@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lọc Email & Password CapCut</title>
+    <style>
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            margin: 20px; 
+            background-color: #f4f7f6; 
+        }
+        .container { 
+            max-width: 800px; 
+            margin: 0 auto; 
+            background: white; 
+            padding: 25px; 
+            border-radius: 10px; 
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1); 
+        }
+        textarea { 
+            width: 100%; 
+            height: 200px; 
+            padding: 15px; 
+            margin-bottom: 15px; 
+            border: 1px solid #ddd; 
+            border-radius: 6px; 
+            box-sizing: border-box; 
+            font-family: monospace; 
+            font-size: 14px;
+            resize: vertical;
+        }
+        textarea:focus {
+            outline: none;
+            border-color: #007bff;
+            box-shadow: 0 0 5px rgba(0,123,255,0.3);
+        }
+        button { 
+            padding: 12px 24px; 
+            background-color: #007bff; 
+            color: white; 
+            border: none; 
+            border-radius: 6px; 
+            cursor: pointer; 
+            font-size: 16px; 
+            font-weight: 600;
+            margin-bottom: 20px; 
+            transition: background-color 0.3s;
+        }
+        button:hover { 
+            background-color: #0056b3; 
+        }
+        .btn-copy {
+            background-color: #28a745;
+        }
+        .btn-copy:hover {
+            background-color: #218838;
+        }
+        h1 { 
+            color: #333; 
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        h3 { 
+            color: #555; 
+            margin-bottom: 10px;
+        }
+        .format-select {
+            margin-bottom: 15px;
+            font-size: 15px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Lọc Email & Password từ Accounts</h1>
+        
+        <h3>1. Dán toàn bộ dữ liệu từ file accounts.txt vào đây:</h3>
+        <textarea id="inputData" placeholder="Dán nội dung file accounts.txt của bạn vào đây..."></textarea>
+        
+        <div class="format-select">
+            <label for="formatType">Chọn định dạng xuất ra: </label>
+            <select id="formatType">
+                <option value="pipe">Email|Password (Căn bản)</option>
+                <option value="tab">Email [Tab] Password</option>
+                <option value="colon">Email:Password</option>
+            </select>
+        </div>
+
+        <button onclick="processData()">Lọc Dữ Liệu</button>
+        
+        <h3>2. Kết quả (Chỉ còn Email và Password):</h3>
+        <textarea id="outputData" readonly placeholder="Kết quả sẽ hiển thị ở đây..."></textarea>
+        <button class="btn-copy" onclick="copyResult()">📋 Copy Kết Quả</button>
+    </div>
+
+    <script>
+        function processData() {
+            const input = document.getElementById('inputData').value;
+            const formatType = document.getElementById('formatType').value;
+            const lines = input.split('\n');
+            let output = [];
+            
+            for (let line of lines) {
+                line = line.trim();
+                if (!line) continue;
+                
+                // Dữ liệu từ file text ngăn cách nhau bởi dấu Tab (\t)
+                const parts = line.split('\t');
+                
+                // Cấu trúc: uidname \t email \t password \t link \t msToken
+                // Nên parts[1] là email, parts[2] là password
+                if (parts.length >= 3) {
+                    const email = parts[1].trim();
+                    const password = parts[2].trim();
+                    
+                    if (formatType === 'pipe') {
+                        output.push(`${email}|${password}`);
+                    } else if (formatType === 'tab') {
+                        output.push(`${email}\t${password}`);
+                    } else if (formatType === 'colon') {
+                        output.push(`${email}:${password}`);
+                    }
+                }
+            }
+            
+            const outputElem = document.getElementById('outputData');
+            if (output.length > 0) {
+                outputElem.value = output.join('\n');
+            } else {
+                outputElem.value = "Không tìm thấy dữ liệu hợp lệ. Hãy chắc chắn bạn đã copy đúng từ file accounts.txt!";
+            }
+        }
+
+        function copyResult() {
+            const outputText = document.getElementById('outputData');
+            if (!outputText.value || outputText.value.startsWith("Không tìm thấy")) {
+                alert("Chưa có kết quả để copy!");
+                return;
+            }
+            
+            outputText.select();
+            outputText.setSelectionRange(0, 99999); // Cho mobile
+            navigator.clipboard.writeText(outputText.value).then(() => {
+                alert('Đã copy toàn bộ kết quả vào khay nhớ tạm!');
+            }).catch(err => {
+                // Fallback cho trình duyệt cũ
+                document.execCommand('copy');
+                alert('Đã copy toàn bộ kết quả!');
+            });
+        }
+    </script>
+</body>
+</html>
