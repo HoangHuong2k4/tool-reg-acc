@@ -35,11 +35,12 @@ def setup_database():
             )
         """)
         
-        # Seed data cho bảng settings (nếu chưa có)
         default_settings = {
+            "PROXY_TYPE": "proxyquick",
             "PROXY_API_TOKEN": "proxyquick6_9df2f4385910e1a5d4bf45498a783abf845ba8776cb2642cb31839a1740b29ef",
             "PROXY_MERCHANT": "a20f20d6-9512-40fd-9a12-eeff809fdaeb",
-            "PROXY_ID": "953319"
+            "PROXY_ID": "953319",
+            "PROXYXOAY_KEY": ""
         }
         
         for k, v in default_settings.items():
