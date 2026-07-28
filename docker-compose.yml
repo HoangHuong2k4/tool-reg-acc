@@ -3,14 +3,11 @@ services:
     build: .
     image: capcut-regaccc:latest
     container_name: capcut-regaccc
-    command: xvfb-run -a python3 src/web/app.py
+    command: xvfb-run -a /opt/venv/bin/python src/web/app.py
     ports:
       - "5050:5050"
     volumes:
-      - capcut-data:/app/capcut-regaccc/data
+      - ./data:/app/capcut-regaccc/data
     shm_size: "2gb"        # Firefox cần /dev/shm lớn, tránh crash
     mem_limit: "4g"
     restart: unless-stopped
-
-volumes:
-  capcut-data:

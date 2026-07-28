@@ -49,6 +49,14 @@ def setup_db_if_not_exists():
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        try:
+            conn.execute("ALTER TABLE accounts ADD COLUMN twofa TEXT")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            conn.execute("ALTER TABLE accounts ADD COLUMN momo TEXT")
+        except sqlite3.OperationalError:
+            pass
 
         
         default_settings = {
@@ -91,6 +99,7 @@ PROXY_PASS       = _init_settings.get("LAST_PROXY_PASS", "odq0nda0odmzoa==")
 PROXY_V3_INDEX   = -1
 
 CAPCUT_HOTMAIL_FILE = os.path.join(os.path.dirname(__file__), "..", "..", "data", "hotmails.txt")
+GPT_HOTMAIL_FILE    = os.path.join(os.path.dirname(__file__), "..", "..", "data", "hotmail-gpt.txt")
 
 # ─── Flask App ────────────────────────────────────────────────────────────────
 app = Flask(__name__, template_folder="../../ui/templates", static_folder="../../ui/static")
@@ -115,6 +124,7 @@ class BotState:
 
 state_capcut = BotState("CapCut")
 state_higgsfield = BotState("Higgsfield")
+state_gpt = BotState("GPT")
 
 def patched_get_proxy():
     print(f"[Proxy] Dùng proxy: {PROXY_HOST}:{PROXY_PORT}")
@@ -419,8 +429,14 @@ def _run_capcut_task(mode, count, threads, join_link, mail_type, browser_type, h
             sys.path.insert(0, root_dir)
             
         state_capcut.module = importlib.import_module(mod_name)
-        state_capcut.module.log = state_capcut.log
-        state_capcut.module.get_rotated_proxy = patched_get_proxy
+        bot = state_capcut.module
+        bot.log = state_capcut.log
+        
+        # Patch để dừng OTP ngang
+        import src.bots.capcut_hotmail as ch
+        ch.GLOBAL_STOP_EVENT = state_capcut.task_stop
+        
+        bot.get_rotated_proxy = patched_get_proxy
         
         # Patch save_account to use DB
         def capcut_save_db(uid, email, password, *args, **kwargs):
@@ -629,6 +645,179 @@ def _run_higgsfield_task(count, threads, browser_type, headless):
         state_higgsfield.log_queue.put(json.dumps({"type": "done", "ok": 0, "fail": 0}))
     finally:
         state_higgsfield.is_running = False
+
+# ─── GPT API ──────────────────────────────────────────────────────────────────
+@app.route("/api/gpt/accounts")
+def gpt_accounts():
+    accounts = []
+    try:
+        with get_db() as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT email, password, twofa, momo FROM accounts WHERE app='gpt' ORDER BY id ASC")
+            accounts = [dict(row) for row in cursor.fetchall()]
+    except Exception:
+        pass
+    return jsonify({"accounts": accounts})
+
+@app.route("/api/gpt/accounts/raw")
+def gpt_accounts_raw():
+    text = ""
+    try:
+        with get_db() as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT email, password, twofa FROM accounts WHERE app='gpt' ORDER BY id ASC")
+            for row in cursor.fetchall():
+                text += f"{row['email']}\t{row['password']}\t{row['twofa'] or ''}\n"
+    except Exception:
+        pass
+    return text, 200, {"Content-Type": "text/plain; charset=utf-8"}
+
+@app.route("/api/gpt/accounts/raw_ep")
+def gpt_accounts_raw_ep():
+    text = ""
+    try:
+        with get_db() as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT email, password, twofa FROM accounts WHERE app='gpt' ORDER BY id ASC")
+            for row in cursor.fetchall():
+                text += f"{row['email']}|{row['password']}|{row['twofa'] or ''}\n"
+    except Exception:
+        pass
+    return text, 200, {"Content-Type": "text/plain; charset=utf-8"}
+
+@app.route("/api/gpt/hotmail/count")
+def gpt_hotmail_count():
+    count = 0
+    if os.path.exists(GPT_HOTMAIL_FILE):
+        with open(GPT_HOTMAIL_FILE, "r", encoding="utf-8") as f:
+            count = sum(
+                1 for l in f
+                if l.strip() and not l.strip().startswith("#") and ("----" in l or "|" in l)
+            )
+    return jsonify({"count": count})
+
+@app.route("/api/gpt/hotmail/upload", methods=["POST"])
+def gpt_hotmail_upload():
+    f = request.files.get("file")
+    if not f: return jsonify({"error": "No file"}), 400
+    lines = [l.strip() for l in f.read().decode("utf-8").splitlines() if l.strip()]
+    with open(GPT_HOTMAIL_FILE, "w", encoding="utf-8") as fp:
+        fp.write("\n".join(lines) + "\n")
+    valid_count = sum(1 for l in lines if not l.startswith("#") and ("----" in l or "|" in l))
+    return jsonify({"count": valid_count})
+
+@app.route("/api/gpt/accounts/clear", methods=["POST"])
+def gpt_accounts_clear():
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM accounts WHERE app='gpt'")
+            conn.commit()
+    except Exception:
+        pass
+    return jsonify({"success": True})
+
+@app.route("/api/gpt/status")
+def gpt_status():
+    return jsonify({"is_running": state_gpt.is_running})
+
+@app.route("/api/gpt/task/start", methods=["POST"])
+def gpt_task_start():
+    if state_gpt.is_running:
+        return jsonify({"success": False, "error": "Đang chạy rồi!"})
+    data = request.json or {}
+    count = int(data.get("count", 1))
+    threads = int(data.get("threads", 1))
+    mail_type = data.get("mail_type", "outlook")
+    check_momo = data.get("check_momo", True)
+
+    state_gpt.task_stop.clear()
+    while not state_gpt.log_queue.empty():
+        try: state_gpt.log_queue.get_nowait()
+        except: break
+
+    state_gpt.is_running = True
+    state_gpt.task_thread = threading.Thread(target=_run_gpt_task, args=(count, threads, mail_type, check_momo), daemon=True)
+    state_gpt.task_thread.start()
+    return jsonify({"success": True})
+
+@app.route("/api/gpt/task/stop", methods=["POST"])
+def gpt_task_stop():
+    state_gpt.task_stop.set()
+    return jsonify({"success": True})
+
+@app.route("/api/gpt/task/stream")
+def gpt_task_stream():
+    def generate():
+        yield f"data: {json.dumps({'type':'log','level':'INFO','time':datetime.now().strftime('%H:%M:%S'),'msg':'🔗 Kết nối log stream...'})}\n\n"
+        while True:
+            try:
+                msg = state_gpt.log_queue.get(timeout=25)
+                yield f"data: {msg}\n\n"
+            except queue.Empty:
+                yield f"data: {json.dumps({'type':'ping'})}\n\n"
+    return Response(stream_with_context(generate()), mimetype="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+def _run_gpt_task(count, threads, mail_type, check_momo=True):
+    state_gpt.check_momo = check_momo
+    import importlib
+    try:
+        state_gpt.module = importlib.import_module("src.bots.gpt_hotmail")
+        bot = state_gpt.module
+        bot.log = state_gpt.log
+        bot.get_rotated_proxy = patched_get_proxy
+        
+        # Patch để dừng OTP ngang
+        import src.bots.capcut_hotmail as ch
+        ch.GLOBAL_STOP_EVENT = state_gpt.task_stop
+
+        # Đẩy config MoMo xuống bot
+        bot.CHECK_MOMO = state_gpt.check_momo
+
+        # Patch save_account to use DB
+        def gpt_save_db(email, password, totp_secret, has_momo=False):
+            try:
+                with get_db() as conn:
+                    cursor = conn.cursor()
+                    momo_str = str(has_momo) if isinstance(has_momo, str) else ("có" if has_momo else "không")
+                    cursor.execute("INSERT INTO accounts (app, uid, email, password, twofa, momo) VALUES (?, '', ?, ?, ?, ?)", 
+                                   ("gpt", email, password, totp_secret, momo_str))
+                    conn.commit()
+            except Exception as e:
+                state_gpt.log(f"Lỗi lưu DB: {e}", "ERR")
+                
+        bot.save_account = gpt_save_db
+
+
+        done = {"ok": 0, "fail": 0}
+        
+        bot.load_hotmails_to_queue(limit=count)
+        def worker(i):
+            time.sleep((i % threads) * 2.5)
+            while not bot.HOTMAIL_QUEUE.empty() and not state_gpt.task_stop.is_set():
+                res = bot.register_one_account(i)
+                state_gpt.log_queue.put(json.dumps({"type": "result", "success": bool(res)}))
+                if res: done["ok"] += 1
+                else: done["fail"] += 1
+
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as ex:
+            futures = [ex.submit(worker, idx+1) for idx in range(threads)]
+            concurrent.futures.wait(futures)
+
+        if state_gpt.task_stop.is_set():
+            state_gpt.log_queue.put(json.dumps({"type": "stopped"}))
+        else:
+            state_gpt.log(f"✅ Xong! {done['ok']} thành công / {done['fail']} thất bại", "OK")
+            state_gpt.log_queue.put(json.dumps({"type": "done", "ok": done["ok"], "fail": done["fail"]}))
+    except Exception as e:
+        state_gpt.log(f"Lỗi task: {type(e).__name__}: {e}", "ERR")
+        state_gpt.log_queue.put(json.dumps({"type": "done", "ok": 0, "fail": 0}))
+    finally:
+        state_gpt.is_running = False
 
 
 if __name__ == "__main__":

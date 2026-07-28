@@ -208,7 +208,7 @@ def mac_clear_system_proxy():
 
 
 # ── Cấu hình ────────────────────────────────────────────────────────
-HOTMAIL_API_URL = 'https://tools.dongvanfb.net/api/get_messages_oauth2'
+HOTMAIL_API_URL = 'https://mixmmo.com/api/get-hotmail-messages.php'
 HOTMAIL_FILE = "data/hotmails.txt"
 PASSWORD    = "capcut123"
 CAPCUT_URL  = "https://www.capcut.com/vi-vn/signup"
@@ -256,35 +256,67 @@ def log(msg, level="INFO"):
     print(f"{color}[{now}] {icon} {msg}{C.RST}")
 
 
-def wait_for_otp(email, password, refresh_token, client_id, timeout=120, interval=4):
-    log(f"Đang chờ OTP cho {email} qua Hotmail API (tối đa {timeout}s)...", "INFO")
-    headers = {"Content-Type": "application/json"}
+# ── Hỗ trợ lấy OTP qua API ──────────────────────────────────────────
+
+GLOBAL_STOP_EVENT = None
+
+def wait_for_otp(email, password, refresh_token, client_id, timeout=120, interval=4, after_ts=0):
+    log(f"Đang chờ OTP cho {email} qua MixMMO API (tối đa {timeout}s)...", "INFO")
+    # MixMMO sử dụng form-urlencode với cookies để định danh
+    headers = {
+        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
+        "X-Requested-With": "XMLHttpRequest",
+        "Origin": "https://mixmmo.com",
+        "Referer": "https://mixmmo.com/tool/checklive-hotmail"
+    }
+    
+    # Định dạng chuỗi ghép email|pass|refresh_token|client_id giống hệt tham số account của MixMMO
+    account_str = f"{email}|{password}|{refresh_token}|{client_id}"
+    
     payload = {
-        "email": email,
-        "pass": password,
-        "refresh_token": refresh_token,
-        "client_id": client_id,
+        "action": "get_hotmail_messages",
+        "account": account_str,
+        "mode": "oauth",
+        "folder": "inbox",
+        "start_timestamp": int(after_ts) if after_ts else 0
+    }
+    
+    # MixMMO yêu cầu cookies session
+    cookies = {
+        "user_login": "3bef3cb8b749b1c4f44b2d36650600f4b147a5088d250448d937c3241eef0959",
+        "PHPSESSID": "48f0jbkeusednr81ailju5v138"
     }
     
     elapsed = 0
     while elapsed < timeout:
+        if GLOBAL_STOP_EVENT and GLOBAL_STOP_EVENT.is_set():
+            log("Task bị dừng bởi người dùng, thoát chờ OTP!", "WARN")
+            return None
         try:
-            resp = requests.post(HOTMAIL_API_URL, headers=headers, json=payload, timeout=20)
+            resp = requests.post(HOTMAIL_API_URL, headers=headers, data=payload, cookies=cookies, timeout=20)
             data = resp.json()
             
-            if data.get("status"):
-                if data.get("messages"):
-                    for msg in data["messages"]:
+            if data.get("success") or data.get("status"):
+                messages = data.get("messages")
+                if not messages and isinstance(data.get("raw"), dict):
+                    messages = data["raw"].get("messages")
+                
+                if messages:
+                    for msg in messages:
                         subject = msg.get("subject", "")
                         message = msg.get("message", "")
-                        text_to_search = subject + " " + message
+                        # Loại bỏ tag HTML và CSS style để không bị nhận nhầm các mã màu hex (như #202123) thành OTP
+                        clean_message = re.sub(r'<style[^>]*>.*?</style>', ' ', message, flags=re.IGNORECASE)
+                        clean_message = re.sub(r'<[^>]+>', ' ', clean_message)
+                        text_to_search = subject + " " + clean_message
                         match = re.search(r'\b(\d{6})\b', text_to_search)
                         if match:
                             otp = match.group(1)
                             log(f"Nhận được OTP: {C.BOLD}{otp}{C.RST}", "OK")
                             return otp
             else:
-                log(f"API Hotmail trả về lỗi: {data}", "WARN")
+                log(f"API Hotmail trả về lỗi: {data.get('error') or data}", "WARN")
                 
         except Exception as e:
             log(f"Lỗi gọi API Hotmail: {e}", "WARN")

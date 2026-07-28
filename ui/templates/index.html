@@ -293,7 +293,7 @@
     <div class="status-pill"><div class="dot" id="gpt-statusDot"></div><span id="gpt-statusText">Idle</span></div>
   </div>
   <div class="stats stats-4">
-    <div class="stat-card"><div class="stat-label">Đang đợi</div><div class="stat-value accent" id="gpt-statTotal">0</div><div class="stat-sub">số lượng yêu cầu</div></div>
+    <div class="stat-card"><div class="stat-label">Hotmail còn lại</div><div class="stat-value accent" id="gpt-statHotmail">–</div><div class="stat-sub">trong hotmail-gpt.txt</div></div>
     <div class="stat-card"><div class="stat-label">Thành công</div><div class="stat-value green" id="gpt-statOk">0</div><div class="stat-sub">tài khoản đã tạo</div></div>
     <div class="stat-card"><div class="stat-label">Thất bại</div><div class="stat-value red" id="gpt-statFail">0</div><div class="stat-sub">lỗi đăng ký</div></div>
     <div class="stat-card"><div class="stat-label">Tiến trình</div><div class="stat-value yellow" id="gpt-statPct">0%</div><div class="progress-bar-wrap"><div class="progress-bar" id="gpt-progressBar" style="width:0%"></div></div></div>
@@ -320,14 +320,21 @@
         <div class="panel-header"><span>⚙️</span><h2>Cấu hình ChatGPT</h2></div>
         <div class="panel-body">
           <div class="form-group">
-            <label>Loại Mail:</label>
+            <label>Loại Mail: <span style="color:var(--muted);font-size:11px;">(chỉ hỗ trợ Hotmail/Outlook)</span></label>
             <div class="radio-group">
-              <div class="radio-btn active" id="gpt-mailIcloud" onclick="gptSetMailType('icloud')">☁️ iCloud HME</div>
-              <div class="radio-btn" id="gpt-mailHotmail" onclick="gptSetMailType('outlook')">📧 Outlook/Hotmail</div>
-              <div class="radio-btn" id="gpt-mailGmail" onclick="gptSetMailType('gmail_advanced')">📨 Gmail Advanced</div>
+              <div class="radio-btn active" id="gpt-mailHotmail" onclick="gptSetMailType('outlook')">📧 Hotmail / Outlook (Từ File)</div>
             </div>
           </div>
-          
+
+          <div class="form-group" id="gpt-hotmailGroup">
+            <label>Hotmails (<span id="gpt-hotmailCountLabel">–</span> còn lại)</label>
+            <div class="file-drop" onclick="document.getElementById('gpt-fileInput').click()">
+              <span class="hotmail-count" id="gpt-hotmailCountBadge">–</span>
+              hotmail trong file • Click để upload file mới
+              <input type="file" id="gpt-fileInput" style="display:none" accept=".txt" onchange="gptUploadHotmail(this)">
+            </div>
+          </div>
+
           <div class="form-group">
             <label>Số lượng tài khoản cần tạo</label>
             <input type="number" id="gpt-count" class="input" value="10" min="1" max="1000">
@@ -339,8 +346,13 @@
               <input type="number" id="gpt-workers" class="input" value="1" min="1" max="5">
             </div>
             <div class="form-group" style="flex:1;">
-              <label>Thời gian chờ (Poll s)</label>
-              <input type="number" id="gpt-poll-interval" class="input" value="30" min="10" max="120">
+              <label>Check MoMo Stripe</label>
+              <div style="margin-top: 8px;">
+                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                  <input type="checkbox" id="gpt-checkMomo" checked style="width: 16px;height: 16px;">
+                  Bật Check MoMo
+                </label>
+              </div>
             </div>
           </div>
           
@@ -364,38 +376,16 @@
       <div class="panel">
         <div class="panel-header" style="justify-content:space-between">
           <div style="display:flex;align-items:center;gap:8px;"><span>📋</span><h2>Tài Khoản Gần Đây</h2></div>
-          <div class="account-actions">
-            <button class="btn-secondary btn" style="width:auto;padding:6px 12px;font-size:11px;" onclick="gptCopyAccounts()">📋 Copy</button>
-            <button class="btn-secondary btn" style="width:auto;padding:6px 12px;font-size:11px;" onclick="gptClearAccounts()">🗑️ Xóa</button>
-            <button class="btn-secondary btn" style="width:auto;padding:6px 12px;font-size:11px;" onclick="gptRefreshAccounts()">🔄 Refresh</button>
+          <div class="account-actions" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+            <button class="btn-secondary btn" style="width:auto;padding:5px 10px;font-size:11px;" onclick="gptCopyAccounts()">📋 Copy</button>
+            <button class="btn-secondary btn" style="width:auto;padding:5px 10px;font-size:11px;" onclick="gptClearAccounts()">🗑️ Xóa</button>
+            <button class="btn-secondary btn" style="width:auto;padding:5px 10px;font-size:11px;" onclick="gptRefreshAccounts()">🔄 Refresh</button>
           </div>
         </div>
         <div class="accounts-wrap">
-          <table><thead><tr><th>Email</th><th>Mật khẩu</th><th>Status</th></tr></thead>
-          <tbody id="gpt-accountsBody"><tr><td colspan="3" style="text-align:center;color:var(--muted);padding:20px;">Chưa có tài khoản nào</td></tr></tbody></table>
+          <table><thead><tr><th>Email</th><th>Mật khẩu</th><th>2FA (TOTP)</th><th>MoMo</th><th>Status</th></tr></thead>
+          <tbody id="gpt-accountsBody"><tr><td colspan="4" style="text-align:center;color:var(--muted);padding:20px;">Chưa có tài khoản nào</td></tr></tbody></table>
         </div>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- ======================= GPT TAB ======================= -->
-<div class="wrap" id="tab-gpt">
-  <div class="header">
-    <div class="logo">
-      <div class="logo-icon" style="background:#10a37f;">
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="44" height="44">
-          <path d="M50 20 A 30 30 0 1 0 80 50 A 30 30 0 0 0 50 20 Z" fill="#fff"/>
-        </svg>
-      </div>
-      <div><h1>ChatGPT Reg Mode</h1><span>Tính năng sắp được phát triển</span></div>
-    </div>
-  </div>
-  <div class="main-grid" style="grid-template-columns: 1fr;">
-    <div class="panel">
-      <div class="panel-body" style="text-align: center; padding: 40px; color: var(--muted);">
-        <h2>🚧 Đang bảo trì & Phát triển</h2>
-        <p style="margin-top: 10px;">Tính năng ChatGPT Reg đang được team xây dựng và sẽ sớm ra mắt trong thời gian tới.</p>
       </div>
     </div>
   </div>

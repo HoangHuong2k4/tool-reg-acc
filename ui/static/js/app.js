@@ -166,6 +166,16 @@ async function checkRunningStatus() {
       hfStartSSE();
     }
   } catch(e) {}
+  
+  try {
+    const r3 = await fetch('/api/gpt/status');
+    const d3 = await r3.json();
+    if(d3.is_running) {
+      gptIsRunning = true;
+      gptSetUI(true);
+      gptStartSSE();
+    }
+  } catch(e) {}
 }
 
 window.addEventListener('hashchange', () => {
@@ -182,6 +192,8 @@ window.onload=()=>{
   ccLoadHotmailCount();
   ccLoadAccounts();
   hfLoadAccounts();
+  gptLoadAccounts();
+  gptLoadHotmailCount();
   loadProxyStatus();
   setInterval(loadProxyStatus,10000);
   
@@ -394,5 +406,114 @@ function hfUpdateStats(){
 function hfSetUI(running){
   document.getElementById('hf-startBtn').style.display=running?'none':'flex'; document.getElementById('hf-stopBtn').style.display=running?'flex':'none';
   const dot=document.getElementById('hf-statusDot'), txt=document.getElementById('hf-statusText');
+  if(running){dot.className='dot running';txt.textContent='Đang chạy...';}else{dot.className='dot';txt.textContent='Idle';}
+}
+
+// ==== GPT ====
+let gptMailType='outlook', gptFilter='ALL', gptLogs=[], gptOk=0, gptFail=0, gptTotal=0;
+
+function gptSetMailType(m){
+  gptMailType = m;
+  // Only hotmail is supported
+  document.getElementById('gpt-mailHotmail').classList.toggle('active', true);
+}
+
+async function gptLoadHotmailCount(){
+  try{
+    const r=await fetch('/api/gpt/hotmail/count');const d=await r.json();
+    const cnt = d.count || 0;
+    document.getElementById('gpt-statHotmail').textContent = cnt;
+    document.getElementById('gpt-hotmailCountBadge').textContent = cnt;
+    document.getElementById('gpt-hotmailCountLabel').textContent = cnt;
+  }catch(e){}
+}
+
+async function gptUploadHotmail(input){
+  const file=input.files[0];if(!file)return;
+  const fd=new FormData();fd.append('file',file);
+  try{
+    const r=await fetch('/api/gpt/hotmail/upload',{method:'POST',body:fd});const d=await r.json();
+    showToast('✅','Đã upload: '+d.count+' hotmail GPT');
+    gptLoadHotmailCount();
+  }catch(e){showToast('❌','Upload thất bại');}
+}
+
+async function gptLoadAccounts(){
+  try{
+    const r=await fetch('/api/gpt/accounts');const d=await r.json();
+    const tbody=document.getElementById('gpt-accountsBody');
+    if(!d.accounts||d.accounts.length===0){
+      tbody.innerHTML='<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:20px;">Chưa có tài khoản nào</td></tr>';
+      return;
+    }
+    tbody.innerHTML=d.accounts.slice().reverse().slice(0,50).map(a=>{
+      const twofa = a.twofa || '';
+      const momoHtml = (a.momo === 'có') ? '<span style="color:#d82d8b;font-weight:bold;">Có</span>' : '<span style="color:var(--muted)">Không</span>';
+      return `<tr><td>${escHtml(a.email)}</td><td><code style="color:var(--muted)">${escHtml(a.password)}</code></td><td><code style="color:var(--accent);font-size:10px;">${escHtml(twofa)||'<span style="color:var(--muted)">N/A</span>'}</code></td><td>${momoHtml}</td><td><div style="display:flex;align-items:center;gap:6px;"><span class="tag tag-ok" style="margin:0;">✅ OK</span><button class="copy-btn" title="Copy Email|Pass|2FA" onclick="navigator.clipboard.writeText('${escHtml(a.email)}|${escHtml(a.password)}|${escHtml(twofa)}');showToast('📋','Đã copy!');"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button></div></td></tr>`;
+    }).join('');
+  }catch(e){}
+}
+
+async function gptCopyAccounts(){
+  try{const r=await fetch('/api/gpt/accounts/raw_ep');const t=await r.text();await navigator.clipboard.writeText(t);showToast('📋','Đã copy (Email|Pass|2FA)!');}catch(e){}
+}
+
+async function gptClearAccounts(){
+  showConfirmModal('Xóa tài khoản GPT', 'Bạn có chắc chắn muốn xóa toàn bộ danh sách tài khoản GPT đã tạo?', async () => {
+    try{await fetch('/api/gpt/accounts/clear',{method:'POST'});showToast('🗑️','Đã xóa danh sách!');gptLoadAccounts();}catch(e){}
+  });
+}
+
+function gptRefreshAccounts() {
+    gptLoadAccounts();
+}
+
+async function gptStartTask(){
+  if(gptIsRunning)return;
+  const count=parseInt(document.getElementById('gpt-count').value)||1;
+  const threads=parseInt(document.getElementById('gpt-workers').value)||1;
+  const checkMomo=document.getElementById('gpt-checkMomo').checked;
+  
+  gptOk=0;gptFail=0;gptTotal=count;gptUpdateStats();
+  const r=await fetch('/api/gpt/task/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({count,threads,mail_type:gptMailType,check_momo:checkMomo})});
+  const d=await r.json();
+  if(!d.success){showToast('❌',d.error);return;}
+  gptIsRunning=true;gptSetUI(true);gptStartSSE();
+}
+
+async function gptStopTask(){
+  gptIsRunning=false; gptSetUI(false); if(gptEvt)gptEvt.close();
+  await fetch('/api/gpt/task/stop',{method:'POST'});
+  showToast('⏹','Đã dừng GPT.');
+}
+
+function gptStartSSE(){
+  if(gptEvt)gptEvt.close(); gptEvt=new EventSource('/api/gpt/task/stream');
+  gptEvt.onmessage=(e)=>{
+    const data=JSON.parse(e.data);
+    if(data.type==='log')gptAddLog(data);
+    else if(data.type==='result'){if(data.success)gptOk++;else gptFail++;gptUpdateStats();if(data.success)gptLoadAccounts();}
+    else if(data.type==='done'){gptIsRunning=false;gptSetUI(false);gptEvt.close();showToast('✅','GPT Xong!');gptLoadAccounts();}
+    else if(data.type==='stopped'){gptIsRunning=false;gptSetUI(false);gptEvt.close();showToast('⏹','GPT Đã dừng.');}
+  };
+}
+
+function gptAddLog(data){gptLogs.push(data);if(gptLogs.length>2000)gptLogs.shift();if(gptFilter==='ALL'||data.level===gptFilter)gptRenderLog(data);}
+function gptRenderLog(data){
+  const wrap=document.getElementById('gpt-logWrap');
+  if(!wrap) return;
+  const icons={OK:'✅',ERR:'❌',WARN:'⚠️',INFO:'📌'}; const classes={OK:'log-ok',ERR:'log-err',WARN:'log-warn',INFO:'log-info'};
+  const div=document.createElement('div'); div.className='log-entry '+(classes[data.level]||'log-info');
+  div.innerHTML=`<span class="log-time">${data.time}</span><span class="log-icon">${icons[data.level]||'📌'}</span><span class="log-msg">${escHtml(data.msg)}</span>`;
+  wrap.appendChild(div);wrap.scrollTop=wrap.scrollHeight;
+}
+function gptUpdateStats(){
+  document.getElementById('gpt-statOk').textContent=gptOk; document.getElementById('gpt-statFail').textContent=gptFail;
+  const pct=gptTotal>0?Math.round(((gptOk+gptFail)/gptTotal)*100):0;
+  document.getElementById('gpt-statPct').textContent=pct+'%'; document.getElementById('gpt-progressBar').style.width=pct+'%';
+}
+function gptSetUI(running){
+  document.getElementById('gpt-startBtn').style.display=running?'none':'inline-block'; document.getElementById('gpt-stopBtn').style.display=running?'inline-block':'none';
+  const dot=document.getElementById('gpt-statusDot'), txt=document.getElementById('gpt-statusText');
   if(running){dot.className='dot running';txt.textContent='Đang chạy...';}else{dot.className='dot';txt.textContent='Idle';}
 }

@@ -55,6 +55,7 @@
   .panel{background:var(--card);border:1px solid var(--border);border-radius:16px;overflow:hidden;}
   .panel-header{display:flex;align-items:center;gap:10px;padding:16px 20px;border-bottom:1px solid var(--border);background:rgba(255,255,255,0.02);}
   .panel-header h2{font-size:14px;font-weight:600;}
+  .account-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-left:auto;}
   .panel-body{padding:20px;}
   
   .form-group{margin-bottom:16px;}

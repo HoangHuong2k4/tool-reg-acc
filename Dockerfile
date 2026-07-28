@@ -67,7 +67,7 @@ RUN useradd -m -u 10001 appuser
 # + tini (init/PID 1: xvfb-run kẹt ở Xvfb-readiness khi chạy làm PID 1 — cần
 #   init thật reap/forward signal để xvfb-run launch được web process).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      xvfb xauth curl tini \
+      xvfb xauth curl tini nodejs \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /opt/venv /opt/venv
