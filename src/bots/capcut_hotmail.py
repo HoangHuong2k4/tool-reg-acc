@@ -260,8 +260,9 @@ def log(msg, level="INFO"):
 
 GLOBAL_STOP_EVENT = None
 
-def wait_for_otp(email, password, refresh_token, client_id, timeout=120, interval=4, after_ts=0):
-    log(f"Đang chờ OTP cho {email} qua Hotmail API (tối đa {timeout}s)...", "INFO")
+def wait_for_otp(email, password, refresh_token, client_id, timeout=120, interval=4, after_ts=0, mail_api_source="dongvanfb"):
+    api_url = HOTMAIL_API_URL if mail_api_source == "dongvanfb" else "https://mixmmo.com/api/get-hotmail-messages.php"
+    log(f"Đang chờ OTP cho {email} qua {mail_api_source.upper()} API (tối đa {timeout}s)...", "INFO")
     headers = {"Content-Type": "application/json"}
     payload = {
         "email": email,
@@ -276,7 +277,7 @@ def wait_for_otp(email, password, refresh_token, client_id, timeout=120, interva
             log("Task bị dừng bởi người dùng, thoát chờ OTP!", "WARN")
             return None
         try:
-            resp = requests.post(HOTMAIL_API_URL, headers=headers, json=payload, timeout=20)
+            resp = requests.post(api_url, headers=headers, json=payload, timeout=20)
             data = resp.json()
             
             if data.get("status"):
@@ -785,7 +786,7 @@ def step3_enter_birthday(driver):
     time.sleep(2)
 
 
-def step4_enter_otp(driver, email, password, refresh_token, client_id):
+def step4_enter_otp(driver, email, password, refresh_token, client_id, mail_api_source="dongvanfb"):
     """Bước 4: Chờ OTP và nhập vào ô xác nhận"""
     from selenium.webdriver.common.by import By
 
@@ -800,7 +801,7 @@ def step4_enter_otp(driver, email, password, refresh_token, client_id):
     # Chờ 5 giây để email server nhận thư
     time.sleep(5)
 
-    otp = wait_for_otp(email, password, refresh_token, client_id, timeout=120, interval=4)
+    otp = wait_for_otp(email, password, refresh_token, client_id, timeout=120, interval=4, mail_api_source=mail_api_source)
 
     if not otp:
         log("Không lấy được OTP!", "ERR")
@@ -1110,7 +1111,7 @@ def api_upgrade_vip(driver):
     return False
 
 
-def step_get_payment_link(driver, email):
+def step_get_payment_link(driver, email, password):
     try:
         from selenium.webdriver.common.by import By
         import time
@@ -1249,7 +1250,7 @@ def step_get_payment_link(driver, email):
         if payment_url:
             os.makedirs("data", exist_ok=True)
             with open("data/success_links.txt", "a", encoding="utf-8") as f:
-                f.write(f"{email}\t{payment_url}\n")
+                f.write(f"{email}\t{password}\t{payment_url}\n")
             return payment_url
 
         log("Không tìm thấy link thanh toán pipopay sau khi bấm Nâng cấp!", "WARN")
@@ -1260,7 +1261,7 @@ def step_get_payment_link(driver, email):
         return None
 
 
-def register_one_account(index, join_link=None, keep_open=False, batch_size=3, predefined_proxy=None, headless=False, browser_type="chrome", get_link=False):
+def register_one_account(index, join_link=None, keep_open=False, batch_size=3, predefined_proxy=None, headless=False, browser_type="chrome", get_link=False, mail_api_source="dongvanfb"):
     try:
         acc = HOTMAIL_QUEUE.get_nowait()
     except queue.Empty:
@@ -1308,7 +1309,7 @@ def register_one_account(index, join_link=None, keep_open=False, batch_size=3, p
         step2_enter_password(driver, password)
         bday_status = step3_enter_birthday(driver)
         if bday_status != "ALREADY_LOGGED_IN":
-            if not step4_enter_otp(driver, email, email_pass, refresh_token, client_id):
+            if not step4_enter_otp(driver, email, email_pass, refresh_token, client_id, mail_api_source):
                 return False
 
         msToken = ""
@@ -1347,7 +1348,7 @@ def register_one_account(index, join_link=None, keep_open=False, batch_size=3, p
             step_skip_role_survey(driver, timeout=10)
             step_close_whats_new(driver, timeout=15)
             if get_link:
-                step_get_payment_link(driver, email)
+                step_get_payment_link(driver, email, password)
 
         # Chỉ đánh dấu hotmail đã dùng (trừ khỏi hotmails.txt) khi mọi thứ đều thành công
         mark_hotmail_used(acc)

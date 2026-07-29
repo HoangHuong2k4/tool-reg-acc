@@ -211,13 +211,19 @@ window.onload=()=>{
 };
 
 // ==== CAPCUT ====
-let ccMode=1, ccMailType='hotmail', ccBrowser=localStorage.getItem('ccBrowser')||'chrome', ccHeadless=(localStorage.getItem('ccHeadless')==='true'), ccFilter='ALL', ccLogs=[], ccOk=0, ccFail=0, ccTotal=0;
+let ccMode=1, ccMailType='hotmail', ccMailApiSource='dongvanfb', ccBrowser=localStorage.getItem('ccBrowser')||'chrome', ccHeadless=(localStorage.getItem('ccHeadless')==='true'), ccFilter='ALL', ccLogs=[], ccOk=0, ccFail=0, ccTotal=0;
 function ccSetMode(m){ccMode=m;document.getElementById('cc-mode1').classList.toggle('active',m===1);document.getElementById('cc-mode2').classList.toggle('active',m===2);if(document.getElementById('cc-mode3'))document.getElementById('cc-mode3').classList.toggle('active',m===3);document.getElementById('cc-joinLinkGroup').style.display=m===2?'block':'none';}
 function ccSetMailType(m){
   ccMailType=m;
   document.getElementById('cc-mailHotmail').classList.toggle('active',m==='hotmail');
   document.getElementById('cc-mailDomain').classList.toggle('active',m==='domain');
   document.getElementById('cc-hotmailGroup').style.display=m==='hotmail'?'block':'none';
+  if(document.getElementById('cc-apiSourceGroup')) document.getElementById('cc-apiSourceGroup').style.display=m==='hotmail'?'block':'none';
+}
+function ccSetApiSource(s){
+  ccMailApiSource=s;
+  document.getElementById('cc-sourceDongvanfb').classList.toggle('active',s==='dongvanfb');
+  document.getElementById('cc-sourceMixmmo').classList.toggle('active',s==='mixmmo');
 }
 function ccSetBrowser(b){
   ccBrowser=b;
@@ -296,7 +302,7 @@ async function ccStartTask(){
   const jl=document.getElementById('cc-joinLink').value.trim();
   if(ccMode===2 && !jl){showToast('⚠️','Vui lòng nhập Link Join Team!');return;}
   try{
-    const r=await fetch('/api/capcut/task/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:ccMode,count,threads,join_link:jl,mail_type:ccMailType,browser_type:ccBrowser,headless:ccHeadless})});
+    const r=await fetch('/api/capcut/task/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:ccMode,count,threads,join_link:jl,mail_type:ccMailType,mail_api_source:ccMailApiSource,browser_type:ccBrowser,headless:ccHeadless})});
     const d=await r.json();
     if(!d.success){showToast('❌',d.error);return;}
     ccIsRunning=true;ccSetUI(true);ccStartSSE();
