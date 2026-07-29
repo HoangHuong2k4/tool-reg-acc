@@ -1292,6 +1292,13 @@ def register_one_account(index, join_link=None, keep_open=False, batch_size=3, p
                     if attempt < max_retries - 1:
                         log(f"[{email}] Lỗi kết nối/proxy, đang đổi proxy và thử lại... ({type(e).__name__})", "WARN")
                         try:
+                            import requests
+                            requests.post("http://127.0.0.1:5050/api/proxy/rotate", timeout=5)
+                            log("Đã yêu cầu API nội bộ xoay proxy mới!", "INFO")
+                        except Exception as re_err:
+                            log(f"Không thể gọi API xoay proxy: {re_err}", "WARN")
+
+                        try:
                             if driver in ACTIVE_DRIVERS: ACTIVE_DRIVERS.remove(driver)
                             driver.quit()
                         except: pass

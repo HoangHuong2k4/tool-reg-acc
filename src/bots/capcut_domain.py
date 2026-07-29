@@ -863,93 +863,154 @@ def step_close_whats_new(driver, timeout=10):
     log("Không thấy modal 'What's new' (bỏ qua).", "INFO")
     return False
 
-def api_upgrade_vip(driver):
-    from selenium.webdriver.common.by import By
-    import time
-    log("Đang thực hiện nhận VIP qua giao diện để lấy link cashier...", "INFO")
-    
-    # 1. Bấm nút Nâng cấp trên header
-    clicked_header = False
-    start = time.time()
-    while time.time() - start < 15:
-        try:
-            upgrade_btns = driver.find_elements(By.CSS_SELECTOR, '[data-id="TitleBarUpgradeVip"] .LvHeaderUpgradeVipNew, .LvHeaderUpgradeVipNew')
-            if not upgrade_btns:
-                upgrade_btns = driver.find_elements(By.CSS_SELECTOR, '[data-id="TitleBarUpgradeVip"]')
-            for btn in upgrade_btns:
-                if btn.is_displayed():
-                    try_click(driver, btn, "Nâng cấp (Header)")
-                    clicked_header = True
+def step_get_payment_link(driver, email, password):
+    try:
+        from selenium.webdriver.common.by import By
+        import time
+        import os
+
+        # Reload lại trang để React mount lại sạch, không bị rác popup
+        log("Reload trang để lấy UI sạch...", "INFO")
+        current_url = driver.current_url
+        if "my-edit" not in current_url and "workspace" not in current_url and "capcut.com" not in current_url:
+            driver.get("https://www.capcut.com/my-edit")
+        else:
+            driver.refresh()
+        time.sleep(7)
+
+        # 1. Đóng các modal onboarding nếu có (What's new, Seedance, v.v.)
+        for _ in range(2):
+            try:
+                # Đóng nút "Bỏ qua", "Skip", "Đã hiểu", close icon
+                skip_btns = driver.find_elements(By.XPATH, "//*[contains(text(), 'Bỏ qua') or contains(text(), 'Skip') or contains(text(), 'Đã hiểu')]")
+                close_btns = driver.find_elements(By.CSS_SELECTOR, '.lv-modal-close-icon, button[aria-label="close"], .skip-mrkR37')
+                for btn in skip_btns + close_btns:
+                    if btn.is_displayed():
+                        try_click(driver, btn, f"Đóng popup/onboarding")
+                        time.sleep(1)
+            except:
+                pass
+            time.sleep(1)
+
+        log("Đang tìm nút Upgrade trên Header...", "INFO")
+        
+        # 1. Bấm nút Nâng cấp trên header
+        clicked_header = False
+        start = time.time()
+        while time.time() - start < 20:
+            try:
+                upgrade_btns = driver.find_elements(By.CSS_SELECTOR, '[data-id="TitleBarUpgradeVip"] .LvHeaderUpgradeVipNew, .LvHeaderUpgradeVipNew')
+                if not upgrade_btns:
+                    upgrade_btns = driver.find_elements(By.CSS_SELECTOR, '[data-id="TitleBarUpgradeVip"]')
+                for btn in upgrade_btns:
+                    if btn.is_displayed():
+                        try_click(driver, btn, "Nâng cấp (Header)")
+                        clicked_header = True
+                        break
+                if clicked_header:
                     break
-            if clicked_header:
-                break
-        except Exception as e:
-            pass
-        time.sleep(1)
+            except Exception as e:
+                pass
+            time.sleep(1)
+            
+        if not clicked_header:
+            log("Không tìm thấy nút Upgrade trên Header (bỏ qua).", "WARN")
+            return None
+            
+        time.sleep(3)
         
-    if not clicked_header:
-        log("Không tìm thấy nút Upgrade trên Header (bỏ qua).", "WARN")
-        return ""
-        
-    time.sleep(2)
-    
-    # 2. Chờ modal Chọn gói hiện lên và bấm Nâng cấp (Gói Pro)
-    log("Đang chờ modal Nâng cấp hiện ra...", "INFO")
-    clicked_modal = False
-    start = time.time()
-    while time.time() - start < 15:
-        try:
-            action_btns = driver.find_elements(By.CSS_SELECTOR, '.subscriptionProductSection-pro button.subscriptionProductSection-actionDark, button.subscriptionProductSection-actionGradient')
-            for btn in action_btns:
-                if btn.is_displayed() and btn.is_enabled():
-                    try_click(driver, btn, "Nâng cấp (Trong Modal Gói Pro)")
-                    clicked_modal = True
+        # 2. Chờ modal Chọn gói hiện lên và bấm Nâng cấp (Gói Pro)
+        log("Đang chờ modal Nâng cấp hiện ra...", "INFO")
+        clicked_modal = False
+        start = time.time()
+        while time.time() - start < 20:
+            try:
+                # Nếu có popup "Bỏ qua" nhảy ra đè lên, click nó
+                try:
+                    skip_btns = driver.find_elements(By.XPATH, "//*[text()='Bỏ qua' or text()='Skip' or text()='Đã hiểu']")
+                    for s_btn in skip_btns:
+                        if s_btn.is_displayed():
+                            try_click(driver, s_btn, "Dismiss Onboarding Popup")
+                            time.sleep(1)
+                            # Bấm lại Header vì popup làm mất modal
+                            h_btns = driver.find_elements(By.CSS_SELECTOR, '.LvHeaderUpgradeVipNew, [data-id="TitleBarUpgradeVip"]')
+                            for hb in h_btns:
+                                if hb.is_displayed():
+                                    try_click(driver, hb, "Re-click Nâng cấp (Header)")
+                                    time.sleep(2)
+                                    break
+                except:
+                    pass
+
+                # Tìm nút thanh toán trong modal
+                action_btns = driver.find_elements(By.CSS_SELECTOR, '.subscriptionProductSection-pro button.subscriptionProductSection-actionDark, button.subscriptionProductSection-actionGradient, button.subscriptionProductSection-actionDark')
+                for btn in action_btns:
+                    if btn.is_displayed() and btn.is_enabled():
+                        try_click(driver, btn, "Nâng cấp (Trong Modal Gói Pro)")
+                        clicked_modal = True
+                        break
+                if clicked_modal:
                     break
-            if clicked_modal:
-                break
-        except Exception as e:
-            pass
-        time.sleep(1)
-        
-    if not clicked_modal:
-        log("Không tìm thấy nút xác nhận Nâng cấp trong Modal!", "WARN")
-        return ""
-        
-    # 3. Đợi iframe Pipo (Cashier) xuất hiện hoặc trang chuyển hướng và lấy link src
-    log("Đã bấm nâng cấp, đang chờ link thanh toán xuất hiện...", "INFO")
-    start = time.time()
-    while time.time() - start < 20:
-        try:
-            # Kiểm tra URL hiện tại
-            if "pipopay.com" in driver.current_url:
-                log("Đã lấy được link cashier_url từ URL hiện tại!", "OK")
-                return driver.current_url
-                
-            # Kiểm tra các tab khác
-            original_window = driver.current_window_handle
-            for handle in driver.window_handles:
-                if handle != original_window:
-                    driver.switch_to.window(handle)
-                    if "pipopay.com" in driver.current_url:
-                        url = driver.current_url
-                        driver.switch_to.window(original_window)
-                        log("Đã lấy được link cashier_url từ tab mới!", "OK")
-                        return url
-                    driver.switch_to.window(original_window)
+            except Exception as e:
+                pass
+            time.sleep(1)
+            
+        if not clicked_modal:
+            log("Không tìm thấy nút xác nhận Nâng cấp trong Modal!", "WARN")
+            return None
+            
+        # 3. Đợi iframe Pipo (Cashier) xuất hiện hoặc trang chuyển hướng và lấy link src
+        log("Đã bấm nâng cấp, đang chờ link thanh toán xuất hiện...", "INFO")
+        payment_url = None
+        start = time.time()
+        while time.time() - start < 30:
+            try:
+                # Kiểm tra URL hiện tại
+                if "pipopay.com" in driver.current_url or "buy.stripe.com" in driver.current_url:
+                    log("Đã lấy được link cashier_url từ URL hiện tại!", "OK")
+                    payment_url = driver.current_url
+                    break
                     
-            # Kiểm tra iframe
-            iframes = driver.find_elements(By.CSS_SELECTOR, "iframe[src*='pipopay.com'], iframe[src*='cashier']")
-            for iframe in iframes:
-                src = iframe.get_attribute("src")
-                if src and "pipopay.com" in src:
-                    log("Đã lấy được link cashier_url từ iframe thành công!", "OK")
-                    return src
-        except:
-            pass
-        time.sleep(1)
-        
-    log("Không tìm thấy link thanh toán pipopay sau khi bấm Nâng cấp!", "WARN")
-    return ""
+                # Kiểm tra các tab khác
+                original_window = driver.current_window_handle
+                for handle in driver.window_handles:
+                    if handle != original_window:
+                        driver.switch_to.window(handle)
+                        if "pipopay.com" in driver.current_url or "buy.stripe.com" in driver.current_url:
+                            url = driver.current_url
+                            log("Đã lấy được link cashier_url từ tab mới!", "OK")
+                            payment_url = url
+                            break
+                        driver.switch_to.window(original_window)
+                if payment_url:
+                    break
+                        
+                # Kiểm tra iframe
+                iframes = driver.find_elements(By.CSS_SELECTOR, "iframe[src*='pipopay.com'], iframe[src*='cashier'], iframe[src*='stripe.com']")
+                for iframe in iframes:
+                    src = iframe.get_attribute("src")
+                    if src and ("pipopay.com" in src or "stripe.com" in src):
+                        log("Đã lấy được link cashier_url từ iframe thành công!", "OK")
+                        payment_url = src
+                        break
+                if payment_url:
+                    break
+            except:
+                pass
+            time.sleep(1)
+            
+        if payment_url:
+            os.makedirs("data", exist_ok=True)
+            with open("data/success_links.txt", "a", encoding="utf-8") as f:
+                f.write(f"{email}\t{password}\t{payment_url}\n")
+            return payment_url
+
+        log("Không tìm thấy link thanh toán pipopay sau khi bấm Nâng cấp!", "WARN")
+        return None
+
+    except Exception as e:
+        log(f"Lỗi lấy link: {e}", "ERR")
+        return None
 
 def step5_join_team(driver, join_link):
     from selenium.webdriver.common.by import By
@@ -1051,6 +1112,13 @@ def register_one_account(index, join_link=None, keep_open=False, batch_size=3, p
                     if attempt < max_retries - 1:
                         log(f"[{email}] Lỗi kết nối/proxy, đang đổi proxy và thử lại... ({type(e).__name__})", "WARN")
                         try:
+                            import requests
+                            requests.post("http://127.0.0.1:5050/api/proxy/rotate", timeout=5)
+                            log("Đã yêu cầu API nội bộ xoay proxy mới!", "INFO")
+                        except Exception as re_err:
+                            log(f"Không thể gọi API xoay proxy: {re_err}", "WARN")
+
+                        try:
                             if driver in ACTIVE_DRIVERS: ACTIVE_DRIVERS.remove(driver)
                             driver.quit()
                         except: pass
@@ -1066,9 +1134,10 @@ def register_one_account(index, join_link=None, keep_open=False, batch_size=3, p
         step0b_click_email_button(driver)
         step1_enter_email(driver, email)
         step2_enter_password(driver, password)
-        step3_enter_birthday(driver)
-        if not step4_enter_otp(driver, email):
-            return False
+        bday_status = step3_enter_birthday(driver)
+        if bday_status != "ALREADY_LOGGED_IN":
+            if not step4_enter_otp(driver, email):
+                return False
 
         msToken = ""
         try:
@@ -1088,8 +1157,9 @@ def register_one_account(index, join_link=None, keep_open=False, batch_size=3, p
             uidname = extract_uidname(driver)
             save_account(uidname, email, password, join_link, msToken)
             log(f"ĐĂNG KÝ THÀNH CÔNG! {email} (UID: {uidname})", "OK")
-        else:
-            step5_open_capcut(driver)
+            if bday_status != "ALREADY_LOGGED_IN":
+                step5_open_capcut(driver)
+            
             if not wait_for_dashboard(driver):
                 log("Không vào được CapCut -> HỦY LƯU!", "ERR")
                 return False
@@ -1097,13 +1167,16 @@ def register_one_account(index, join_link=None, keep_open=False, batch_size=3, p
             uidname = extract_uidname(driver)
             log(f"ĐĂNG KÝ THÀNH CÔNG! {email} (UID: {uidname})", "OK")
 
-            # Các bước sau đăng ký thành công (chỉ chạy cho chức năng 1)
+            # Lưu tài khoản NGAY sau khi tạo xong (không cần chờ link thanh toán)
+            save_account(uidname, email, password, "", msToken)
+
+            # Các bước sau đăng ký thành công
             log("Đang xử lý các popup sau đăng ký...", "INFO")
             step_skip_role_survey(driver, timeout=10)
             step_close_whats_new(driver, timeout=10)
             
-            cashier_link = api_upgrade_vip(driver)
-            save_account(uidname, email, password, cashier_link, msToken)
+            if get_link:
+                step_get_payment_link(driver, email, password)
 
         return True
 
