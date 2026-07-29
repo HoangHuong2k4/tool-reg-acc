@@ -208,7 +208,7 @@ def mac_clear_system_proxy():
 
 
 # ── Cấu hình ────────────────────────────────────────────────────────
-HOTMAIL_API_URL = 'https://mixmmo.com/api/get-hotmail-messages.php'
+HOTMAIL_API_URL = 'https://tools.dongvanfb.net/api/get_messages_oauth2'
 HOTMAIL_FILE = "data/hotmails.txt"
 PASSWORD    = "capcut123"
 CAPCUT_URL  = "https://www.capcut.com/vi-vn/signup"
@@ -261,31 +261,13 @@ def log(msg, level="INFO"):
 GLOBAL_STOP_EVENT = None
 
 def wait_for_otp(email, password, refresh_token, client_id, timeout=120, interval=4, after_ts=0):
-    log(f"Đang chờ OTP cho {email} qua MixMMO API (tối đa {timeout}s)...", "INFO")
-    # MixMMO sử dụng form-urlencode với cookies để định danh
-    headers = {
-        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
-        "X-Requested-With": "XMLHttpRequest",
-        "Origin": "https://mixmmo.com",
-        "Referer": "https://mixmmo.com/tool/checklive-hotmail"
-    }
-    
-    # Định dạng chuỗi ghép email|pass|refresh_token|client_id giống hệt tham số account của MixMMO
-    account_str = f"{email}|{password}|{refresh_token}|{client_id}"
-    
+    log(f"Đang chờ OTP cho {email} qua Hotmail API (tối đa {timeout}s)...", "INFO")
+    headers = {"Content-Type": "application/json"}
     payload = {
-        "action": "get_hotmail_messages",
-        "account": account_str,
-        "mode": "oauth",
-        "folder": "inbox",
-        "start_timestamp": int(after_ts) if after_ts else 0
-    }
-    
-    # MixMMO yêu cầu cookies session
-    cookies = {
-        "user_login": "3bef3cb8b749b1c4f44b2d36650600f4b147a5088d250448d937c3241eef0959",
-        "PHPSESSID": "48f0jbkeusednr81ailju5v138"
+        "email": email,
+        "pass": password,
+        "refresh_token": refresh_token,
+        "client_id": client_id,
     }
     
     elapsed = 0
@@ -294,29 +276,26 @@ def wait_for_otp(email, password, refresh_token, client_id, timeout=120, interva
             log("Task bị dừng bởi người dùng, thoát chờ OTP!", "WARN")
             return None
         try:
-            resp = requests.post(HOTMAIL_API_URL, headers=headers, data=payload, cookies=cookies, timeout=20)
+            resp = requests.post(HOTMAIL_API_URL, headers=headers, json=payload, timeout=20)
             data = resp.json()
             
-            if data.get("success") or data.get("status"):
-                messages = data.get("messages")
-                if not messages and isinstance(data.get("raw"), dict):
-                    messages = data["raw"].get("messages")
-                
-                if messages:
-                    for msg in messages:
+            if data.get("status"):
+                if data.get("messages"):
+                    for msg in data["messages"]:
                         subject = msg.get("subject", "")
                         message = msg.get("message", "")
-                        # Loại bỏ tag HTML và CSS style để không bị nhận nhầm các mã màu hex (như #202123) thành OTP
+                        
                         clean_message = re.sub(r'<style[^>]*>.*?</style>', ' ', message, flags=re.IGNORECASE)
                         clean_message = re.sub(r'<[^>]+>', ' ', clean_message)
                         text_to_search = subject + " " + clean_message
+                        
                         match = re.search(r'\b(\d{6})\b', text_to_search)
                         if match:
                             otp = match.group(1)
                             log(f"Nhận được OTP: {C.BOLD}{otp}{C.RST}", "OK")
                             return otp
             else:
-                log(f"API Hotmail trả về lỗi: {data.get('error') or data}", "WARN")
+                log(f"API Hotmail trả về lỗi: {data}", "WARN")
                 
         except Exception as e:
             log(f"Lỗi gọi API Hotmail: {e}", "WARN")
@@ -385,6 +364,7 @@ def setup_driver(index=1, keep_open=False, use_api_proxy=True, batch_size=3, use
     options.add_argument("--disable-blink-features=AutomationControlled")
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
     options.add_experimental_option("useAutomationExtension", False)
+    options.set_capability("goog:loggingPrefs", {"performance": "ALL"})
     if keep_open:
         options.add_experimental_option("detach", True)
     
@@ -709,8 +689,16 @@ def step3_enter_birthday(driver):
     log("Bước 3: Điền ngày sinh...", "INFO")
 
     # Chờ màn hình ngày sinh
-    wait_for_element(driver, By.CSS_SELECTOR,
-        '.lv_sign_in_panel_wide-birthday-detail, .gate_birthday-picker', timeout=20)
+    try:
+        wait_for_element(driver, By.CSS_SELECTOR,
+            '.lv_sign_in_panel_wide-birthday-detail, .gate_birthday-picker', timeout=15)
+    except Exception as e:
+        if "TimeoutException" in type(e).__name__:
+            url = driver.current_url.lower()
+            if "my-edit" in url or "home" in url or "space" in url or "dashboard" in url:
+                log("Đã đăng nhập thẳng vào tài khoản cũ, bỏ qua đăng ký!", "OK")
+                return "ALREADY_LOGGED_IN"
+        raise e
     time.sleep(0.5)
 
     # Nhập Năm
@@ -1000,6 +988,9 @@ def save_account(uidname, email, password, join_link, msToken=""):
         f.write(line + "\n")
     log(f"Đã lưu tài khoản → {OUTPUT_FILE}", "OK")
 
+def update_account_payment_link(email, link):
+    pass # File handling for success_links.txt is already done in step_get_payment_link
+
 ACTIVE_DRIVERS = []
 
 
@@ -1118,7 +1109,158 @@ def api_upgrade_vip(driver):
     log("Không tìm thấy nút xác nhận Nâng cấp trong Modal!", "WARN")
     return False
 
-def register_one_account(index, join_link=None, keep_open=False, batch_size=3, predefined_proxy=None, headless=False, browser_type="chrome"):
+
+def step_get_payment_link(driver, email):
+    try:
+        from selenium.webdriver.common.by import By
+        import time
+        import os
+
+        # Reload lại trang để React mount lại sạch, không bị rác popup
+        log("Reload trang để lấy UI sạch...", "INFO")
+        current_url = driver.current_url
+        if "my-edit" not in current_url and "workspace" not in current_url and "capcut.com" not in current_url:
+            driver.get("https://www.capcut.com/my-edit")
+        else:
+            driver.refresh()
+        time.sleep(7)
+
+        # 1. Đóng các modal onboarding nếu có (What's new, Seedance, v.v.)
+        for _ in range(2):
+            try:
+                # Đóng nút "Bỏ qua", "Skip", "Đã hiểu", close icon
+                skip_btns = driver.find_elements(By.XPATH, "//*[contains(text(), 'Bỏ qua') or contains(text(), 'Skip') or contains(text(), 'Đã hiểu')]")
+                close_btns = driver.find_elements(By.CSS_SELECTOR, '.lv-modal-close-icon, button[aria-label="close"], .skip-mrkR37')
+                for btn in skip_btns + close_btns:
+                    if btn.is_displayed():
+                        try_click(driver, btn, f"Đóng popup/onboarding")
+                        time.sleep(1)
+            except:
+                pass
+            time.sleep(1)
+
+        log("Đang tìm nút Upgrade trên Header...", "INFO")
+        
+        # 1. Bấm nút Nâng cấp trên header
+        clicked_header = False
+        start = time.time()
+        while time.time() - start < 20:
+            try:
+                upgrade_btns = driver.find_elements(By.CSS_SELECTOR, '[data-id="TitleBarUpgradeVip"] .LvHeaderUpgradeVipNew, .LvHeaderUpgradeVipNew')
+                if not upgrade_btns:
+                    upgrade_btns = driver.find_elements(By.CSS_SELECTOR, '[data-id="TitleBarUpgradeVip"]')
+                for btn in upgrade_btns:
+                    if btn.is_displayed():
+                        try_click(driver, btn, "Nâng cấp (Header)")
+                        clicked_header = True
+                        break
+                if clicked_header:
+                    break
+            except Exception as e:
+                pass
+            time.sleep(1)
+            
+        if not clicked_header:
+            log("Không tìm thấy nút Upgrade trên Header (bỏ qua).", "WARN")
+            return None
+            
+        time.sleep(3)
+        
+        # 2. Chờ modal Chọn gói hiện lên và bấm Nâng cấp (Gói Pro)
+        log("Đang chờ modal Nâng cấp hiện ra...", "INFO")
+        clicked_modal = False
+        start = time.time()
+        while time.time() - start < 20:
+            try:
+                # Nếu có popup "Bỏ qua" nhảy ra đè lên, click nó
+                try:
+                    skip_btns = driver.find_elements(By.XPATH, "//*[text()='Bỏ qua' or text()='Skip' or text()='Đã hiểu']")
+                    for s_btn in skip_btns:
+                        if s_btn.is_displayed():
+                            try_click(driver, s_btn, "Dismiss Onboarding Popup")
+                            time.sleep(1)
+                            # Bấm lại Header vì popup làm mất modal
+                            h_btns = driver.find_elements(By.CSS_SELECTOR, '.LvHeaderUpgradeVipNew, [data-id="TitleBarUpgradeVip"]')
+                            for hb in h_btns:
+                                if hb.is_displayed():
+                                    try_click(driver, hb, "Re-click Nâng cấp (Header)")
+                                    time.sleep(2)
+                                    break
+                except:
+                    pass
+
+                # Tìm nút thanh toán trong modal
+                action_btns = driver.find_elements(By.CSS_SELECTOR, '.subscriptionProductSection-pro button.subscriptionProductSection-actionDark, button.subscriptionProductSection-actionGradient, button.subscriptionProductSection-actionDark')
+                for btn in action_btns:
+                    if btn.is_displayed() and btn.is_enabled():
+                        try_click(driver, btn, "Nâng cấp (Trong Modal Gói Pro)")
+                        clicked_modal = True
+                        break
+                if clicked_modal:
+                    break
+            except Exception as e:
+                pass
+            time.sleep(1)
+            
+        if not clicked_modal:
+            log("Không tìm thấy nút xác nhận Nâng cấp trong Modal!", "WARN")
+            return None
+            
+        # 3. Đợi iframe Pipo (Cashier) xuất hiện hoặc trang chuyển hướng và lấy link src
+        log("Đã bấm nâng cấp, đang chờ link thanh toán xuất hiện...", "INFO")
+        payment_url = None
+        start = time.time()
+        while time.time() - start < 30:
+            try:
+                # Kiểm tra URL hiện tại
+                if "pipopay.com" in driver.current_url or "buy.stripe.com" in driver.current_url:
+                    log("Đã lấy được link cashier_url từ URL hiện tại!", "OK")
+                    payment_url = driver.current_url
+                    break
+                    
+                # Kiểm tra các tab khác
+                original_window = driver.current_window_handle
+                for handle in driver.window_handles:
+                    if handle != original_window:
+                        driver.switch_to.window(handle)
+                        if "pipopay.com" in driver.current_url or "buy.stripe.com" in driver.current_url:
+                            url = driver.current_url
+                            log("Đã lấy được link cashier_url từ tab mới!", "OK")
+                            payment_url = url
+                            break
+                        driver.switch_to.window(original_window)
+                if payment_url:
+                    break
+                        
+                # Kiểm tra iframe
+                iframes = driver.find_elements(By.CSS_SELECTOR, "iframe[src*='pipopay.com'], iframe[src*='cashier'], iframe[src*='stripe.com']")
+                for iframe in iframes:
+                    src = iframe.get_attribute("src")
+                    if src and ("pipopay.com" in src or "stripe.com" in src):
+                        log("Đã lấy được link cashier_url từ iframe thành công!", "OK")
+                        payment_url = src
+                        break
+                if payment_url:
+                    break
+            except:
+                pass
+            time.sleep(1)
+            
+        if payment_url:
+            os.makedirs("data", exist_ok=True)
+            with open("data/success_links.txt", "a", encoding="utf-8") as f:
+                f.write(f"{email}\t{payment_url}\n")
+            return payment_url
+
+        log("Không tìm thấy link thanh toán pipopay sau khi bấm Nâng cấp!", "WARN")
+        return None
+
+    except Exception as e:
+        log(f"Lỗi lấy link: {e}", "ERR")
+        return None
+
+
+def register_one_account(index, join_link=None, keep_open=False, batch_size=3, predefined_proxy=None, headless=False, browser_type="chrome", get_link=False):
     try:
         acc = HOTMAIL_QUEUE.get_nowait()
     except queue.Empty:
@@ -1164,9 +1306,10 @@ def register_one_account(index, join_link=None, keep_open=False, batch_size=3, p
         step0b_click_email_button(driver)
         step1_enter_email(driver, email)
         step2_enter_password(driver, password)
-        step3_enter_birthday(driver)
-        if not step4_enter_otp(driver, email, email_pass, refresh_token, client_id):
-            return False
+        bday_status = step3_enter_birthday(driver)
+        if bday_status != "ALREADY_LOGGED_IN":
+            if not step4_enter_otp(driver, email, email_pass, refresh_token, client_id):
+                return False
 
         msToken = ""
         try:
@@ -1177,7 +1320,8 @@ def register_one_account(index, join_link=None, keep_open=False, batch_size=3, p
         except: pass
 
         if join_link:
-            step5_join_team(driver, join_link)
+            if bday_status != "ALREADY_LOGGED_IN":
+                step5_join_team(driver, join_link)
             if not wait_for_dashboard(driver):
                 log("Không thể join team (bị kẹt ở trang join) -> HỦY LƯU TÀI KHOẢN NÀY!", "ERR")
                 return False
@@ -1186,13 +1330,14 @@ def register_one_account(index, join_link=None, keep_open=False, batch_size=3, p
             save_account(uidname, email, password, join_link, msToken)
             log(f"ĐĂNG KÝ & JOIN THÀNH CÔNG! {email} (UID: {uidname})", "OK")
         else:
-            step5_open_capcut(driver)
+            if bday_status != "ALREADY_LOGGED_IN":
+                step5_open_capcut(driver)
             if not wait_for_dashboard(driver):
                 log("Không vào được CapCut -> HỦY LƯU!", "ERR")
                 return False
                 
             uidname = extract_uidname(driver)
-            log(f"ĐĂNG KÝ THÀNH CÔNG! {email} (UID: {uidname})", "OK")
+            log(f"ĐĂNG NHẬP / ĐĂNG KÝ THÀNH CÔNG! {email} (UID: {uidname})", "OK")
 
             # Lưu tài khoản NGAY sau khi tạo xong (không cần chờ link thanh toán)
             save_account(uidname, email, password, "", msToken)
@@ -1201,6 +1346,8 @@ def register_one_account(index, join_link=None, keep_open=False, batch_size=3, p
             log("Đang xử lý các popup sau đăng ký...", "INFO")
             step_skip_role_survey(driver, timeout=10)
             step_close_whats_new(driver, timeout=15)
+            if get_link:
+                step_get_payment_link(driver, email)
 
         # Chỉ đánh dấu hotmail đã dùng (trừ khỏi hotmails.txt) khi mọi thứ đều thành công
         mark_hotmail_used(acc)
@@ -1256,7 +1403,7 @@ def load_hotmails_to_queue(limit=None):
     log(f"Đã tải {count} hotmail từ file {HOTMAIL_FILE}.", "OK")
     return count
 
-def register_multiple(count, threads, join_link, keep_open=False):
+def register_multiple(count, threads, join_link, keep_open=False, get_link=False):
 
     import concurrent.futures
     results = {"ok": 0, "fail": 0}
@@ -1273,7 +1420,7 @@ def register_multiple(count, threads, join_link, keep_open=False):
         local_ok = 0
         local_fail = 0
         while not HOTMAIL_QUEUE.empty():
-            res = register_one_account(i, join_link, keep_open, batch_size=threads, predefined_proxy=shared_proxy)
+            res = register_one_account(i, join_link, keep_open, batch_size=threads, predefined_proxy=shared_proxy, get_link=get_link)
             if res: local_ok += 1
             else: local_fail += 1
             if keep_open:
@@ -1312,16 +1459,21 @@ if __name__ == "__main__":
         print(f"\n{C.WARN}=== MENU CHỨC NĂNG ==={C.RST}")
         print("1. Chỉ tạo tài khoản ngẫu nhiên (Lưu vào file txt - GIỮ TAB MỞ ĐỂ TỰ THANH TOÁN)")
         print("2. Tạo tài khoản + Auto Join Team + Gửi lên Google Sheet")
-        choice_func = input(f"👉 Chọn 1 hoặc 2: ").strip()
+        print("3. Tự động Tạo tài khoản + Đóng Popup + Lấy Link PipoPay (Treo máy)")
+        choice_func = input(f"👉 Chọn 1, 2 hoặc 3: ").strip()
 
-        if choice_func not in ["1", "2"]:
-            print(f"{C.ERR}Lựa chọn không hợp lệ! Vui lòng nhập 1 hoặc 2.{C.RST}")
+        if choice_func not in ["1", "2", "3"]:
+            print(f"{C.ERR}Lựa chọn không hợp lệ! Vui lòng nhập 1, 2 hoặc 3.{C.RST}")
             continue
 
         join_link = None
         keep_open = False
+        get_link = False
         try:
-            if choice_func == "2":
+            if choice_func == "3":
+                get_link = True
+                keep_open = False
+            elif choice_func == "2":
                 join_link = input(f"\n{C.WARN}1. Nhập Link Join Team (Bắt buộc): {C.RST}").strip()
             else:
                 keep_open = True
@@ -1353,20 +1505,21 @@ if __name__ == "__main__":
         log(f"Sẽ chạy thực tế {actual_count} luồng dựa trên số lượng hotmail.", "INFO")
 
         if choice_func == "2":
-            register_multiple(actual_count, threads, join_link, keep_open)
+            register_multiple(actual_count, threads, join_link, keep_open, get_link)
         else:
             # Chức năng 1: chạy từng đợt
             batch_count_idx = 1
             while not HOTMAIL_QUEUE.empty():
                 log(f"--- ĐANG CHẠY ĐỢT {batch_count_idx} ---", "WARN")
-                register_multiple(actual_count, threads, join_link, keep_open)
+                register_multiple(actual_count, threads, join_link, keep_open, get_link)
                 
                 if not HOTMAIL_QUEUE.empty():
-                    print(f"\n{C.WARN}⚠️ Đã xong đợt {batch_count_idx}. Các tab vẫn đang mở để bạn tự thanh toán.{C.RST}")
-                    input(f"{C.BOLD}👉 Bấm Enter để ĐÓNG các tab hiện tại và CHẠY ĐỢT TIẾP THEO: {C.RST}")
+                    if choice_func == "1":
+                        print(f"\n{C.WARN}⚠️ Đã xong đợt {batch_count_idx}. Các tab vẫn đang mở để bạn tự thanh toán.{C.RST}")
+                        input(f"{C.BOLD}👉 Bấm Enter để ĐÓNG các tab hiện tại và CHẠY ĐỢT TIẾP THEO: {C.RST}")
                     
                     if ACTIVE_DRIVERS:
-                        log("Đang đóng các tab cũ...", "INFO")
+                        log("Đang dọn dẹp các tab cũ trước khi qua đợt mới...", "INFO")
                         for d in ACTIVE_DRIVERS:
                             try: d.quit()
                             except: pass

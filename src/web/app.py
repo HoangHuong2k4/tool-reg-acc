@@ -293,9 +293,9 @@ def capcut_accounts():
         with get_db() as conn:
             cursor = conn.cursor()
             if session_only:
-                cursor.execute("SELECT id, uid, email, password FROM accounts WHERE app='capcut' AND id > ? ORDER BY id ASC", (state_capcut.last_start_id,))
+                cursor.execute("SELECT id, uid, email, password, join_link FROM accounts WHERE app='capcut' AND id > ? ORDER BY id ASC", (state_capcut.last_start_id,))
             else:
-                cursor.execute("SELECT id, uid, email, password FROM accounts WHERE app='capcut' ORDER BY id ASC")
+                cursor.execute("SELECT id, uid, email, password, join_link FROM accounts WHERE app='capcut' ORDER BY id ASC")
             accounts = cursor.fetchall()
     except Exception as e:
         print("Lỗi get accounts:", e)
@@ -333,6 +333,24 @@ def capcut_accounts_raw_ep():
                 cursor.execute("SELECT email, password FROM accounts WHERE app='capcut' ORDER BY id ASC")
             for row in cursor.fetchall():
                     text += f"{row['email']}|{row['password']}\n"
+    except Exception:
+        pass
+    return text, 200, {"Content-Type": "text/plain; charset=utf-8"}
+
+@app.route("/api/capcut/accounts/raw_epl")
+def capcut_accounts_raw_epl():
+    text = ""
+    session_only = request.args.get('session', 'false').lower() == 'true'
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            if session_only:
+                cursor.execute("SELECT email, password, join_link FROM accounts WHERE app='capcut' AND id > ? ORDER BY id ASC", (state_capcut.last_start_id,))
+            else:
+                cursor.execute("SELECT email, password, join_link FROM accounts WHERE app='capcut' ORDER BY id ASC")
+            for row in cursor.fetchall():
+                jl = row.get('join_link', '') or ''
+                text += f"{row['email']}\t{row['password']}\t{jl}\n"
     except Exception:
         pass
     return text, 200, {"Content-Type": "text/plain; charset=utf-8"}
@@ -451,7 +469,18 @@ def _run_capcut_task(mode, count, threads, join_link, mail_type, browser_type, h
             except Exception as e:
                 state_capcut.log(f"Lỗi lưu DB: {e}", "ERR")
                 
+        def capcut_update_link(email, link):
+            try:
+                with get_db() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("UPDATE accounts SET join_link = ? WHERE app = 'capcut' AND email = ?", (link, email))
+                    conn.commit()
+            except Exception as e:
+                state_capcut.log(f"Lỗi update DB link: {e}", "ERR")
+                
         state_capcut.module.save_account = capcut_save_db
+        if hasattr(state_capcut.module, 'update_account_payment_link'):
+            state_capcut.module.update_account_payment_link = capcut_update_link
         bot = state_capcut.module
         
         done = {"ok": 0, "fail": 0}
@@ -461,7 +490,7 @@ def _run_capcut_task(mode, count, threads, join_link, mail_type, browser_type, h
             def worker(i):
                 time.sleep((i % threads) * 2.5)
                 while not bot.HOTMAIL_QUEUE.empty() and not state_capcut.task_stop.is_set():
-                    res = bot.register_one_account(i, join_link if mode == 2 else None, keep_open=True, batch_size=threads, headless=headless, browser_type=browser_type)
+                    res = bot.register_one_account(i, join_link if mode == 2 else None, keep_open=False, batch_size=threads, headless=headless, browser_type=browser_type, get_link=(mode == 3))
                     state_capcut.log_queue.put(json.dumps({"type": "result", "success": bool(res)}))
                     if res: done["ok"] += 1
                     else: done["fail"] += 1
@@ -475,7 +504,7 @@ def _run_capcut_task(mode, count, threads, join_link, mail_type, browser_type, h
                 try:
                     time.sleep((i % threads) * 2.5)
                     if state_capcut.task_stop.is_set(): return
-                    res = bot.register_one_account(i, join_link if mode == 2 else None, keep_open=True, batch_size=threads, headless=headless, browser_type=browser_type)
+                    res = bot.register_one_account(i, join_link if mode == 2 else None, keep_open=False, batch_size=threads, headless=headless, browser_type=browser_type, get_link=(mode == 3))
                     state_capcut.log_queue.put(json.dumps({"type": "result", "success": bool(res)}))
                     if res: done["ok"] += 1
                     else: done["fail"] += 1
@@ -624,7 +653,7 @@ def _run_higgsfield_task(count, threads, browser_type, headless):
         def worker(i):
             time.sleep((i % threads) * 2.5)
             if state_higgsfield.task_stop.is_set(): return
-            res = bot.register_one_account(i, keep_open=True, batch_size=threads, use_proxy=True, headless=headless, browser_type=browser_type)
+            res = bot.register_one_account(i, keep_open=False, batch_size=threads, use_proxy=True, headless=headless, browser_type=browser_type)
             state_higgsfield.log_queue.put(json.dumps({"type": "result", "success": bool(res)}))
             if res: done["ok"] += 1
             else: done["fail"] += 1
@@ -818,6 +847,18 @@ def _run_gpt_task(count, threads, mail_type, check_momo=True):
         state_gpt.log_queue.put(json.dumps({"type": "done", "ok": 0, "fail": 0}))
     finally:
         state_gpt.is_running = False
+
+def _auto_proxy_rotator():
+    import time
+    import requests
+    while True:
+        time.sleep(180)
+        try:
+            requests.post("http://127.0.0.1:5050/api/proxy/rotate", timeout=20)
+        except:
+            pass
+
+threading.Thread(target=_auto_proxy_rotator, daemon=True).start()
 
 
 if __name__ == "__main__":

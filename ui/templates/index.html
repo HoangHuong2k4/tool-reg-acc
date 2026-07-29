@@ -86,6 +86,7 @@
             <div class="radio-group">
               <div class="radio-btn active" id="cc-mode1" onclick="ccSetMode(1)">🆕 Chỉ tạo acc</div>
               <div class="radio-btn" id="cc-mode2" onclick="ccSetMode(2)">👥 Tạo + Join Team</div>
+              <div class="radio-btn" id="cc-mode3" onclick="ccSetMode(3)">🔗 Tạo acc + Auto Lấy Link</div>
             </div>
           </div>
           <div class="form-group" id="cc-joinLinkGroup" style="display:none;">
@@ -154,6 +155,7 @@
           <div style="margin-left:auto;display:flex;gap:8px;">
             <button class="btn-secondary btn" style="width:auto;padding:6px 12px;font-size:11px;" onclick="ccCopyAccounts()">📋 Copy</button>
             <button class="btn-secondary btn" style="width:auto;padding:6px 12px;font-size:11px;" onclick="ccCopyAccountsEP()">📋 Copy E|P</button>
+            <button class="btn-secondary btn" style="width:auto;padding:6px 12px;font-size:11px;" onclick="ccCopyAccountsEPL()">📋 Copy E|P|L</button>
             <button class="btn-secondary btn" style="width:auto;padding:6px 12px;font-size:11px;" onclick="ccClearAccounts()">🗑️ Xóa</button>
             <button class="btn-secondary btn" style="width:auto;padding:6px 12px;font-size:11px;" onclick="ccLoadAccounts()">🔄 Refresh</button>
           </div>

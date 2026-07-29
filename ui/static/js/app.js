@@ -212,7 +212,7 @@ window.onload=()=>{
 
 // ==== CAPCUT ====
 let ccMode=1, ccMailType='hotmail', ccBrowser=localStorage.getItem('ccBrowser')||'chrome', ccHeadless=(localStorage.getItem('ccHeadless')==='true'), ccFilter='ALL', ccLogs=[], ccOk=0, ccFail=0, ccTotal=0;
-function ccSetMode(m){ccMode=m;document.getElementById('cc-mode1').classList.toggle('active',m===1);document.getElementById('cc-mode2').classList.toggle('active',m===2);document.getElementById('cc-joinLinkGroup').style.display=m===2?'block':'none';}
+function ccSetMode(m){ccMode=m;document.getElementById('cc-mode1').classList.toggle('active',m===1);document.getElementById('cc-mode2').classList.toggle('active',m===2);if(document.getElementById('cc-mode3'))document.getElementById('cc-mode3').classList.toggle('active',m===3);document.getElementById('cc-joinLinkGroup').style.display=m===2?'block':'none';}
 function ccSetMailType(m){
   ccMailType=m;
   document.getElementById('cc-mailHotmail').classList.toggle('active',m==='hotmail');
@@ -260,7 +260,13 @@ async function ccLoadAccounts(){
     const r=await fetch('/api/capcut/accounts?session=' + (ccAccountsTab==='session'));const d=await r.json();
     const tbody=document.getElementById('cc-accountsBody');
     if(!d.accounts||d.accounts.length===0){tbody.innerHTML='<tr><td colspan="4" style="text-align:center;color:var(--muted);padding:20px;">Chưa có tài khoản nào</td></tr>';return;}
-    tbody.innerHTML=d.accounts.slice().reverse().slice(0,50).map(a=>`<tr><td style="color:var(--accent)">${escHtml(a.uid||'–')}</td><td>${escHtml(a.email)}</td><td><code style="color:var(--muted)">${escHtml(a.password)}</code></td><td><div style="display:flex;align-items:center;gap:6px;"><span class="tag tag-ok" style="margin:0;">✅ OK</span><button class="copy-btn" title="Copy Email|Pass" onclick="navigator.clipboard.writeText('${escHtml(a.email)}|${escHtml(a.password)}');showToast('📋','Đã copy!');"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button></div></td></tr>`).join('');
+    tbody.innerHTML=d.accounts.slice().reverse().slice(0,50).map(a=>{
+      const link = a.join_link || '';
+      const displayLink = link.length > 30 ? link.substring(0, 30) + '...' : link;
+      const linkHtml = link ? `<a href="${escHtml(link)}" target="_blank" style="font-size:12px;color:var(--accent);text-decoration:none;">${escHtml(displayLink)}</a>` : '<span style="color:var(--muted)">-</span>';
+      
+      return `<tr><td style="color:var(--accent)">${escHtml(a.uid||'–')}</td><td>${escHtml(a.email)}</td><td><code style="color:var(--muted)">${escHtml(a.password)}</code><br/>${linkHtml}</td><td><div style="display:flex;align-items:center;gap:6px;"><span class="tag tag-ok" style="margin:0;">✅ OK</span><button class="copy-btn" title="Copy Email | Pass | Link" onclick="navigator.clipboard.writeText('${escHtml(a.email)}\\t${escHtml(a.password)}\\t${escHtml(link)}');showToast('📋','Đã copy (có link)!');"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button></div></td></tr>`;
+    }).join('');
   }catch(e){}
 }
 async function ccCopyAccounts(){
@@ -272,6 +278,11 @@ async function ccCopyAccountsEP(){
   try{const r=await fetch('/api/capcut/accounts/raw_ep?session=' + (ccAccountsTab==='session'));const t=await r.text();
   if(!t.trim()){showToast('⚠️','Không có dữ liệu!');return;}
   await navigator.clipboard.writeText(t);showToast('📋','Đã copy (Email|Pass)!');}catch(e){}
+}
+async function ccCopyAccountsEPL(){
+  try{const r=await fetch('/api/capcut/accounts/raw_epl?session=' + (ccAccountsTab==='session'));const t=await r.text();
+  if(!t.trim()){showToast('⚠️','Không có dữ liệu!');return;}
+  await navigator.clipboard.writeText(t);showToast('📋','Đã copy (Email|Pass|Link)!');}catch(e){}
 }
 async function ccClearAccounts(){
   showConfirmModal('Xóa tài khoản CapCut', 'Bạn có chắc chắn muốn xóa toàn bộ danh sách tài khoản CapCut đã tạo?', async () => {

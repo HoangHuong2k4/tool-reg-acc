@@ -57,3 +57,4 @@ Python-dotenv>=1.0.0
 Cryptography>=41
 Pycryptodome>=3.23.0
 selenium
+webdriver-manager

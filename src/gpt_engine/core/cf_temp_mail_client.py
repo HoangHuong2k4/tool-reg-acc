@@ -461,8 +461,8 @@ def _standalone_otp_from_html(html: str) -> typing.Union[str, None]:
     """OpenAI 邮件常见：验证码单独占一行/单元格，如 >449759<。"""
     if not html:
         return None
-    # 去 style，减少 #353740 这类颜色误伤
-    cleaned = re.sub(r"<style[^>]*>.*?</style>", " ", html, flags=re.typing.Union[I, re].S)
+    # 先去 style，忽略大小写，匹配多行
+    cleaned = re.sub(r"<style[^>]*>.*?</style>", " ", html, flags=re.I | re.S)
     for pattern in (
         r">\s*(\d{6})\s*<",
         r"(?m)^\s*(\d{6})\s*$",

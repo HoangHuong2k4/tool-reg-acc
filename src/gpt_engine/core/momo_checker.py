@@ -67,98 +67,33 @@ def check_momo_payment(session, access_token: str) -> bool:
             return "Stripe Init Lỗi"
             
         data2 = resp2.json()
+        payment_methods = data2.get("ordered_payment_method_types", [])
+        if not payment_methods:
+            payment_methods = data2.get("payment_method_types", [])
+        logger.info(f"[MoMoCheck] Payment methods available: {payment_methods}")
+        
+        has_momo = "momo" in payment_methods
+        momo_str = "Có MoMo" if has_momo else "Không MoMo"
         
         # Kiểm tra xem có phải gói 0đ không
         due = None
-        if "total_summary" in data2 and "due" in data2["total_summary"]:
-            due = data2["total_summary"]["due"]
-        elif "invoice" in data2 and "amount_due" in data2["invoice"]:
-            due = data2["invoice"]["amount_due"]
-        elif "elements_options" in data2 and "amount" in data2["elements_options"]:
-            due = data2["elements_options"]["amount"]
-        elif "amount_due" in data2:
-            due = data2["amount_due"]
-            
+        for item in data2.get("display_items", []):
+            if item.get("type") == "custom":
+                due = item.get("custom", {}).get("amount")
+                break
+        
         is_0d = False
         if isinstance(due, dict) and due.get("value") == 0:
             is_0d = True
         elif due == 0:
             is_0d = True
-            
-        prefix = "Gói 0đ" if is_0d else "Không 0đ"
         
-        # Bỏ qua việc check momo ở init theo thiết kế (Geocoding ban đầu có thể ẩn momo)
-        
-        # Bước 3.1: Khởi tạo Elements Session
-        elements_url = "https://api.stripe.com/v1/elements/sessions"
-        elements_params = {
-            "deferred_intent[payment_method_types][0]": "card",
-            "deferred_intent[payment_method_types][1]": "momo",
-            "deferred_intent[currency]": "vnd",
-            "currency": "vnd",
-            "key": publishable_key
-        }
-        resp3_1 = session.get(elements_url, headers=stripe_headers, params=elements_params, timeout=20)
-        # Bỏ qua status check của 3.1 (dù lỗi hay không ta vẫn force tax region)
-        
-        # Bước 3.2: Cập nhật Tax Region (Ép về Việt Nam)
-        update_tax_url = f"https://api.stripe.com/v1/payment_pages/{checkout_session_id}"
-        tax_payload = {
-            "tax_region[country]": "VN",
-            "tax_region[postal_code]": "100000",
-            "tax_region[city]": "Hanoi",
-            "tax_region[line1]": "1 Trang Tien",
-            "key": publishable_key
-        }
-        resp3_2 = session.post(update_tax_url, headers=stripe_headers, data=tax_payload, timeout=20)
-        if resp3_2.status_code != 200:
-            logger.warning(f"[MoMoCheck] Ép Tax Region thất bại. Status: {resp3_2.status_code}")
-            return f"{prefix} - Ép Tax Lỗi"
-            
-        raw_due = due.get("value", 0) if isinstance(due, dict) else due
-        
-        # Bước 4: Chốt Thanh Toán MoMo
-        confirm_url = f"https://api.stripe.com/v1/payment_pages/{checkout_session_id}/confirm"
-        confirm_payload = {
-            "payment_method_data[type]": "momo",
-            "expected_payment_method_type": "momo",
-            "payment_method_data[billing_details][name]": "Nguyen Van A",
-            "payment_method_data[billing_details][email]": "a@example.com",
-            "payment_method_data[billing_details][address][line1]": "1 Trang Tien",
-            "payment_method_data[billing_details][address][city]": "Hanoi",
-            "payment_method_data[billing_details][address][postal_code]": "100000",
-            "payment_method_data[billing_details][address][country]": "VN",
-            "expected_amount": str(raw_due) if raw_due is not None else "0",
-            "version": "3eeb60efc5",
-            "js_checksum": stripe_js_checksum(checkout_session_id),
-            "rv_timestamp": stripe_rv_timestamp(),
-            "_stripe_version": "2025-03-31.basil; checkout_server_update_beta=v1; checkout_manual_approval_preview=v1",
-            "return_url": f"https://chatgpt.com/checkout/pay/{checkout_session_id}",
-            "client_attribution_metadata[client_session_id]": stripe_js_id,
-            "client_attribution_metadata[checkout_session_id]": checkout_session_id,
-            "client_attribution_metadata[merchant_integration_source]": "checkout",
-            "client_attribution_metadata[merchant_integration_version]": "custom",
-            "client_attribution_metadata[merchant_integration_subtype]": "payment-element",
-            "client_attribution_metadata[payment_intent_creation_flow]": "deferred",
-            "client_attribution_metadata[payment_method_selection_flow]": "automatic",
-            "key": publishable_key
-        }
-        resp4 = session.post(confirm_url, headers=stripe_headers, data=confirm_payload, timeout=20)
-        
-        if resp4.status_code != 200:
-            logger.warning(f"[MoMoCheck] Chốt thanh toán MoMo thất bại. Status: {resp4.status_code}, Body: {resp4.text}")
-            return f"{prefix} - Chốt Lỗi"
-            
-        data4 = resp4.json()
-        next_action = data4.get("next_action")
-        if next_action and "redirect_to_url" in next_action:
-            url = next_action["redirect_to_url"].get("url")
-            if url and url.startswith("http"):
-                logger.info(f"[MoMoCheck] THÀNH CÔNG: Tài khoản có hỗ trợ thanh toán MoMo! ({prefix})")
-                return f"{prefix} - Có MoMo"
-                
-        logger.info(f"[MoMoCheck] Không tìm thấy URL MoMo trong next_action. ({prefix})")
-        return f"{prefix} - Ko MoMo"
+        if due == 0:
+            return f"Gói 0đ - {momo_str}"
+        elif due is not None:
+            return f"Gói {due} - {momo_str}"
+        else:
+            return f"Có Trial - {momo_str}" if is_0d else "Không 0đ"
         
     except Exception as e:
         logger.error(f"[MoMoCheck] Lỗi check MoMo: {str(e)}")

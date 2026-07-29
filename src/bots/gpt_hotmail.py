@@ -244,10 +244,67 @@ def register_one_account(thread_id):
         _twofa_cfg.ENABLE_2FA = True
 
         def custom_wait_for_otp(email_addr, after_ts, **kwargs):
-            log(f"[OTP-Hook] Đang lấy mã OTP cho {email_addr} từ API dongvanfb...", "INFO")
-            # Tăng thời gian chờ (timeout) lên 180 giây thay vì 120 giây mặc định
-            from bots.capcut_hotmail import wait_for_otp as dongvan_wait
-            return dongvan_wait(
+            log(f"[OTP-Hook] Đang lấy mã OTP cho {email_addr} từ API DongVanFB (với logic OpenAI)...", "INFO")
+            
+            def mixmmo_wait(email, password, refresh_token, client_id, timeout=120, interval=4, after_ts=0):
+                import requests, time, re
+                headers = {"Content-Type": "application/json"}
+                payload = {
+                    "email": email,
+                    "pass": password,
+                    "refresh_token": refresh_token,
+                    "client_id": client_id
+                }
+                
+                elapsed = 0
+                while elapsed < timeout:
+                    try:
+                        resp = requests.post("https://tools.dongvanfb.net/api/get_messages_oauth2", headers=headers, json=payload, timeout=20)
+                        data = resp.json()
+                        
+                        if data.get("status"):
+                            messages = data.get("messages")
+                            
+                            if messages:
+                                for msg in messages:
+                                    subject = msg.get("subject", "")
+                                    message = msg.get("message", "")
+                                    
+                                    # Sử dụng logic của gpt_engine để trích xuất OTP chính xác nhất (tránh lấy nhầm 6 số khác)
+                                    from gpt_engine.core.otp_utils import extract_otp
+                                    
+                                    # Giả lập format tin nhắn để truyền vào hàm extract_otp
+                                    simulated_email_dict = {
+                                        "subject": subject,
+                                        "text": message,
+                                        "content": message
+                                    }
+                                    otp = extract_otp(simulated_email_dict)
+                                    
+                                    if not otp:
+                                        # Fallback regex nếu hàm trên không lấy được
+                                        clean_message = re.sub(r'<style[^>]*>.*?</style>', ' ', message, flags=re.IGNORECASE)
+                                        clean_message = re.sub(r'<[^>]+>', ' ', clean_message)
+                                        text_to_search = subject + " " + clean_message
+                                        # Tìm "code is XXXXXX" hoặc các pattern tương tự
+                                        if "openai" in text_to_search.lower() or "chatgpt" in text_to_search.lower():
+                                            match = re.search(r'\b(\d{6})\b', text_to_search)
+                                            if match:
+                                                otp = match.group(1)
+                                    
+                                    if otp:
+                                        log(f"Nhận được OTP DongVanFB: {otp}", "OK")
+                                        return otp
+                    except Exception as e:
+                        log(f"Lỗi gọi API DongVanFB: {e}", "WARN")
+                        
+                    time.sleep(interval)
+                    elapsed += interval
+                
+                log("Hết thời gian chờ OTP DongVanFB!", "ERR")
+                return None
+            
+            return mixmmo_wait(
                 email=acc["email"],
                 password=acc["password"],
                 refresh_token=acc["refresh_token"],
@@ -256,7 +313,6 @@ def register_one_account(thread_id):
                 interval=4,
                 after_ts=after_ts
             )
-            
         email_provider.wait_for_otp = custom_wait_for_otp
         gem.wait_for_otp = custom_wait_for_otp
         try:

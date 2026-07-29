@@ -34,8 +34,8 @@ SAFARI_WEBKIT_VERSION = "537.36"
 MAC_OS_UA_VERSION = "10_15_7"
 
 # ---------- curl_cffi 模拟浏览器 ----------
-# curl_cffi 0.15 当前最高内置到 chrome146；HTTP/JS 画像按抓包补齐到 Chrome/149。
-IMPERSONATE = "chrome146"
+# curl_cffi 0.15 当前最高内置到 chrome136；HTTP/JS 画像按抓包补齐到 Chrome/136。
+IMPERSONATE = "chrome136"
 
 # ---------- 桌面 Chrome 画像 ----------
 BROWSER_FAMILY = "chrome"
@@ -62,8 +62,8 @@ SEND_CLIENT_HINTS = True
 SEND_HIGH_ENTROPY_CLIENT_HINTS = False
 
 # ---------- 语言 / 时区 ----------
-BROWSER_LOCALE_PROFILE = "vn"
-AUTO_BROWSER_LOCALE_FROM_IP = False
+BROWSER_LOCALE_PROFILE = "us"
+AUTO_BROWSER_LOCALE_FROM_IP = True
 IP_GEO_TIMEOUT = 6.0
 IP_GEO_ENDPOINTS = [
     "https://ipinfo.io/json",
