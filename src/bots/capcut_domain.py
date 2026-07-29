@@ -1025,7 +1025,7 @@ def save_account(uidname, email, password, join_link, msToken=""):
 
 ACTIVE_DRIVERS = []
 
-def register_one_account(index, join_link=None, keep_open=False, batch_size=3, predefined_proxy=None, shared_relay_port=None, headless=False, browser_type="chrome"):
+def register_one_account(index, join_link=None, keep_open=False, batch_size=3, predefined_proxy=None, shared_relay_port=None, headless=False, browser_type="chrome", get_link=False, **kwargs):
     email = None
     driver = None
     password = PASSWORD
