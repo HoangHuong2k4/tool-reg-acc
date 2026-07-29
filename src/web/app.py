@@ -490,7 +490,7 @@ def _run_capcut_task(mode, count, threads, join_link, mail_type, browser_type, h
             def worker(i):
                 time.sleep((i % threads) * 2.5)
                 while not bot.HOTMAIL_QUEUE.empty() and not state_capcut.task_stop.is_set():
-                    res = bot.register_one_account(i, join_link if mode == 2 else None, keep_open=False, batch_size=threads, headless=headless, browser_type=browser_type, get_link=(mode == 3))
+                    res = bot.register_one_account(i, join_link if mode == 2 else None, keep_open=(mode == 1), batch_size=threads, headless=headless, browser_type=browser_type, get_link=(mode == 3))
                     state_capcut.log_queue.put(json.dumps({"type": "result", "success": bool(res)}))
                     if res: done["ok"] += 1
                     else: done["fail"] += 1
@@ -504,7 +504,7 @@ def _run_capcut_task(mode, count, threads, join_link, mail_type, browser_type, h
                 try:
                     time.sleep((i % threads) * 2.5)
                     if state_capcut.task_stop.is_set(): return
-                    res = bot.register_one_account(i, join_link if mode == 2 else None, keep_open=False, batch_size=threads, headless=headless, browser_type=browser_type, get_link=(mode == 3))
+                    res = bot.register_one_account(i, join_link if mode == 2 else None, keep_open=(mode == 1), batch_size=threads, headless=headless, browser_type=browser_type, get_link=(mode == 3))
                     state_capcut.log_queue.put(json.dumps({"type": "result", "success": bool(res)}))
                     if res: done["ok"] += 1
                     else: done["fail"] += 1

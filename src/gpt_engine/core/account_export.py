@@ -354,18 +354,38 @@ def setup_2fa(session: BrowserSession, email: str, otp_code: typing.Union[str, N
     _follow_reauth(session, auth_url)
     human_delay("navigate")
 
-    if otp_code is None:
-        if _email_cfg.USE_EMAIL_SERVICE:
-            from core.email_provider import wait_for_otp
-            logger.info("[2FA] 自动等待邮箱重认证 OTP...")
-            otp_code = wait_for_otp(email, after_ts=reauth_otp_after_ts)
-        else:
-            logger.info("")
-            logger.info("[2FA] 请检查邮箱，输入新收到的 6 位验证码")
-            otp_code = input(">>> 2FA 验证码: ").strip()
+    max_otp_attempts = 3
+    current_otp = otp_code
+    continue_url = None
 
-    human_delay("otp_input")
-    continue_url = _validate_reauth_otp(session, otp_code)
+    for otp_attempt in range(1, max_otp_attempts + 1):
+        if current_otp is None:
+            if _email_cfg.USE_EMAIL_SERVICE:
+                from core.email_provider import wait_for_otp
+                logger.info(f"[2FA] 自动等待邮箱重认证 OTP...（第 {otp_attempt}/{max_otp_attempts} 次）")
+                current_otp = wait_for_otp(email, after_ts=reauth_otp_after_ts)
+            else:
+                logger.info("")
+                logger.info(f"[2FA] 请检查邮箱，输入新收到的 6 位验证码（第 {otp_attempt}/{max_otp_attempts} 次）:")
+                current_otp = input(">>> 2FA 验证码: ").strip()
+
+        human_delay("otp_input")
+        try:
+            continue_url = _validate_reauth_otp(session, current_otp)
+            break
+        except Exception as exc:
+            if otp_attempt >= max_otp_attempts:
+                raise
+            logger.warning(f"[2FA] 验证码错误/过期：{str(exc)[:180]}，准备重新发送并重新获取验证码")
+            reauth_otp_after_ts = time.time()
+            from core.openai_auth import send_email_otp
+            send_email_otp(session, referer="https://auth.openai.com/email-verification")
+            human_delay("api")
+            current_otp = None
+
+    if not continue_url:
+        raise RuntimeError("[2FA] OTP 验证未完成，未获取到 continue_url")
+
     human_delay("api")
     new_token = _exchange_new_token(session, continue_url)
     human_delay("api")
