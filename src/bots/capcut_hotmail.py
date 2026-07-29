@@ -1126,6 +1126,19 @@ def step_get_payment_link(driver, email, password):
             driver.refresh()
         time.sleep(7)
 
+        # Kiểm tra trang bị ban "hoạt động bất thường" → mở tab mới để vượt qua
+        try:
+            page_text = driver.find_element(By.TAG_NAME, "body").text
+            if "hoạt động bất thường" in page_text or "abnormal" in page_text.lower() or "không thể tiếp tục" in page_text:
+                log("⚠️ Phát hiện trang BLOCK 'hoạt động bất thường'! Đang mở tab mới...", "WARN")
+                driver.execute_script("window.open('https://www.capcut.com/my-edit', '_blank');")
+                time.sleep(3)
+                driver.switch_to.window(driver.window_handles[-1])
+                time.sleep(6)
+                log("✅ Đã mở tab mới, tiếp tục lấy link trên tab sạch...", "INFO")
+        except Exception as _ban_err:
+            pass
+
         # 1. Đóng các modal onboarding nếu có (What's new, Seedance, v.v.)
         for _ in range(2):
             try:
@@ -1253,12 +1266,232 @@ def step_get_payment_link(driver, email, password):
                 f.write(f"{email}\t{password}\t{payment_url}\n")
             return payment_url
 
+        # ── Nếu không lấy được link → mở tab mới retry tối đa 2 lần ──
+        for _retry in range(2):
+            log(f"⚠️ Chưa lấy được link (lần {_retry+1}). Mở tab mới để thử lại...", "WARN")
+            try:
+                # Đóng hết tab phụ
+                main_handle = driver.window_handles[0]
+                for h in driver.window_handles[1:]:
+                    try:
+                        driver.switch_to.window(h); driver.close()
+                    except: pass
+                driver.switch_to.window(main_handle)
+
+                # Mở tab mới
+                driver.execute_script("window.open('https://www.capcut.com/my-edit', '_blank');")
+                time.sleep(1)
+                driver.switch_to.window(driver.window_handles[-1])
+                time.sleep(3.5)  # Đủ để page load
+
+                # Đóng popup (1 lần, nhanh)
+                try:
+                    skip_btns = driver.find_elements(By.XPATH, "//*[contains(text(),'Bỏ qua') or contains(text(),'Skip') or contains(text(),'Đã hiểu')]")
+                    close_btns = driver.find_elements(By.CSS_SELECTOR, '.lv-modal-close-icon, button[aria-label="close"]')
+                    for btn in (skip_btns + close_btns)[:3]:
+                        if btn.is_displayed():
+                            try_click(driver, btn, "Đóng popup (retry)")
+                            time.sleep(0.3)
+                except: pass
+
+                # Bấm Nâng cấp (timeout 10s, poll 0.5s)
+                clicked = False
+                t0 = time.time()
+                while time.time() - t0 < 10:
+                    try:
+                        btns = driver.find_elements(By.CSS_SELECTOR, '[data-id="TitleBarUpgradeVip"] .LvHeaderUpgradeVipNew, .LvHeaderUpgradeVipNew, [data-id="TitleBarUpgradeVip"]')
+                        for btn in btns:
+                            if btn.is_displayed():
+                                try_click(driver, btn, "Nâng cấp (retry tab mới)"); clicked = True; break
+                    except: pass
+                    if clicked: break
+                    time.sleep(0.5)
+
+                if not clicked:
+                    log("Không tìm thấy nút Nâng cấp trên tab mới!", "WARN"); continue
+
+                time.sleep(1.5)  # Chờ modal mở
+
+                # Bấm xác nhận modal (timeout 10s, poll 0.5s)
+                t0 = time.time()
+                while time.time() - t0 < 10:
+                    try:
+                        confirm_btns = driver.find_elements(By.XPATH,
+                            "//*[contains(@class,'upgrade') or contains(@class,'Upgrade') or contains(@class,'pro') or contains(@class,'Pro')]"
+                            "[contains(text(),'Nâng cấp') or contains(text(),'Upgrade')]")
+                        confirm_btns += driver.find_elements(By.CSS_SELECTOR,
+                            ".upgrade-btn, .btn-upgrade, [class*='upgradeBtn'], [class*='UpgradeBtn']")
+                        for btn in confirm_btns:
+                            if btn.is_displayed() and btn.tag_name in ("button", "div", "a"):
+                                try_click(driver, btn, "Nâng cấp (Modal retry)"); break
+                    except: pass
+                    time.sleep(0.5)
+
+                # Đợi link (timeout 20s, poll 0.5s)
+                log("Đang chờ link thanh toán (tab mới)...", "INFO")
+                t0 = time.time()
+                while time.time() - t0 < 20:
+                    try:
+                        if "pipopay.com" in driver.current_url or "buy.stripe.com" in driver.current_url:
+                            payment_url = driver.current_url; log("✅ Lấy được link trên tab mới (URL)!", "OK"); break
+                        for h in driver.window_handles:
+                            try:
+                                driver.switch_to.window(h)
+                                if "pipopay.com" in driver.current_url or "buy.stripe.com" in driver.current_url:
+                                    payment_url = driver.current_url; log("✅ Lấy được link trên tab mới (popup)!", "OK"); break
+                            except: pass
+                        if payment_url: break
+                        iframes = driver.find_elements(By.CSS_SELECTOR, "iframe[src*='pipopay.com'], iframe[src*='cashier'], iframe[src*='stripe.com']")
+                        for iframe in iframes:
+                            src = iframe.get_attribute("src")
+                            if src and ("pipopay.com" in src or "stripe.com" in src):
+                                payment_url = src; log("✅ Lấy được link trên tab mới (iframe)!", "OK"); break
+                        if payment_url: break
+                    except: pass
+                    time.sleep(0.5)
+
+                if payment_url:
+                    os.makedirs("data", exist_ok=True)
+                    with open("data/success_links.txt", "a", encoding="utf-8") as f:
+                        f.write(f"{email}\t{password}\t{payment_url}\n")
+                    return payment_url
+
+            except Exception as _retry_err:
+                log(f"Lỗi retry tab mới lần {_retry+1}: {_retry_err}", "WARN")
+
         log("Không tìm thấy link thanh toán pipopay sau khi bấm Nâng cấp!", "WARN")
         return None
 
     except Exception as e:
         log(f"Lỗi lấy link: {e}", "ERR")
         return None
+
+
+# ─── Retry lấy link cho acc đã tạo nhưng chưa lấy được link ─────────────────
+
+NO_LINK_FILE = "data/no_link.json"
+
+def save_pending_link(email, password, refresh_token, client_id, cookies):
+    """Lưu acc thành công nhưng chưa lấy được link để retry sau."""
+    import json, os
+    os.makedirs("data", exist_ok=True)
+    records = []
+    if os.path.exists(NO_LINK_FILE):
+        try:
+            with open(NO_LINK_FILE, "r", encoding="utf-8") as f:
+                records = json.load(f)
+        except:
+            records = []
+    
+    # Tránh lưu trùng email
+    records = [r for r in records if r.get("email") != email]
+    records.append({
+        "email": email,
+        "password": password,
+        "refresh_token": refresh_token,
+        "client_id": client_id,
+        "cookies": cookies
+    })
+    with open(NO_LINK_FILE, "w", encoding="utf-8") as f:
+        json.dump(records, f, ensure_ascii=False, indent=2)
+    log(f"Đã lưu acc {email} vào danh sách chờ lấy link ({NO_LINK_FILE})", "INFO")
+
+def retry_get_payment_link_for_acc(email, password, refresh_token, client_id, cookies,
+                                    headless=False, browser_type="chrome", mail_api_source="dongvanfb",
+                                    index=1, batch_size=1):
+    """Thử lấy link thanh toán cho 1 acc đã lưu (dùng cookie, hoặc đăng nhập lại)."""
+    log(f"[Retry #{index}] Đang xử lý: {email}", "INFO")
+    driver = None
+    try:
+        proxy = get_rotated_proxy()
+        driver = setup_driver(index, keep_open=False, use_api_proxy=True, batch_size=batch_size,
+                              use_proxy=True, predefined_proxy=proxy,
+                              headless=headless, browser_type=browser_type)
+        ACTIVE_DRIVERS.append(driver)
+
+        # Bước 1: Thử đăng nhập bằng cookie
+        logged_in = False
+        if cookies:
+            try:
+                driver.get("https://www.capcut.com")
+                time.sleep(2)
+                for ck in cookies:
+                    try:
+                        driver.add_cookie(ck)
+                    except:
+                        pass
+                driver.get("https://www.capcut.com/my-edit")
+                time.sleep(5)
+                url = driver.current_url
+                if "my-edit" in url or "workspace" in url or "login" not in url:
+                    log(f"[Retry] Cookie còn hạn! Đã đăng nhập {email} bằng cookie", "OK")
+                    logged_in = True
+                else:
+                    log(f"[Retry] Cookie hết hạn cho {email}, sẽ đăng nhập lại...", "WARN")
+            except Exception as e:
+                log(f"[Retry] Lỗi load cookie: {e}", "WARN")
+
+        # Bước 2: Đăng nhập lại bằng email/pass nếu cookie thất bại
+        if not logged_in:
+            try:
+                driver.get("https://www.capcut.com/vi-vn/login")
+                time.sleep(3)
+                step0_dismiss_tos(driver)
+                step0b_click_email_button(driver)
+                step1_enter_email(driver, email)
+                step2_enter_password(driver, password)
+                # OTP nếu cần
+                try:
+                    from selenium.webdriver.common.by import By
+                    wait_for_element(driver, By.CSS_SELECTOR, 
+                        '.lv_sign_in_panel_wide-code-detail, .verification_code_input-wrapper', timeout=15)
+                    log(f"[Retry] Cần OTP, đang lấy từ {mail_api_source.upper()}...", "INFO")
+                    time.sleep(5)
+                    otp = wait_for_otp(email, password, refresh_token, client_id, 
+                                       timeout=90, interval=4, mail_api_source=mail_api_source)
+                    if otp:
+                        otp_input = driver.find_element(By.CSS_SELECTOR,
+                            'input[maxlength="6"], .lv_sign_in_panel_wide-code-detail input')
+                        set_react_input(driver, otp_input, otp)
+                        log(f"[Retry] Đã nhập OTP: {otp}", "OK")
+                        time.sleep(3)
+                    else:
+                        log(f"[Retry] Không lấy được OTP cho {email}!", "ERR")
+                        return False
+                except Exception:
+                    pass  # Không có màn hình OTP → có thể đã đăng nhập
+                
+                step5_open_capcut(driver)
+                if not wait_for_dashboard(driver, timeout=45):
+                    log(f"[Retry] Không vào được dashboard sau đăng nhập lại!", "ERR")
+                    return False
+                log(f"[Retry] Đăng nhập lại thành công cho {email}", "OK")
+                logged_in = True
+            except Exception as e:
+                log(f"[Retry] Lỗi đăng nhập lại: {e}", "ERR")
+                return False
+
+        if not logged_in:
+            return False
+
+        # Bước 3: Lấy link thanh toán
+        link = step_get_payment_link(driver, email, password)
+        if link:
+            log(f"[Retry] ✅ Lấy được link cho {email}: {link[:60]}...", "OK")
+            return True
+        else:
+            log(f"[Retry] Không lấy được link cho {email}", "ERR")
+            return False
+
+    except Exception as e:
+        log(f"[Retry] Lỗi không mong muốn: {e}", "ERR")
+        return False
+    finally:
+        if driver:
+            try:
+                if driver in ACTIVE_DRIVERS: ACTIVE_DRIVERS.remove(driver)
+                driver.quit()
+            except: pass
 
 
 def register_one_account(index, join_link=None, keep_open=False, batch_size=3, predefined_proxy=None, headless=False, browser_type="chrome", get_link=False, mail_api_source="dongvanfb"):
@@ -1355,7 +1588,15 @@ def register_one_account(index, join_link=None, keep_open=False, batch_size=3, p
             step_skip_role_survey(driver, timeout=10)
             step_close_whats_new(driver, timeout=15)
             if get_link:
-                step_get_payment_link(driver, email, password)
+                link = step_get_payment_link(driver, email, password)
+                if not link:
+                    # Lưu cookie để retry sau
+                    try:
+                        cookies = driver.get_cookies()
+                        save_pending_link(email, password, refresh_token, client_id, cookies)
+                        log(f"Đã lưu cookie acc {email} để retry lấy link sau!", "WARN")
+                    except Exception as ck_err:
+                        log(f"Không lưu được cookie: {ck_err}", "WARN")
 
         # Chỉ đánh dấu hotmail đã dùng (trừ khỏi hotmails.txt) khi mọi thứ đều thành công
         mark_hotmail_used(acc)

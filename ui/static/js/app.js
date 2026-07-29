@@ -190,6 +190,7 @@ window.onload=()=>{
   switchTab(hash, false);
 
   ccLoadHotmailCount();
+  ccLoadPendingLinkCount();
   ccLoadAccounts();
   hfLoadAccounts();
   gptLoadAccounts();
@@ -246,6 +247,22 @@ async function ccLoadHotmailCount(){
     document.getElementById('cc-hotmailCountBadge').textContent=d.count;
     document.getElementById('cc-hotmailCountLabel').textContent=d.count;
   }catch(e){}
+}
+async function ccLoadPendingLinkCount(){
+  try{const r=await fetch('/api/capcut/pending_links/count');const d=await r.json();
+    const n=d.count||0;
+    document.getElementById('cc-pendingLinkCount').textContent=n;
+    document.getElementById('cc-pendingLinkCount2').textContent=n;
+  }catch(e){}
+}
+async function ccRetryLinks(){
+  if(ccIsRunning){showToast('\u26a0\ufe0f','C\u00f3 task \u0111ang ch\u1ea1y, h\u00e3y d\u1eebng tr\u01b0\u1edbc!');return;}
+  const threads=parseInt(document.getElementById('cc-retryThreads').value)||2;
+  const r=await fetch('/api/capcut/retry_links/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({browser_type:ccBrowser,headless:ccHeadless,mail_api_source:ccMailApiSource,threads})});
+  const d=await r.json();
+  if(!d.success){showToast('\u274c',d.error||'L\u1ed7i kh\u1eddi \u0111\u1ed9ng retry');return;}
+  ccIsRunning=true;ccSetUI(true);ccStartSSE();
+  showToast('\ud83d\udd04','\u0110\u00e3 b\u1eaft \u0111\u1ea7u retry '+d.total+' acc v\u1edbi '+threads+' lu\u1ed3ng!');
 }
 async function ccUploadHotmail(input){
   const file=input.files[0];if(!file)return;
@@ -322,7 +339,8 @@ function ccStartSSE(){
     const data=JSON.parse(e.data);
     if(data.type==='log')ccAddLog(data);
     else if(data.type==='result'){if(data.success)ccOk++;else ccFail++;ccUpdateStats();if(data.success)ccLoadAccounts();}
-    else if(data.type==='done'){ccIsRunning=false;ccSetUI(false);ccEvt.close();showToast('✅','CapCut Xong!');ccLoadHotmailCount();ccLoadAccounts();}
+    else if(data.type==='done'){ccIsRunning=false;ccSetUI(false);ccEvt.close();showToast('✅','CapCut Xong!');ccLoadHotmailCount();ccLoadAccounts();ccLoadPendingLinkCount();}
+    else if(data.type==='pending_count_update'){ccLoadPendingLinkCount();ccLoadAccounts();}
     else if(data.type==='stopped'){ccIsRunning=false;ccSetUI(false);ccEvt.close();showToast('⏹','CapCut Đã dừng.');}
   };
 }

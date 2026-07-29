@@ -74,15 +74,16 @@
       <div class="panel">
         <div class="panel-header"><span>⚙️</span><h2>Cấu hình CapCut</h2></div>
         <div class="panel-body">
+          <!-- Mail Type + API Source on same line if possible -->
           <div class="form-group">
-            <label>Loại Mail:</label>
+            <label>Loại Mail</label>
             <div class="radio-group">
-              <div class="radio-btn active" id="cc-mailHotmail" onclick="ccSetMailType('hotmail')">📧 Hotmail (Từ File)</div>
-              <div class="radio-btn" id="cc-mailDomain" onclick="ccSetMailType('domain')">🌐 Mail Domain (Tự tạo)</div>
+              <div class="radio-btn active" id="cc-mailHotmail" onclick="ccSetMailType('hotmail')">📧 Hotmail</div>
+              <div class="radio-btn" id="cc-mailDomain" onclick="ccSetMailType('domain')">🌐 Mail Domain</div>
             </div>
           </div>
           <div class="form-group" id="cc-apiSourceGroup">
-            <label>Nguồn đọc Mail (chỉ Hotmail):</label>
+            <label>Nguồn đọc Mail (Hotmail)</label>
             <div class="radio-group">
               <div class="radio-btn active" id="cc-sourceDongvanfb" onclick="ccSetApiSource('dongvanfb')">DongVanFB</div>
               <div class="radio-btn" id="cc-sourceMixmmo" onclick="ccSetApiSource('mixmmo')">MixMMO</div>
@@ -90,49 +91,56 @@
           </div>
           <div class="form-group">
             <label>Chế độ</label>
-            <div class="radio-group">
-              <div class="radio-btn active" id="cc-mode1" onclick="ccSetMode(1)">🆕 Chỉ tạo acc</div>
-              <div class="radio-btn" id="cc-mode2" onclick="ccSetMode(2)">👥 Tạo + Join Team</div>
-              <div class="radio-btn" id="cc-mode3" onclick="ccSetMode(3)">🔗 Tạo acc + Auto Lấy Link</div>
+            <div class="radio-group" style="flex-direction:column;gap:3px;">
+              <div class="radio-btn active" id="cc-mode1" onclick="ccSetMode(1)" style="flex:none;text-align:left;">🆕 Chỉ tạo acc</div>
+              <div class="radio-btn" id="cc-mode2" onclick="ccSetMode(2)" style="flex:none;text-align:left;">👥 Tạo + Join Team</div>
+              <div class="radio-btn" id="cc-mode3" onclick="ccSetMode(3)" style="flex:none;text-align:left;">🔗 Tạo acc + Auto Lấy Link</div>
             </div>
           </div>
           <div class="form-group" id="cc-joinLinkGroup" style="display:none;">
-      <label>Link Join Team</label>
-      <input type="text" id="cc-joinLink" class="input" placeholder="Nhập link (nếu chạy chức năng Tạo + Join)">
-    </div>
-    
-    <div class="form-group">
-      <label>Loại Trình Duyệt</label>
-      <div class="mode-selector" style="display:flex; gap: 8px;">
-        <div class="nav-btn active" id="cc-browserChrome" onclick="ccSetBrowser('chrome')">🌐 Chrome</div>
-        <div class="nav-btn" id="cc-browserFirefox" onclick="ccSetBrowser('firefox')">🦊 Firefox</div>
-        <div class="nav-btn" id="cc-browserCamoufox" onclick="ccSetBrowser('camoufox')">🦊 Camoufox</div>
-      </div>
-    </div>
-    
-    <div class="form-group">
-      <div class="toggle-btn" id="cc-headlessToggle" onclick="ccToggleHeadless()">
-        <span>Chạy ẩn (Headless)</span><div class="toggle-switch"></div>
-      </div>
-    </div>
-    
-    <div class="btn-row" style="margin-top:16px;">
-            <div class="form-group"><label>Số tài khoản</label><input type="number" id="cc-count" value="4" min="1" max="999"></div>
-            <div class="form-group"><label>Tab đồng thời</label><input type="number" id="cc-threads" value="4" min="1" max="8"></div>
+            <label>Link Join Team</label>
+            <input type="text" id="cc-joinLink" placeholder="Nhập link join team...">
+          </div>
+          <div class="form-group">
+            <label>Trình duyệt</label>
+            <div class="radio-group">
+              <div class="nav-btn active" id="cc-browserChrome" onclick="ccSetBrowser('chrome')">🌐 Chrome</div>
+              <div class="nav-btn" id="cc-browserFirefox" onclick="ccSetBrowser('firefox')">🦊 Firefox</div>
+              <div class="nav-btn" id="cc-browserCamoufox" onclick="ccSetBrowser('camoufox')">🦊 Camoufox</div>
+            </div>
+          </div>
+          <div class="form-group">
+            <div class="toggle-btn" id="cc-headlessToggle" onclick="ccToggleHeadless()">
+              <span>Chạy ẩn (Headless)</span><div class="toggle-switch"></div>
+            </div>
+          </div>
+          <div class="row2">
+            <div class="form-group" style="margin-bottom:0"><label>Số tài khoản</label><input type="number" id="cc-count" value="4" min="1" max="999"></div>
+            <div class="form-group" style="margin-bottom:0"><label>Tab đồng thời</label><input type="number" id="cc-threads" value="4" min="1" max="8"></div>
           </div>
           <hr class="divider">
           <div class="form-group" id="cc-hotmailGroup">
             <label>Hotmails (<span id="cc-hotmailCountLabel">–</span> còn lại)</label>
             <div class="file-drop" onclick="document.getElementById('cc-fileInput').click()">
               <span class="hotmail-count" id="cc-hotmailCountBadge">–</span>
-              hotmail trong file • Click để upload file mới
+              hotmail • Click upload mới
               <input type="file" id="cc-fileInput" style="display:none" accept=".txt" onchange="ccUploadHotmail(this)">
             </div>
           </div>
           <div class="btn-row">
             <button class="btn btn-start" id="cc-startBtn" onclick="ccStartTask()">▶ BẮT ĐẦU</button>
             <button class="btn btn-stop" id="cc-stopBtn" onclick="ccStopTask()" style="display:none">⏹ DỪNG</button>
-            <button class="btn btn-secondary" style="border-color:var(--red);color:var(--red);" onclick="ccCloseBrowsers()">💥 ĐÓNG TRÌNH DUYỆT</button>
+            <button class="btn btn-secondary" style="border-color:var(--red);color:var(--red);" onclick="ccCloseBrowsers()">💥</button>
+          </div>
+          <div class="retry-section">
+            <label>🔄 Retry lấy link · <span id="cc-pendingLinkCount" style="color:#f59e0b;font-weight:700;">0</span> acc chờ</label>
+            <div class="retry-row">
+              <input type="number" id="cc-retryThreads" value="2" min="1" max="6" title="Số luồng">
+              <label style="font-size:9px;color:var(--muted);margin:0;text-transform:none;white-space:nowrap;">luồng</label>
+              <button class="btn btn-secondary" onclick="ccRetryLinks()">🔄 Chạy (<span id="cc-pendingLinkCount2">0</span>)</button>
+              <button class="btn btn-secondary" onclick="ccOpenQueueManager()" title="Quản lý hàng đợi" style="flex:none;padding:5px 8px;border-color:#38bdf8;color:#38bdf8;">📋</button>
+              <button class="btn btn-secondary" onclick="document.getElementById('cc-addManualModal').classList.add('active')" title="Thêm acc thủ công" style="flex:none;padding:5px 8px;border-color:#a78bfa;color:#a78bfa;">➕</button>
+            </div>
           </div>
         </div>
       </div>
@@ -496,6 +504,147 @@ document.getElementById('confirmOkBtn').addEventListener('click', () => {
   if(confirmCallback) confirmCallback();
   closeConfirmModal();
 });
+</script>
+
+<!-- ============ MODAL: Thêm acc thủ công vào Retry Queue ============ -->
+<div class="modal-overlay" id="cc-addManualModal" onclick="if(event.target===this)this.classList.remove('active')">
+  <div class="modal-box" style="width:480px;max-width:95%;">
+    <div class="modal-title">➕ Thêm acc vào hàng đợi lấy link</div>
+    <div class="modal-desc">
+      Paste danh sách acc, mỗi dòng 1 acc.<br>
+      Hỗ trợ định dạng: <code>email tab password</code> · <code>email|password</code> · <code>email password</code>
+    </div>
+    <textarea id="cc-manualAccInput" style="width:100%;height:180px;font-family:'JetBrains Mono',monospace;font-size:11px;background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:8px;color:var(--text);resize:vertical;" placeholder="leontebronco7628@outlook.com	capcut123
+naokiqvxgini@outlook.com	capcut123
+..."></textarea>
+    <div style="margin-top:8px;font-size:10px;color:var(--muted);" id="cc-manualAccStatus"></div>
+    <div class="modal-actions" style="margin-top:14px;">
+      <button class="btn btn-cancel" onclick="document.getElementById('cc-addManualModal').classList.remove('active');document.getElementById('cc-manualAccStatus').textContent=''">Hủy</button>
+      <button class="btn btn-start" style="width:auto;padding:7px 20px;" onclick="ccAddManualAccounts()">✅ Thêm vào Queue</button>
+    </div>
+  </div>
+</div>
+
+<script>
+async function ccAddManualAccounts(){
+  const raw=document.getElementById('cc-manualAccInput').value.trim();
+  if(!raw){showToast('⚠️','Vui lòng nhập ít nhất 1 dòng!');return;}
+  const status=document.getElementById('cc-manualAccStatus');
+  status.textContent='⏳ Đang thêm...';status.style.color='var(--muted)';
+  try{
+    const r=await fetch('/api/capcut/pending_links/add_manual',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({accounts:raw})});
+    const d=await r.json();
+    if(d.success){
+      status.textContent=`✅ Đã thêm ${d.added} acc · bỏ qua ${d.skipped} trùng · tổng ${d.total} acc chờ`;
+      status.style.color='var(--green)';
+      document.getElementById('cc-manualAccInput').value='';
+      ccLoadPendingLinkCount();
+      showToast('✅',`Đã thêm ${d.added} acc vào hàng đợi!`);
+    }else{
+      status.textContent='❌ Lỗi: '+(d.error||'Unknown');
+      status.style.color='var(--red)';
+    }
+  }catch(e){status.textContent='❌ Lỗi kết nối';status.style.color='var(--red)';}
+}
+</script>
+
+<!-- ============ MODAL: Quản lý hàng đợi Retry ============ -->
+<div class="modal-overlay" id="cc-queueManagerModal" onclick="if(event.target===this)this.classList.remove('active')">
+  <div class="modal-box" style="width:600px;max-width:96%;max-height:85vh;display:flex;flex-direction:column;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+      <div class="modal-title" style="margin:0;">📋 Hàng đợi lấy link · <span id="cc-qmTotal" style="color:var(--accent);">0</span> acc</div>
+      <button class="btn btn-secondary" style="width:auto;padding:4px 10px;font-size:10px;" onclick="document.getElementById('cc-queueManagerModal').classList.remove('active')">✕ Đóng</button>
+    </div>
+    <div style="display:flex;gap:6px;margin-bottom:8px;align-items:center;">
+      <input type="text" id="cc-qmSearch" placeholder="🔍 Tìm email..." style="flex:1;font-size:11px;" oninput="ccQmFilter()">
+      <button class="btn btn-secondary" style="width:auto;padding:5px 10px;font-size:10px;border-color:var(--red);color:var(--red);" onclick="ccQmDeleteAll()">🗑️ Xóa tất cả</button>
+    </div>
+    <div style="flex:1;overflow-y:auto;border:1px solid var(--border);border-radius:6px;">
+      <table style="width:100%;border-collapse:collapse;font-size:11px;">
+        <thead>
+          <tr>
+            <th style="padding:7px 10px;text-align:left;background:var(--bg2);border-bottom:1px solid var(--border);color:var(--muted);font-size:10px;">#</th>
+            <th style="padding:7px 10px;text-align:left;background:var(--bg2);border-bottom:1px solid var(--border);color:var(--muted);font-size:10px;">Email</th>
+            <th style="padding:7px 10px;text-align:left;background:var(--bg2);border-bottom:1px solid var(--border);color:var(--muted);font-size:10px;">Mật khẩu</th>
+            <th style="padding:7px 10px;text-align:center;background:var(--bg2);border-bottom:1px solid var(--border);color:var(--muted);font-size:10px;">Cookie</th>
+            <th style="padding:7px 10px;background:var(--bg2);border-bottom:1px solid var(--border);"></th>
+          </tr>
+        </thead>
+        <tbody id="cc-qmTableBody"></tbody>
+      </table>
+    </div>
+    <div style="margin-top:8px;font-size:10px;color:var(--muted);text-align:right;" id="cc-qmStatus"></div>
+  </div>
+</div>
+
+<script>
+let ccQmRecords = [];
+
+async function ccOpenQueueManager(){
+  document.getElementById('cc-queueManagerModal').classList.add('active');
+  document.getElementById('cc-qmSearch').value='';
+  document.getElementById('cc-qmStatus').textContent='⏳ Đang tải...';
+  try{
+    const r=await fetch('/api/capcut/pending_links/list');
+    const d=await r.json();
+    if(d.success){
+      ccQmRecords=d.records;
+      ccQmRender(ccQmRecords);
+      document.getElementById('cc-qmStatus').textContent='';
+    }else{
+      document.getElementById('cc-qmStatus').textContent='❌ Lỗi: '+(d.error||'');
+    }
+  }catch(e){document.getElementById('cc-qmStatus').textContent='❌ Lỗi kết nối';}
+}
+
+function ccQmRender(recs){
+  document.getElementById('cc-qmTotal').textContent=ccQmRecords.length;
+  const tbody=document.getElementById('cc-qmTableBody');
+  if(!recs.length){tbody.innerHTML='<tr><td colspan="5" style="padding:20px;text-align:center;color:var(--muted);">Không có acc nào trong hàng đợi</td></tr>';return;}
+  tbody.innerHTML=recs.map((r,i)=>`
+    <tr id="cc-qmRow-${escHtml(r.email)}" style="border-bottom:1px solid rgba(255,255,255,0.04);">
+      <td style="padding:6px 10px;color:var(--muted);font-family:'JetBrains Mono',monospace;">${i+1}</td>
+      <td style="padding:6px 10px;font-family:'JetBrains Mono',monospace;color:var(--text);">${escHtml(r.email)}</td>
+      <td style="padding:6px 10px;font-family:'JetBrains Mono',monospace;color:var(--muted);">${escHtml(r.password)}</td>
+      <td style="padding:6px 10px;text-align:center;">${r.has_cookie?'<span style="color:var(--green);font-size:10px;">✅ Có</span>':'<span style="color:var(--muted);font-size:10px;">—</span>'}</td>
+      <td style="padding:6px 10px;text-align:right;">
+        <button onclick="ccQmDelete('${escHtml(r.email)}')" style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);color:var(--red);border-radius:4px;padding:3px 8px;font-size:10px;cursor:pointer;">🗑️</button>
+      </td>
+    </tr>`).join('');
+}
+
+function ccQmFilter(){
+  const q=document.getElementById('cc-qmSearch').value.toLowerCase();
+  const filtered=q?ccQmRecords.filter(r=>r.email.toLowerCase().includes(q)):ccQmRecords;
+  ccQmRender(filtered);
+}
+
+async function ccQmDelete(email){
+  try{
+    const r=await fetch('/api/capcut/pending_links/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})});
+    const d=await r.json();
+    if(d.success){
+      ccQmRecords=ccQmRecords.filter(r=>r.email.toLowerCase()!==email.toLowerCase());
+      ccQmFilter();
+      document.getElementById('cc-qmTotal').textContent=ccQmRecords.length;
+      document.getElementById('cc-qmStatus').textContent=`✅ Đã xóa ${email} · còn ${d.remaining} acc`;
+      ccLoadPendingLinkCount();
+    }
+  }catch(e){}
+}
+
+async function ccQmDeleteAll(){
+  if(!confirm(`Xóa toàn bộ ${ccQmRecords.length} acc khỏi hàng đợi?`))return;
+  // Xóa từng acc
+  const emails=ccQmRecords.map(r=>r.email);
+  for(const email of emails){
+    await fetch('/api/capcut/pending_links/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})});
+  }
+  ccQmRecords=[];
+  ccQmRender([]);
+  document.getElementById('cc-qmStatus').textContent=`✅ Đã xóa tất cả ${emails.length} acc`;
+  ccLoadPendingLinkCount();
+}
 </script>
 
 </body></html>

@@ -410,6 +410,252 @@ def capcut_task_stop():
     capcut_close_browsers()
     return jsonify({"success": True})
 
+@app.route("/api/capcut/pending_links/count")
+def pending_links_count():
+    import json, os
+    path = os.path.join(os.path.dirname(__file__), "..", "..", "data", "no_link.json")
+    try:
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                records = json.load(f)
+            return jsonify({"count": len(records)})
+    except:
+        pass
+    return jsonify({"count": 0})
+
+@app.route("/api/capcut/pending_links/list")
+def pending_links_list():
+    """Trả về danh sách acc trong hàng đợi retry (chỉ email + password)."""
+    import json, os
+    path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "no_link.json"))
+    try:
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                records = json.load(f)
+            return jsonify({"success": True, "records": [
+                {"email": r.get("email",""), "password": r.get("password",""), "has_cookie": bool(r.get("cookies"))}
+                for r in records
+            ]})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e), "records": []})
+    return jsonify({"success": True, "records": []})
+
+@app.route("/api/capcut/pending_links/delete", methods=["POST"])
+def pending_links_delete():
+    """Xóa một acc khỏi hàng đợi retry theo email."""
+    import json, os
+    data = request.json or {}
+    email = data.get("email", "").strip().lower()
+    path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "no_link.json"))
+    try:
+        records = []
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                records = json.load(f)
+        before = len(records)
+        records = [r for r in records if r.get("email","").lower() != email]
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(records, f, ensure_ascii=False, indent=2)
+        return jsonify({"success": True, "deleted": before - len(records), "remaining": len(records)})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+@app.route("/api/capcut/pending_links/add_manual", methods=["POST"])
+def pending_links_add_manual():
+    """Thêm thủ công danh sách acc (email + pass) vào hàng đợi retry lấy link."""
+    import json, os
+    data = request.json or {}
+    lines_raw = data.get("accounts", "")
+    path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "no_link.json"))
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+
+    # Parse từng dòng: email password | email\tpassword | email|password
+    added = 0
+    skipped = 0
+    try:
+        records = []
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                records = json.load(f)
+
+        existing_emails = {r.get("email", "").lower() for r in records}
+
+        for line in lines_raw.splitlines():
+            line = line.strip()
+            if not line: continue
+            # Hỗ trợ các dấu phân cách: tab, |, space
+            import re
+            parts = re.split(r'[\t|]| {2,}', line, maxsplit=1)
+            if len(parts) < 2:
+                parts = line.split(" ", 1)
+            if len(parts) < 2: continue
+            email = parts[0].strip()
+            password = parts[1].strip()
+            if not email or not password: continue
+
+            if email.lower() in existing_emails:
+                skipped += 1
+                continue
+
+            records.append({
+                "email": email,
+                "password": password,
+                "refresh_token": "",
+                "client_id": "",
+                "cookies": []  # Rỗng → bot sẽ đăng nhập lại bằng email/pass
+            })
+            existing_emails.add(email.lower())
+            added += 1
+
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(records, f, ensure_ascii=False, indent=2)
+
+        return jsonify({"success": True, "added": added, "skipped": skipped, "total": len(records)})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+@app.route("/api/capcut/retry_links/start", methods=["POST"])
+def retry_links_start():
+    if state_capcut.is_running:
+        return jsonify({"success": False, "error": "Đang có task khác chạy!"})
+    data = request.json or {}
+    browser_type = data.get("browser_type", "chrome")
+    headless = bool(data.get("headless", False))
+    mail_api_source = data.get("mail_api_source", "dongvanfb")
+    threads = int(data.get("threads", 2))
+
+    # Check count before starting
+    import json as _json, os as _os
+    no_link_path = _os.path.join(_os.path.dirname(__file__), "..", "..", "data", "no_link.json")
+    total = 0
+    if _os.path.exists(no_link_path):
+        try:
+            with open(no_link_path, "r", encoding="utf-8") as f:
+                total = len(_json.load(f))
+        except: pass
+
+    if total == 0:
+        return jsonify({"success": False, "error": "Không có acc nào chờ lấy link!"})
+
+    state_capcut.task_stop.clear()
+    while not state_capcut.log_queue.empty():
+        try: state_capcut.log_queue.get_nowait()
+        except: break
+
+    state_capcut.is_running = True
+    state_capcut.task_thread = threading.Thread(
+        target=_run_retry_links_task,
+        args=(browser_type, headless, mail_api_source, threads),
+        daemon=True
+    )
+    state_capcut.task_thread.start()
+    return jsonify({"success": True, "total": total, "threads": threads})
+
+def _run_retry_links_task(browser_type, headless, mail_api_source, threads=2):
+    import importlib, json, os, concurrent.futures, threading as _threading
+    try:
+        root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+        if root_dir not in sys.path:
+            sys.path.insert(0, root_dir)
+
+        mod = importlib.import_module("src.bots.capcut_hotmail")
+        state_capcut.module = mod
+        mod.log = state_capcut.log
+        import src.bots.capcut_hotmail as ch
+        ch.GLOBAL_STOP_EVENT = state_capcut.task_stop
+        mod.get_rotated_proxy = patched_get_proxy
+
+        no_link_path = os.path.join(root_dir, "data", "no_link.json")
+        if not os.path.exists(no_link_path):
+            state_capcut.log("Không có acc nào trong danh sách chờ lấy link!", "WARN")
+            return
+
+        with open(no_link_path, "r", encoding="utf-8") as f:
+            records = json.load(f)
+
+        total = len(records)
+        state_capcut.log(f"🚀 Bắt đầu retry lấy link cho {total} acc với {threads} luồng song song...", "INFO")
+
+        succeeded = []
+        failed = []
+        lock = _threading.Lock()
+
+        def retry_worker(rec, idx):
+            if state_capcut.task_stop.is_set():
+                with lock: failed.append(rec)
+                return
+            email = rec.get("email", "")
+            password = rec.get("password", "")
+            refresh_token = rec.get("refresh_token", "")
+            client_id = rec.get("client_id", "")
+            cookies = rec.get("cookies", [])
+
+            state_capcut.log(f"[{idx}/{total}] Đang retry: {email}", "INFO")
+            # Stagger: mỗi luồng chờ khác nhau để không mở Chrome đồng loạt
+            stagger = ((idx - 1) % threads) * 2.5
+            if stagger > 0:
+                time.sleep(stagger)
+
+            ok = mod.retry_get_payment_link_for_acc(
+                email, password, refresh_token, client_id, cookies,
+                headless=headless, browser_type=browser_type, mail_api_source=mail_api_source,
+                index=idx, batch_size=threads
+            )
+            state_capcut.log_queue.put(json.dumps({"type": "result", "success": ok}))
+            with lock:
+                if ok:
+                    # Lấy link vừa lưu từ success_links.txt
+                    link = ""
+                    try:
+                        sl_path = os.path.join(root_dir, "data", "success_links.txt")
+                        if os.path.exists(sl_path):
+                            with open(sl_path, "r", encoding="utf-8") as slf:
+                                for line in slf:
+                                    parts = line.strip().split("\t")
+                                    if len(parts) >= 3 and parts[0] == email:
+                                        link = parts[2]
+                    except Exception:
+                        pass
+
+                    # Upsert vào DB: cập nhật join_link nếu đã có, hoặc insert mới
+                    try:
+                        with get_db() as dbc:
+                            dbc.execute("""
+                                INSERT INTO accounts (app, uid, email, password, join_link, ms_token)
+                                VALUES ('capcut', ?, ?, ?, ?, '')
+                                ON CONFLICT DO NOTHING
+                            """, (email.split('@')[0], email, password, link))
+                            # Nếu đã tồn tại thì update link
+                            dbc.execute("""
+                                UPDATE accounts SET join_link=? WHERE app='capcut' AND email=? AND (join_link IS NULL OR join_link='')
+                            """, (link, email))
+                            dbc.commit()
+                        state_capcut.log(f"✅ Đã cập nhật acc {email} vào DB với link!", "OK")
+                    except Exception as dbe:
+                        state_capcut.log(f"Không lưu được vào DB: {dbe}", "WARN")
+
+                    succeeded.append(email)
+                else:
+                    failed.append(rec)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
+            futures = [executor.submit(retry_worker, rec, i+1) for i, rec in enumerate(records)]
+            concurrent.futures.wait(futures)
+
+        # Cập nhật lại file: chỉ giữ lại các acc CHƯA lấy được link
+        with open(no_link_path, "w", encoding="utf-8") as f:
+            json.dump(failed, f, ensure_ascii=False, indent=2)
+
+        state_capcut.log(f"✅ Retry xong: {len(succeeded)} thành công / {len(failed)} thất bại / còn {len(failed)} acc chờ", "OK")
+        # Cập nhật lại số acc chờ trên UI
+        state_capcut.log_queue.put(json.dumps({"type": "pending_count_update"}))
+        state_capcut.log_queue.put(json.dumps({"type": "done"}))
+    except Exception as e:
+        state_capcut.log(f"Lỗi retry task: {e}", "ERR")
+    finally:
+        state_capcut.is_running = False
+
+
 @app.route("/api/capcut/task/close_browsers", methods=["POST"])
 def capcut_close_browsers():
     if state_capcut.module and hasattr(state_capcut.module, "ACTIVE_DRIVERS"):
