@@ -1112,19 +1112,34 @@ def api_upgrade_vip(driver):
 
 
 def step_get_payment_link(driver, email, password):
+    import time
+    for attempt in range(2):
+        res = _do_get_payment_link(driver, email, password, attempt)
+        if res == "TOAST_ERROR":
+            log("⚠️ Phát hiện toast lỗi (lv-message-wrapper)! Mở tab mới thử lại liền...", "WARN")
+            driver.execute_script("window.open('https://www.capcut.com/vi-vn/login', '_blank');")
+            time.sleep(1)
+            driver.switch_to.window(driver.window_handles[-1])
+            time.sleep(5)
+            continue
+        return res
+    return None
+
+def _do_get_payment_link(driver, email, password, attempt=0):
     try:
         from selenium.webdriver.common.by import By
         import time
         import os
 
-        # Reload lại trang để React mount lại sạch, không bị rác popup
-        log("Reload trang để lấy UI sạch...", "INFO")
-        current_url = driver.current_url
-        if "my-edit" not in current_url and "workspace" not in current_url and "capcut.com" not in current_url:
-            driver.get("https://www.capcut.com/vi-vn/login")
-        else:
-            driver.refresh()
-        time.sleep(7)
+        if attempt == 0:
+            # Reload lại trang để React mount lại sạch, không bị rác popup
+            log("Reload trang để lấy UI sạch...", "INFO")
+            current_url = driver.current_url
+            if "my-edit" not in current_url and "workspace" not in current_url and "capcut.com" not in current_url:
+                driver.get("https://www.capcut.com/vi-vn/login")
+            else:
+                driver.refresh()
+            time.sleep(7)
 
         # Kiểm tra trang bị ban "hoạt động bất thường" → mở tab mới để vượt qua
         try:
@@ -1186,6 +1201,14 @@ def step_get_payment_link(driver, email, password):
         start = time.time()
         while time.time() - start < 20:
             try:
+                # CHECK TOAST
+                try:
+                    toasts = driver.find_elements(By.CSS_SELECTOR, '.lv-message-wrapper.lv-message-wrapper-top')
+                    for t in toasts:
+                        if t.is_displayed():
+                            return "TOAST_ERROR"
+                except: pass
+
                 # Nếu có popup "Bỏ qua" nhảy ra đè lên, click nó
                 try:
                     skip_btns = driver.find_elements(By.XPATH, "//*[text()='Bỏ qua' or text()='Skip' or text()='Đã hiểu']")
@@ -1226,6 +1249,14 @@ def step_get_payment_link(driver, email, password):
         start = time.time()
         while time.time() - start < 30:
             try:
+                # CHECK TOAST
+                try:
+                    toasts = driver.find_elements(By.CSS_SELECTOR, '.lv-message-wrapper.lv-message-wrapper-top')
+                    for t in toasts:
+                        if t.is_displayed():
+                            return "TOAST_ERROR"
+                except: pass
+
                 # Kiểm tra URL hiện tại
                 if "pipopay.com" in driver.current_url or "buy.stripe.com" in driver.current_url:
                     log("Đã lấy được link cashier_url từ URL hiện tại!", "OK")
@@ -1266,98 +1297,7 @@ def step_get_payment_link(driver, email, password):
                 f.write(f"{email}\t{password}\t{payment_url}\n")
             return payment_url
 
-        # ── Nếu không lấy được link → mở tab mới retry tối đa 2 lần ──
-        for _retry in range(2):
-            log(f"⚠️ Chưa lấy được link (lần {_retry+1}). Mở tab mới để thử lại...", "WARN")
-            try:
-                # Đóng hết tab phụ
-                main_handle = driver.window_handles[0]
-                for h in driver.window_handles[1:]:
-                    try:
-                        driver.switch_to.window(h); driver.close()
-                    except: pass
-                driver.switch_to.window(main_handle)
 
-                # Mở tab mới
-                driver.execute_script("window.open('https://www.capcut.com/vi-vn/login', '_blank');")
-                time.sleep(1)
-                driver.switch_to.window(driver.window_handles[-1])
-                time.sleep(3.5)  # Đủ để page load
-
-                # Đóng popup (1 lần, nhanh)
-                try:
-                    skip_btns = driver.find_elements(By.XPATH, "//*[contains(text(),'Bỏ qua') or contains(text(),'Skip') or contains(text(),'Đã hiểu')]")
-                    close_btns = driver.find_elements(By.CSS_SELECTOR, '.lv-modal-close-icon, button[aria-label="close"]')
-                    for btn in (skip_btns + close_btns)[:3]:
-                        if btn.is_displayed():
-                            try_click(driver, btn, "Đóng popup (retry)")
-                            time.sleep(0.3)
-                except: pass
-
-                # Bấm Nâng cấp (timeout 10s, poll 0.5s)
-                clicked = False
-                t0 = time.time()
-                while time.time() - t0 < 10:
-                    try:
-                        btns = driver.find_elements(By.CSS_SELECTOR, '[data-id="TitleBarUpgradeVip"] .LvHeaderUpgradeVipNew, .LvHeaderUpgradeVipNew, [data-id="TitleBarUpgradeVip"]')
-                        for btn in btns:
-                            if btn.is_displayed():
-                                try_click(driver, btn, "Nâng cấp (retry tab mới)"); clicked = True; break
-                    except: pass
-                    if clicked: break
-                    time.sleep(0.5)
-
-                if not clicked:
-                    log("Không tìm thấy nút Nâng cấp trên tab mới!", "WARN"); continue
-
-                time.sleep(1.5)  # Chờ modal mở
-
-                # Bấm xác nhận modal (timeout 10s, poll 0.5s)
-                t0 = time.time()
-                while time.time() - t0 < 10:
-                    try:
-                        confirm_btns = driver.find_elements(By.XPATH,
-                            "//*[contains(@class,'upgrade') or contains(@class,'Upgrade') or contains(@class,'pro') or contains(@class,'Pro')]"
-                            "[contains(text(),'Nâng cấp') or contains(text(),'Upgrade')]")
-                        confirm_btns += driver.find_elements(By.CSS_SELECTOR,
-                            ".upgrade-btn, .btn-upgrade, [class*='upgradeBtn'], [class*='UpgradeBtn']")
-                        for btn in confirm_btns:
-                            if btn.is_displayed() and btn.tag_name in ("button", "div", "a"):
-                                try_click(driver, btn, "Nâng cấp (Modal retry)"); break
-                    except: pass
-                    time.sleep(0.5)
-
-                # Đợi link (timeout 20s, poll 0.5s)
-                log("Đang chờ link thanh toán (tab mới)...", "INFO")
-                t0 = time.time()
-                while time.time() - t0 < 20:
-                    try:
-                        if "pipopay.com" in driver.current_url or "buy.stripe.com" in driver.current_url:
-                            payment_url = driver.current_url; log("✅ Lấy được link trên tab mới (URL)!", "OK"); break
-                        for h in driver.window_handles:
-                            try:
-                                driver.switch_to.window(h)
-                                if "pipopay.com" in driver.current_url or "buy.stripe.com" in driver.current_url:
-                                    payment_url = driver.current_url; log("✅ Lấy được link trên tab mới (popup)!", "OK"); break
-                            except: pass
-                        if payment_url: break
-                        iframes = driver.find_elements(By.CSS_SELECTOR, "iframe[src*='pipopay.com'], iframe[src*='cashier'], iframe[src*='stripe.com']")
-                        for iframe in iframes:
-                            src = iframe.get_attribute("src")
-                            if src and ("pipopay.com" in src or "stripe.com" in src):
-                                payment_url = src; log("✅ Lấy được link trên tab mới (iframe)!", "OK"); break
-                        if payment_url: break
-                    except: pass
-                    time.sleep(0.5)
-
-                if payment_url:
-                    os.makedirs("data", exist_ok=True)
-                    with open("data/success_links.txt", "a", encoding="utf-8") as f:
-                        f.write(f"{email}\t{password}\t{payment_url}\n")
-                    return payment_url
-
-            except Exception as _retry_err:
-                log(f"Lỗi retry tab mới lần {_retry+1}: {_retry_err}", "WARN")
 
         log("Không tìm thấy link thanh toán pipopay sau khi bấm Nâng cấp!", "WARN")
         return None
