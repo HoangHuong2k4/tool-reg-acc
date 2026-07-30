@@ -1121,7 +1121,7 @@ def step_get_payment_link(driver, email, password):
         log("Reload trang để lấy UI sạch...", "INFO")
         current_url = driver.current_url
         if "my-edit" not in current_url and "workspace" not in current_url and "capcut.com" not in current_url:
-            driver.get("https://www.capcut.com/my-edit")
+            driver.get("https://www.capcut.com/vi-vn/login")
         else:
             driver.refresh()
         time.sleep(7)
@@ -1131,7 +1131,7 @@ def step_get_payment_link(driver, email, password):
             page_text = driver.find_element(By.TAG_NAME, "body").text
             if "hoạt động bất thường" in page_text or "abnormal" in page_text.lower() or "không thể tiếp tục" in page_text:
                 log("⚠️ Phát hiện trang BLOCK 'hoạt động bất thường'! Đang mở tab mới...", "WARN")
-                driver.execute_script("window.open('https://www.capcut.com/my-edit', '_blank');")
+                driver.execute_script("window.open('https://www.capcut.com/vi-vn/login', '_blank');")
                 time.sleep(3)
                 driver.switch_to.window(driver.window_handles[-1])
                 time.sleep(6)
@@ -1279,7 +1279,7 @@ def step_get_payment_link(driver, email, password):
                 driver.switch_to.window(main_handle)
 
                 # Mở tab mới
-                driver.execute_script("window.open('https://www.capcut.com/my-edit', '_blank');")
+                driver.execute_script("window.open('https://www.capcut.com/vi-vn/login', '_blank');")
                 time.sleep(1)
                 driver.switch_to.window(driver.window_handles[-1])
                 time.sleep(3.5)  # Đủ để page load
@@ -1420,7 +1420,7 @@ def retry_get_payment_link_for_acc(email, password, refresh_token, client_id, co
                         driver.add_cookie(ck)
                     except:
                         pass
-                driver.get("https://www.capcut.com/my-edit")
+                driver.get("https://www.capcut.com/vi-vn/login")
                 time.sleep(5)
                 url = driver.current_url
                 if "my-edit" in url or "workspace" in url or "login" not in url:
