@@ -64,7 +64,8 @@ def setup_db_if_not_exists():
             "PROXY_API_TOKEN": "proxyquick6_9df2f4385910e1a5d4bf45498a783abf845ba8776cb2642cb31839a1740b29ef",
             "PROXY_MERCHANT": "a20f20d6-9512-40fd-9a12-eeff809fdaeb",
             "PROXY_ID": "953319",
-            "PROXYXOAY_KEY": ""
+            "PROXYXOAY_KEY": "",
+            "CAPCUT_PASSWORD": "capcut123"
         }
         for k, v in default_settings.items():
             conn.execute("INSERT OR IGNORE INTO settings (`key`, `value`) VALUES (?, ?)", (k, v))
@@ -78,7 +79,8 @@ def load_settings():
         "PROXY_API_TOKEN": "",
         "PROXY_MERCHANT": "",
         "PROXY_ID": "",
-        "PROXYXOAY_KEY": ""
+        "PROXYXOAY_KEY": "",
+        "CAPCUT_PASSWORD": "capcut123"
     }
     try:
         with get_db() as conn:
@@ -213,33 +215,43 @@ def proxy_rotate():
                 return jsonify({"success": False, "error": "Danh sách ProxyQuick v3 trống!"})
             
             global PROXY_V3_INDEX
-            PROXY_V3_INDEX = (PROXY_V3_INDEX + 1) % len(proxies)
-            current_proxy_line = proxies[PROXY_V3_INDEX]
+            last_error_msg = "Tất cả proxy v3 đều lỗi xoay."
+            last_time_rem = 0
             
-            if "|" in current_proxy_line:
-                p_str, url = current_proxy_line.split("|", 1)
-            else:
-                p_str, url = "", current_proxy_line
-            
-            r = requests.get(url.strip(), timeout=15)
-            data = r.json()
-            if data.get("status") == "success" or data.get("message") == "Xoay proxy thành công":
-                proxy_str = data.get("proxy", p_str.strip())
-                new_ip = data.get("ip", proxy_str.split(':')[0] if proxy_str else "")
-                parts = proxy_str.split(":")
-                if len(parts) >= 4:
-                    PROXY_HOST, PROXY_PORT, PROXY_USER, PROXY_PASS = parts[0], int(parts[1]), parts[2], parts[3]
-                    with get_db() as conn:
-                        conn.execute("INSERT INTO settings (`key`, `value`) VALUES ('LAST_PROXY_HOST', ?) ON CONFLICT(`key`) DO UPDATE SET `value`=excluded.`value`", (PROXY_HOST,))
-                        conn.execute("INSERT INTO settings (`key`, `value`) VALUES ('LAST_PROXY_PORT', ?) ON CONFLICT(`key`) DO UPDATE SET `value`=excluded.`value`", (str(PROXY_PORT),))
-                        conn.execute("INSERT INTO settings (`key`, `value`) VALUES ('LAST_PROXY_USER', ?) ON CONFLICT(`key`) DO UPDATE SET `value`=excluded.`value`", (PROXY_USER,))
-                        conn.execute("INSERT INTO settings (`key`, `value`) VALUES ('LAST_PROXY_PASS', ?) ON CONFLICT(`key`) DO UPDATE SET `value`=excluded.`value`", (PROXY_PASS,))
-                        conn.commit()
-                return jsonify({"success": True, "ip": new_ip, "proxy": proxy_str})
-            else:
-                msg = data.get("message", str(data))
-                time_rem = data.get("timeRemaining")
-                return jsonify({"success": False, "error": msg, "timeRemaining": time_rem})
+            for _ in range(len(proxies)):
+                PROXY_V3_INDEX = (PROXY_V3_INDEX + 1) % len(proxies)
+                current_proxy_line = proxies[PROXY_V3_INDEX]
+                
+                if "|" in current_proxy_line:
+                    p_str, url = current_proxy_line.split("|", 1)
+                else:
+                    p_str, url = "", current_proxy_line
+                
+                try:
+                    r = requests.get(url.strip(), timeout=15)
+                    data = r.json()
+                except Exception as e:
+                    last_error_msg = str(e)
+                    continue
+                    
+                if data.get("status") == "success" or data.get("message") == "Xoay proxy thành công":
+                    proxy_str = data.get("proxy", p_str.strip())
+                    new_ip = data.get("ip", proxy_str.split(':')[0] if proxy_str else "")
+                    parts = proxy_str.split(":")
+                    if len(parts) >= 4:
+                        PROXY_HOST, PROXY_PORT, PROXY_USER, PROXY_PASS = parts[0], int(parts[1]), parts[2], parts[3]
+                        with get_db() as conn:
+                            conn.execute("INSERT INTO settings (`key`, `value`) VALUES ('LAST_PROXY_HOST', ?) ON CONFLICT(`key`) DO UPDATE SET `value`=excluded.`value`", (PROXY_HOST,))
+                            conn.execute("INSERT INTO settings (`key`, `value`) VALUES ('LAST_PROXY_PORT', ?) ON CONFLICT(`key`) DO UPDATE SET `value`=excluded.`value`", (str(PROXY_PORT),))
+                            conn.execute("INSERT INTO settings (`key`, `value`) VALUES ('LAST_PROXY_USER', ?) ON CONFLICT(`key`) DO UPDATE SET `value`=excluded.`value`", (PROXY_USER,))
+                            conn.execute("INSERT INTO settings (`key`, `value`) VALUES ('LAST_PROXY_PASS', ?) ON CONFLICT(`key`) DO UPDATE SET `value`=excluded.`value`", (PROXY_PASS,))
+                            conn.commit()
+                    return jsonify({"success": True, "ip": new_ip, "proxy": proxy_str})
+                else:
+                    last_error_msg = data.get("message", str(data))
+                    last_time_rem = data.get("timeRemaining", 0)
+                    
+            return jsonify({"success": False, "error": f"Lỗi tất cả Proxy v3. Lỗi cuối: {last_error_msg}", "timeRemaining": last_time_rem})
         else:
             headers = {
                 "Authorization": f"Bearer {settings.get('PROXY_API_TOKEN', '')}",
@@ -383,6 +395,7 @@ def capcut_task_start():
     mail_api_source = data.get("mail_api_source", "dongvanfb")
     browser_type = data.get("browser_type", "chrome")
     headless = bool(data.get("headless", False))
+    incognito = bool(data.get("incognito", False))
 
     state_capcut.task_stop.clear()
     while not state_capcut.log_queue.empty():
@@ -400,7 +413,7 @@ def capcut_task_start():
         print("Lỗi get max id:", e)
 
     state_capcut.is_running = True
-    state_capcut.task_thread = threading.Thread(target=_run_capcut_task, args=(mode, count, threads, join_link, mail_type, mail_api_source, browser_type, headless), daemon=True)
+    state_capcut.task_thread = threading.Thread(target=_run_capcut_task, args=(mode, count, threads, join_link, mail_type, mail_api_source, browser_type, headless, incognito), daemon=True)
     state_capcut.task_thread.start()
     return jsonify({"success": True})
 
@@ -521,6 +534,7 @@ def retry_links_start():
     data = request.json or {}
     browser_type = data.get("browser_type", "chrome")
     headless = bool(data.get("headless", False))
+    incognito = bool(data.get("incognito", False))
     mail_api_source = data.get("mail_api_source", "dongvanfb")
     threads = int(data.get("threads", 2))
 
@@ -545,13 +559,13 @@ def retry_links_start():
     state_capcut.is_running = True
     state_capcut.task_thread = threading.Thread(
         target=_run_retry_links_task,
-        args=(browser_type, headless, mail_api_source, threads),
+        args=(browser_type, headless, mail_api_source, threads, incognito),
         daemon=True
     )
     state_capcut.task_thread.start()
     return jsonify({"success": True, "total": total, "threads": threads})
 
-def _run_retry_links_task(browser_type, headless, mail_api_source, threads=2):
+def _run_retry_links_task(browser_type, headless, mail_api_source, threads=2, incognito=False):
     import importlib, json, os, concurrent.futures, threading as _threading
     try:
         root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -599,7 +613,7 @@ def _run_retry_links_task(browser_type, headless, mail_api_source, threads=2):
             ok = mod.retry_get_payment_link_for_acc(
                 email, password, refresh_token, client_id, cookies,
                 headless=headless, browser_type=browser_type, mail_api_source=mail_api_source,
-                index=idx, batch_size=threads
+                index=idx, batch_size=threads, incognito=incognito
             )
             state_capcut.log_queue.put(json.dumps({"type": "result", "success": ok}))
             with lock:
@@ -685,7 +699,7 @@ def capcut_task_stream():
                 yield f"data: {json.dumps({'type':'ping'})}\n\n"
     return Response(stream_with_context(generate()), mimetype="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
-def _run_capcut_task(mode, count, threads, join_link, mail_type, mail_api_source, browser_type, headless):
+def _run_capcut_task(mode, count, threads, join_link, mail_type, mail_api_source, browser_type, headless, incognito=False):
     import importlib
     try:
         mod_name = "src.bots.capcut_hotmail" if mail_type == "hotmail" else "src.bots.capcut_domain"
@@ -737,7 +751,7 @@ def _run_capcut_task(mode, count, threads, join_link, mail_type, mail_api_source
             def worker(i):
                 time.sleep((i % threads) * 2.5)
                 while not bot.HOTMAIL_QUEUE.empty() and not state_capcut.task_stop.is_set():
-                    res = bot.register_one_account(i, join_link if mode == 2 else None, keep_open=(mode == 1), batch_size=threads, headless=headless, browser_type=browser_type, get_link=(mode == 3), mail_api_source=mail_api_source)
+                    res = bot.register_one_account(i, join_link if mode == 2 else None, keep_open=(mode == 1), batch_size=threads, headless=headless, browser_type=browser_type, get_link=(mode == 3), mail_api_source=mail_api_source, incognito=incognito)
                     state_capcut.log_queue.put(json.dumps({"type": "result", "success": bool(res)}))
                     if res: done["ok"] += 1
                     else: done["fail"] += 1
@@ -751,7 +765,7 @@ def _run_capcut_task(mode, count, threads, join_link, mail_type, mail_api_source
                 try:
                     time.sleep((i % threads) * 2.5)
                     if state_capcut.task_stop.is_set(): return
-                    res = bot.register_one_account(i, join_link if mode == 2 else None, keep_open=(mode == 1), batch_size=threads, headless=headless, browser_type=browser_type, get_link=(mode == 3), mail_api_source=mail_api_source)
+                    res = bot.register_one_account(i, join_link if mode == 2 else None, keep_open=(mode == 1), batch_size=threads, headless=headless, browser_type=browser_type, get_link=(mode == 3), mail_api_source=mail_api_source, incognito=incognito)
                     state_capcut.log_queue.put(json.dumps({"type": "result", "success": bool(res)}))
                     if res: done["ok"] += 1
                     else: done["fail"] += 1

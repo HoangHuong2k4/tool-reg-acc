@@ -58,3 +58,4 @@ Cryptography>=41
 Pycryptodome>=3.23.0
 selenium
 webdriver-manager
+undetected-chromedriver==3.5.5

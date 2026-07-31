@@ -40,6 +40,9 @@ async function loadSettings() {
     document.getElementById('setting-proxy-type').value = d.PROXY_TYPE || 'proxyquick';
     document.getElementById('setting-proxyxoay-key').value = d.PROXYXOAY_KEY || '';
     document.getElementById('setting-proxyquick-v3-list').value = d.PROXY_V3_LIST || '';
+    if(document.getElementById('setting-capcut-password')) {
+        document.getElementById('setting-capcut-password').value = d.CAPCUT_PASSWORD || 'capcut123';
+    }
     if(typeof toggleProxySettings === 'function') toggleProxySettings();
   } catch(e) {}
 }
@@ -53,6 +56,9 @@ async function saveSettings() {
     PROXYXOAY_KEY: document.getElementById('setting-proxyxoay-key').value.trim(),
     PROXY_V3_LIST: document.getElementById('setting-proxyquick-v3-list').value.trim()
   };
+  if(document.getElementById('setting-capcut-password')) {
+      data.CAPCUT_PASSWORD = document.getElementById('setting-capcut-password').value.trim() || 'capcut123';
+  }
   try {
     const r = await fetch('/api/settings', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data)});
     const d = await r.json();
@@ -90,7 +96,7 @@ function resetAutoRotateTimer() {
       if (btn && !btn.disabled) {
         rotateProxy('cc');
       }
-    }, 5 * 60 * 1000);
+    }, 3 * 60 * 1000);
   }
 }
 
@@ -98,7 +104,7 @@ function toggleAutoRotate(checked) {
   const checkboxes = document.querySelectorAll('.auto-rotate-cb');
   checkboxes.forEach(cb => cb.checked = checked);
   resetAutoRotateTimer();
-  if(checked) showToast('✅', 'Đã BẬT tự động xoay IP (5 phút)');
+  if(checked) showToast('✅', 'Đã BẬT tự động xoay IP (3 phút)');
   else showToast('❌', 'Đã TẮT tự động xoay IP');
 }
 
@@ -204,6 +210,7 @@ window.onload=()=>{
   // Khôi phục UI state từ localStorage
   ccSetBrowser(ccBrowser);
   if(ccHeadless) document.getElementById('cc-headlessToggle').classList.add('active');
+  if(ccIncognito) document.getElementById('cc-incognitoToggle').classList.add('active');
   
   hfSetBrowser(hfBrowser);
   if(hfHeadless) document.getElementById('hf-headlessToggle').classList.add('active');
@@ -212,7 +219,7 @@ window.onload=()=>{
 };
 
 // ==== CAPCUT ====
-let ccMode=1, ccMailType='hotmail', ccMailApiSource='dongvanfb', ccBrowser=localStorage.getItem('ccBrowser')||'chrome', ccHeadless=(localStorage.getItem('ccHeadless')==='true'), ccFilter='ALL', ccLogs=[], ccOk=0, ccFail=0, ccTotal=0;
+let ccMode=3, ccMailType='hotmail', ccMailApiSource='dongvanfb', ccBrowser=localStorage.getItem('ccBrowser')||'chrome', ccHeadless=(localStorage.getItem('ccHeadless')==='true'), ccIncognito=(localStorage.getItem('ccIncognito')==='true'), ccFilter='ALL', ccLogs=[], ccOk=0, ccFail=0, ccTotal=0;
 function ccSetMode(m){ccMode=m;document.getElementById('cc-mode1').classList.toggle('active',m===1);document.getElementById('cc-mode2').classList.toggle('active',m===2);if(document.getElementById('cc-mode3'))document.getElementById('cc-mode3').classList.toggle('active',m===3);document.getElementById('cc-joinLinkGroup').style.display=m===2?'block':'none';}
 function ccSetMailType(m){
   ccMailType=m;
@@ -241,6 +248,11 @@ function ccToggleHeadless(){
   localStorage.setItem('ccHeadless', ccHeadless);
   document.getElementById('cc-headlessToggle').classList.toggle('active',ccHeadless);
 }
+function ccToggleIncognito() {
+  ccIncognito=!ccIncognito;
+  localStorage.setItem('ccIncognito', ccIncognito);
+  document.getElementById('cc-incognitoToggle').classList.toggle('active',ccIncognito);
+}
 async function ccLoadHotmailCount(){
   try{const r=await fetch('/api/capcut/hotmail/count');const d=await r.json();
     document.getElementById('cc-statHotmail').textContent=d.count;
@@ -258,7 +270,7 @@ async function ccLoadPendingLinkCount(){
 async function ccRetryLinks(){
   if(ccIsRunning){showToast('\u26a0\ufe0f','C\u00f3 task \u0111ang ch\u1ea1y, h\u00e3y d\u1eebng tr\u01b0\u1edbc!');return;}
   const threads=parseInt(document.getElementById('cc-retryThreads').value)||2;
-  const r=await fetch('/api/capcut/retry_links/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({browser_type:ccBrowser,headless:ccHeadless,mail_api_source:ccMailApiSource,threads})});
+  const r=await fetch('/api/capcut/retry_links/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({browser_type:ccBrowser,headless:ccHeadless,mail_api_source:ccMailApiSource,threads,incognito:ccIncognito})});
   const d=await r.json();
   if(!d.success){showToast('\u274c',d.error||'L\u1ed7i kh\u1eddi \u0111\u1ed9ng retry');return;}
   ccIsRunning=true;ccSetUI(true);ccStartSSE();
@@ -319,7 +331,7 @@ async function ccStartTask(){
   const jl=document.getElementById('cc-joinLink').value.trim();
   if(ccMode===2 && !jl){showToast('⚠️','Vui lòng nhập Link Join Team!');return;}
   try{
-    const r=await fetch('/api/capcut/task/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:ccMode,count,threads,join_link:jl,mail_type:ccMailType,mail_api_source:ccMailApiSource,browser_type:ccBrowser,headless:ccHeadless})});
+    const r=await fetch('/api/capcut/task/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:ccMode,count,threads,join_link:jl,mail_type:ccMailType,mail_api_source:ccMailApiSource,browser_type:ccBrowser,headless:ccHeadless,incognito:ccIncognito})});
     const d=await r.json();
     if(!d.success){showToast('❌',d.error);return;}
     ccIsRunning=true;ccSetUI(true);ccStartSSE();

@@ -209,7 +209,7 @@ def mac_clear_system_proxy():
 # ── Cấu hình ────────────────────────────────────────────────────────
 BASE_URL    = "https://regmail.phh.info.vn"
 API_KEY     = "1dec9d51e8707e9bf1fa7756612830c676f65a42a1009851580ec0a82384abd8"
-PASSWORD    = "capcut123"
+
 CAPCUT_URL  = "https://www.capcut.com/vi-vn/signup"
 OUTPUT_FILE = "accounts.txt"
 DOB_YEAR  = "2004"
@@ -277,17 +277,25 @@ def delete_mailbox(email_address):
     except Exception as e:
         log(f"Lỗi xóa mail: {e}", "WARN")
 
-def get_rotated_proxy():
-    # Thử đọc settings từ DB
+def get_settings_from_db():
+    import sqlite3
+    import os
+    db_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "database.db"))
+    settings = {}
     try:
-        import sqlite3
-        import os
-        db_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "database.db"))
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
         cursor.execute("SELECT `key`, `value` FROM settings")
         settings = {row[0]: row[1] for row in cursor.fetchall()}
         conn.close()
+    except Exception:
+        pass
+    return settings
+
+def get_rotated_proxy():
+    # Thử đọc settings từ DB
+    try:
+        settings = get_settings_from_db()
         
         proxy_type = settings.get("PROXY_TYPE", "proxyquick")
         if proxy_type == "proxyxoay":
@@ -321,15 +329,12 @@ def get_rotated_proxy():
         log(f"Lỗi gọi API proxy: {e}", "ERR")
     return None
 
-def setup_driver(index=1, keep_open=False, use_api_proxy=True, batch_size=3, use_proxy=True, predefined_proxy=None, is_func2=False, shared_relay_port=None, headless=False, browser_type="chrome"):
+def setup_driver(index=1, keep_open=False, use_api_proxy=True, batch_size=3, use_proxy=True, predefined_proxy=None, is_func2=False, shared_relay_port=None, headless=False, browser_type="chrome", incognito=False):
     from selenium import webdriver
     from selenium.webdriver.chrome.options import Options
     options = Options()
-    if is_func2:
+    if incognito:
         options.add_argument("--incognito")
-    else:
-        # Không dùng --incognito: tránh bị CapCut phát hiện và không load được Extension
-        pass
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-blink-features=AutomationControlled")
@@ -402,6 +407,8 @@ def setup_driver(index=1, keep_open=False, use_api_proxy=True, batch_size=3, use
         ff_options = FirefoxOptions()
         if headless:
             ff_options.add_argument("--headless")
+        if incognito:
+            ff_options.add_argument("-private")
         ff_options.add_argument(f"--width={window_width}")
         ff_options.add_argument(f"--height={window_height}")
         
@@ -865,13 +872,15 @@ def step_close_whats_new(driver, timeout=10):
 
 def step_get_payment_link(driver, email, password):
     import time
-    for attempt in range(2):
+    for attempt in range(5):
         res = _do_get_payment_link(driver, email, password, attempt)
         if res == "TOAST_ERROR":
             log("⚠️ Phát hiện toast lỗi (lv-message-wrapper)! Mở tab mới thử lại liền...", "WARN")
             driver.execute_script("window.open('https://www.capcut.com/vi-vn/login', '_blank');")
             time.sleep(1)
             driver.switch_to.window(driver.window_handles[-1])
+            try: driver.maximize_window()
+            except: pass
             time.sleep(5)
             continue
         return res
@@ -882,6 +891,25 @@ def _do_get_payment_link(driver, email, password, attempt=0):
         from selenium.webdriver.common.by import By
         import time
         import os
+
+        payment_url = None
+        def _check_manual_payment(d):
+            try:
+                if "pipopay.com" in d.current_url or "buy.stripe.com" in d.current_url: return d.current_url
+                for iframe in d.find_elements(By.CSS_SELECTOR, "iframe[src*='pipopay.com'], iframe[src*='stripe.com']"):
+                    src = iframe.get_attribute("src")
+                    if src and ("pipopay.com" in src or "stripe.com" in src): return src
+                orig = d.current_window_handle
+                for h in d.window_handles:
+                    if h != orig:
+                        d.switch_to.window(h)
+                        if "pipopay.com" in d.current_url or "buy.stripe.com" in d.current_url:
+                            u = d.current_url
+                            d.switch_to.window(orig)
+                            return u
+                        d.switch_to.window(orig)
+            except: pass
+            return None
 
         if attempt == 0:
             # Reload lại trang để React mount lại sạch, không bị rác popup
@@ -901,8 +929,10 @@ def _do_get_payment_link(driver, email, password, attempt=0):
                 driver.execute_script("window.open('https://www.capcut.com/vi-vn/login', '_blank');")
                 time.sleep(3)
                 driver.switch_to.window(driver.window_handles[-1])
+                try: driver.maximize_window()
+                except: pass
                 time.sleep(6)
-                log("✅ Đã mở tab mới, tiếp tục lấy link trên tab sạch...", "INFO")
+                log("✅ Đã mở tab mới và phóng to cửa sổ, tiếp tục lấy link trên tab sạch...", "INFO")
         except Exception as _ban_err:
             pass
 
@@ -926,6 +956,11 @@ def _do_get_payment_link(driver, email, password, attempt=0):
         clicked_header = False
         start = time.time()
         while time.time() - start < 20:
+            payment_url = _check_manual_payment(driver)
+            if payment_url:
+                log("Đã phát hiện link thanh toán do click tay!", "OK")
+                clicked_header = True
+                break
             try:
                 upgrade_btns = driver.find_elements(By.CSS_SELECTOR, '[data-id="TitleBarUpgradeVip"] .LvHeaderUpgradeVipNew, .LvHeaderUpgradeVipNew')
                 if not upgrade_btns:
@@ -952,6 +987,12 @@ def _do_get_payment_link(driver, email, password, attempt=0):
         clicked_modal = False
         start = time.time()
         while time.time() - start < 20:
+            if not payment_url:
+                payment_url = _check_manual_payment(driver)
+            if payment_url:
+                log("Đã phát hiện link thanh toán do click tay!", "OK")
+                clicked_modal = True
+                break
             try:
                 # CHECK TOAST
                 try:
@@ -997,9 +1038,8 @@ def _do_get_payment_link(driver, email, password, attempt=0):
             
         # 3. Đợi iframe Pipo (Cashier) xuất hiện hoặc trang chuyển hướng và lấy link src
         log("Đã bấm nâng cấp, đang chờ link thanh toán xuất hiện...", "INFO")
-        payment_url = None
         start = time.time()
-        while time.time() - start < 30:
+        while time.time() - start < 30 and not payment_url:
             try:
                 # CHECK TOAST
                 try:
@@ -1131,10 +1171,36 @@ def save_account(uidname, email, password, join_link, msToken=""):
 
 ACTIVE_DRIVERS = []
 
-def register_one_account(index, join_link=None, keep_open=False, batch_size=3, predefined_proxy=None, shared_relay_port=None, headless=False, browser_type="chrome", get_link=False, **kwargs):
+NO_LINK_FILE = "data/no_link.json"
+
+def save_pending_link(email, password, cookies):
+    """Lưu acc thành công nhưng chưa lấy được link để retry sau."""
+    import json, os
+    os.makedirs("data", exist_ok=True)
+    records = []
+    if os.path.exists(NO_LINK_FILE):
+        try:
+            with open(NO_LINK_FILE, "r", encoding="utf-8") as f:
+                records = json.load(f)
+        except:
+            records = []
+    
+    # Tránh lưu trùng email
+    records = [r for r in records if r.get("email") != email]
+    records.append({
+        "email": email,
+        "password": password,
+        "cookies": cookies
+    })
+    
+    with open(NO_LINK_FILE, "w", encoding="utf-8") as f:
+        json.dump(records, f, ensure_ascii=False, indent=2)
+    log(f"Đã lưu acc {email} vào danh sách chờ lấy link ({NO_LINK_FILE})", "INFO")
+
+def register_one_account(index, join_link=None, keep_open=False, batch_size=3, predefined_proxy=None, shared_relay_port=None, headless=False, browser_type="chrome", get_link=False, incognito=False, **kwargs):
     email = None
     driver = None
-    password = PASSWORD
+    password = get_settings_from_db().get("CAPCUT_PASSWORD", "capcut123") or "capcut123"
 
     try:
         email = create_random_email()
@@ -1145,7 +1211,7 @@ def register_one_account(index, join_link=None, keep_open=False, batch_size=3, p
         max_retries = 3
         for attempt in range(max_retries):
             is_func2 = bool(join_link)
-            driver = setup_driver(index, keep_open, use_api_proxy=True, batch_size=batch_size, use_proxy=True, predefined_proxy=predefined_proxy, is_func2=is_func2, shared_relay_port=shared_relay_port, headless=headless, browser_type=browser_type)
+            driver = setup_driver(index, keep_open, use_api_proxy=True, batch_size=batch_size, use_proxy=True, predefined_proxy=predefined_proxy, is_func2=is_func2, shared_relay_port=shared_relay_port, headless=headless, browser_type=browser_type, incognito=incognito)
             ACTIVE_DRIVERS.append(driver)
             log(f"[{email}] Bắt đầu mở trình duyệt... (Lần thử {attempt+1})", "INFO")
             
@@ -1194,14 +1260,14 @@ def register_one_account(index, join_link=None, keep_open=False, batch_size=3, p
 
         if join_link:
             step5_join_team(driver, join_link)
-            # Nếu KHÔNG chuyển qua trang my-cloud (nghĩa là lỗi full team hoặc web đứng)
             if not wait_for_dashboard(driver):
                 log("Không thể join team (bị kẹt ở trang join) -> HỦY LƯU TÀI KHOẢN NÀY!", "ERR")
                 return False
                 
             uidname = extract_uidname(driver)
             save_account(uidname, email, password, join_link, msToken)
-            log(f"ĐĂNG KÝ THÀNH CÔNG! {email} (UID: {uidname})", "OK")
+            log(f"ĐĂNG KÝ & JOIN THÀNH CÔNG! {email} (UID: {uidname})", "OK")
+        else:
             if bday_status != "ALREADY_LOGGED_IN":
                 step5_open_capcut(driver)
             
@@ -1210,7 +1276,7 @@ def register_one_account(index, join_link=None, keep_open=False, batch_size=3, p
                 return False
                 
             uidname = extract_uidname(driver)
-            log(f"ĐĂNG KÝ THÀNH CÔNG! {email} (UID: {uidname})", "OK")
+            log(f"ĐĂNG NHẬP / ĐĂNG KÝ THÀNH CÔNG! {email} (UID: {uidname})", "OK")
 
             # Lưu tài khoản NGAY sau khi tạo xong (không cần chờ link thanh toán)
             save_account(uidname, email, password, "", msToken)
@@ -1221,7 +1287,15 @@ def register_one_account(index, join_link=None, keep_open=False, batch_size=3, p
             step_close_whats_new(driver, timeout=10)
             
             if get_link:
-                step_get_payment_link(driver, email, password)
+                link = step_get_payment_link(driver, email, password)
+                if not link:
+                    # Lưu cookie để retry sau
+                    try:
+                        cookies = driver.get_cookies()
+                        save_pending_link(email, password, cookies)
+                        log(f"Đã lưu cookie acc {email} để retry lấy link sau!", "WARN")
+                    except Exception as ck_err:
+                        log(f"Không lưu được cookie: {ck_err}", "WARN")
 
         return True
 

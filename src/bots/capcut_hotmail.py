@@ -210,7 +210,7 @@ def mac_clear_system_proxy():
 # ── Cấu hình ────────────────────────────────────────────────────────
 HOTMAIL_API_URL = 'https://tools.dongvanfb.net/api/get_messages_oauth2'
 HOTMAIL_FILE = "data/hotmails.txt"
-PASSWORD    = "capcut123"
+
 CAPCUT_URL  = "https://www.capcut.com/vi-vn/signup"
 OUTPUT_FILE = "data/accounts.txt"
 DOB_YEAR  = "2004"
@@ -307,18 +307,26 @@ def wait_for_otp(email, password, refresh_token, client_id, timeout=120, interva
     log("Hết thời gian chờ OTP!", "ERR")
     return None
 
-def get_rotated_proxy():
-    FALLBACK_PROXY  = {"host": "180.93.2.171", "port": 3131, "user": "kierangrayson226", "pass": "odq0nda0odmzoa=="}
-    # Thử đọc settings từ DB
+def get_settings_from_db():
+    import sqlite3
+    import os
+    db_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "database.db"))
+    settings = {}
     try:
-        import sqlite3
-        import os
-        db_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "database.db"))
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
         cursor.execute("SELECT `key`, `value` FROM settings")
         settings = {row[0]: row[1] for row in cursor.fetchall()}
         conn.close()
+    except Exception:
+        pass
+    return settings
+
+def get_rotated_proxy():
+    FALLBACK_PROXY  = {"host": "180.93.2.171", "port": 3131, "user": "kierangrayson226", "pass": "odq0nda0odmzoa=="}
+    # Thử đọc settings từ DB
+    try:
+        settings = get_settings_from_db()
         
         proxy_type = settings.get("PROXY_TYPE", "proxyquick")
         if proxy_type == "proxyxoay":
@@ -359,7 +367,6 @@ def setup_driver(index=1, keep_open=False, use_api_proxy=True, batch_size=3, use
     options = Options()
     if incognito:
         options.add_argument("--incognito")
-    # Không dùng --incognito: tránh bị CapCut phát hiện và không load được Extension
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-blink-features=AutomationControlled")
@@ -424,6 +431,8 @@ def setup_driver(index=1, keep_open=False, use_api_proxy=True, batch_size=3, use
         ff_options = FirefoxOptions()
         if headless:
             ff_options.add_argument("--headless")
+        if incognito:
+            ff_options.add_argument("-private")
         ff_options.add_argument(f"--width={window_width}")
         ff_options.add_argument(f"--height={window_height}")
         
@@ -1113,13 +1122,15 @@ def api_upgrade_vip(driver):
 
 def step_get_payment_link(driver, email, password):
     import time
-    for attempt in range(2):
+    for attempt in range(5):
         res = _do_get_payment_link(driver, email, password, attempt)
         if res == "TOAST_ERROR":
             log("⚠️ Phát hiện toast lỗi (lv-message-wrapper)! Mở tab mới thử lại liền...", "WARN")
             driver.execute_script("window.open('https://www.capcut.com/vi-vn/login', '_blank');")
             time.sleep(1)
             driver.switch_to.window(driver.window_handles[-1])
+            try: driver.maximize_window()
+            except: pass
             time.sleep(5)
             continue
         return res
@@ -1130,6 +1141,25 @@ def _do_get_payment_link(driver, email, password, attempt=0):
         from selenium.webdriver.common.by import By
         import time
         import os
+
+        payment_url = None
+        def _check_manual_payment(d):
+            try:
+                if "pipopay.com" in d.current_url or "buy.stripe.com" in d.current_url: return d.current_url
+                for iframe in d.find_elements(By.CSS_SELECTOR, "iframe[src*='pipopay.com'], iframe[src*='stripe.com']"):
+                    src = iframe.get_attribute("src")
+                    if src and ("pipopay.com" in src or "stripe.com" in src): return src
+                orig = d.current_window_handle
+                for h in d.window_handles:
+                    if h != orig:
+                        d.switch_to.window(h)
+                        if "pipopay.com" in d.current_url or "buy.stripe.com" in d.current_url:
+                            u = d.current_url
+                            d.switch_to.window(orig)
+                            return u
+                        d.switch_to.window(orig)
+            except: pass
+            return None
 
         if attempt == 0:
             # Reload lại trang để React mount lại sạch, không bị rác popup
@@ -1149,8 +1179,10 @@ def _do_get_payment_link(driver, email, password, attempt=0):
                 driver.execute_script("window.open('https://www.capcut.com/vi-vn/login', '_blank');")
                 time.sleep(3)
                 driver.switch_to.window(driver.window_handles[-1])
+                try: driver.maximize_window()
+                except: pass
                 time.sleep(6)
-                log("✅ Đã mở tab mới, tiếp tục lấy link trên tab sạch...", "INFO")
+                log("✅ Đã mở tab mới và phóng to cửa sổ, tiếp tục lấy link trên tab sạch...", "INFO")
         except Exception as _ban_err:
             pass
 
@@ -1174,6 +1206,11 @@ def _do_get_payment_link(driver, email, password, attempt=0):
         clicked_header = False
         start = time.time()
         while time.time() - start < 20:
+            payment_url = _check_manual_payment(driver)
+            if payment_url:
+                log("Đã phát hiện link thanh toán do click tay!", "OK")
+                clicked_header = True
+                break
             try:
                 upgrade_btns = driver.find_elements(By.CSS_SELECTOR, '[data-id="TitleBarUpgradeVip"] .LvHeaderUpgradeVipNew, .LvHeaderUpgradeVipNew')
                 if not upgrade_btns:
@@ -1200,6 +1237,12 @@ def _do_get_payment_link(driver, email, password, attempt=0):
         clicked_modal = False
         start = time.time()
         while time.time() - start < 20:
+            if not payment_url:
+                payment_url = _check_manual_payment(driver)
+            if payment_url:
+                log("Đã phát hiện link thanh toán do click tay!", "OK")
+                clicked_modal = True
+                break
             try:
                 # CHECK TOAST
                 try:
@@ -1245,9 +1288,8 @@ def _do_get_payment_link(driver, email, password, attempt=0):
             
         # 3. Đợi iframe Pipo (Cashier) xuất hiện hoặc trang chuyển hướng và lấy link src
         log("Đã bấm nâng cấp, đang chờ link thanh toán xuất hiện...", "INFO")
-        payment_url = None
         start = time.time()
-        while time.time() - start < 30:
+        while time.time() - start < 30 and not payment_url:
             try:
                 # CHECK TOAST
                 try:
@@ -1434,7 +1476,7 @@ def retry_get_payment_link_for_acc(email, password, refresh_token, client_id, co
             except: pass
 
 
-def register_one_account(index, join_link=None, keep_open=False, batch_size=3, predefined_proxy=None, headless=False, browser_type="chrome", get_link=False, mail_api_source="dongvanfb"):
+def register_one_account(index, join_link=None, keep_open=False, batch_size=3, predefined_proxy=None, headless=False, browser_type="chrome", get_link=False, mail_api_source="dongvanfb", incognito=False, **kwargs):
     try:
         acc = HOTMAIL_QUEUE.get_nowait()
     except queue.Empty:
@@ -1446,14 +1488,14 @@ def register_one_account(index, join_link=None, keep_open=False, batch_size=3, p
     email_pass = acc["pass"]
     refresh_token = acc["refresh_token"]
     client_id = acc["client_id"]
-    password = PASSWORD
+    password = get_settings_from_db().get("CAPCUT_PASSWORD", "capcut123") or "capcut123"
 
     driver = None
     try:
         max_retries = 3
 
         for attempt in range(max_retries):
-            driver = setup_driver(index, keep_open, use_api_proxy=True, batch_size=batch_size, use_proxy=True, predefined_proxy=predefined_proxy, headless=headless, browser_type=browser_type)
+            driver = setup_driver(index, keep_open, use_api_proxy=True, batch_size=batch_size, use_proxy=True, predefined_proxy=predefined_proxy, incognito=incognito, headless=headless, browser_type=browser_type)
             ACTIVE_DRIVERS.append(driver)
             log(f"[{email}] Bắt đầu mở trình duyệt... (Lần thử {attempt+1})", "INFO")
             
