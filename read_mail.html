@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Hotmail Tool — dongvanfb</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg:       #090c10;
+      --s1:       #0d1117;
+      --s2:       #161b22;
+      --s3:       #21262d;
+      --border:   #30363d;
+      --blue:     #58a6ff;
+      --purple:   #a78bfa;
+      --green:    #3fb950;
+      --red:      #f85149;
+      --yellow:   #e3b341;
+      --text:     #e6edf3;
+      --muted:    #8b949e;
+      --r:        10px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    /* ─── TOP BAR ─── */
+    .topbar {
+      background: var(--s1);
+      border-bottom: 1px solid var(--border);
+      padding: 0 24px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      height: 56px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .logo {
+      font-size: 16px;
+      font-weight: 800;
+      background: linear-gradient(90deg, var(--blue), var(--purple));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      white-space: nowrap;
+    }
+    .topbar-tabs {
+      display: flex;
+      gap: 4px;
+      margin-left: 16px;
+    }
+    .topbar-tab {
+      padding: 6px 16px;
+      border-radius: 6px;
+      border: 1px solid transparent;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      background: transparent;
+      color: var(--muted);
+      font-family: 'Inter', sans-serif;
+      transition: all .15s;
+    }
+    .topbar-tab:hover { color: var(--text); background: var(--s3); }
+    .topbar-tab.active {
+      background: var(--s3);
+      border-color: var(--border);
+      color: var(--text);
+    }
+    .topbar-dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 6px var(--green);
+      flex-shrink: 0;
+      margin-left: auto;
+    }
+    .topbar-status { font-size: 11px; color: var(--muted); }
+
+    /* ─── LAYOUT ─── */
+    .main { max-width: 920px; margin: 0 auto; padding: 28px 16px 60px; }
+
+    /* ─── PANEL ─── */
+    .panel { display: none; }
+    .panel.active { display: block; }
+
+    /* ─── SECTION CARD ─── */
+    .card {
+      background: var(--s2);
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      padding: 20px 22px;
+      margin-bottom: 20px;
+    }
+    .card-head {
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .07em;
+      color: var(--muted);
+      margin-bottom: 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .card-head span { font-size: 15px; }
+
+    /* ─── TEXTAREA ─── */
+    textarea {
+      width: 100%;
+      background: var(--s1);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-family: 'JetBrains Mono', 'Courier New', monospace;
+      font-size: 12.5px;
+      line-height: 1.7;
+      padding: 12px 14px;
+      resize: vertical;
+      min-height: 100px;
+      outline: none;
+      transition: border-color .2s;
+    }
+    textarea::placeholder { color: var(--muted); }
+    textarea:focus { border-color: var(--blue); }
+
+    .hint { font-size: 11px; color: var(--muted); margin-top: 8px; line-height: 1.6; }
+    .hint code { background: var(--s3); padding: 1px 5px; border-radius: 4px; color: var(--purple); }
+
+    /* ─── BUTTONS ─── */
+    .btn-row { display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
+    .btn {
+      padding: 9px 20px;
+      border-radius: 8px;
+      border: none;
+      font-family: 'Inter', sans-serif;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all .15s;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+    }
+    .btn-blue  { background: linear-gradient(135deg, #1f6feb, #388bfd); color: #fff; }
+    .btn-blue:hover { filter: brightness(1.1); transform: translateY(-1px); }
+    .btn-blue:disabled { opacity: .45; cursor: not-allowed; transform: none; filter: none; }
+    .btn-ghost { background: var(--s3); color: var(--text); border: 1px solid var(--border); }
+    .btn-ghost:hover { border-color: var(--blue); color: var(--blue); }
+    .btn-green { background: rgba(63,185,80,.15); color: var(--green); border: 1px solid rgba(63,185,80,.3); }
+    .btn-green:hover { background: rgba(63,185,80,.25); }
+
+    /* ─── PROGRESS ─── */
+    .prog-wrap { margin-bottom: 14px; display: none; }
+    .prog-bar-bg { background: var(--s3); border-radius: 999px; height: 5px; overflow: hidden; margin-bottom: 7px; }
+    .prog-bar { height: 100%; background: linear-gradient(90deg, #1f6feb, var(--purple)); border-radius: 999px; width: 0; transition: width .3s; }
+    .prog-text { font-size: 11px; color: var(--muted); }
+
+    /* ─── APIKEY INPUT ─── */
+    .apikey-row {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      background: var(--s1);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 14px;
+      margin-bottom: 14px;
+    }
+    .apikey-row label { font-size: 12px; color: var(--muted); white-space: nowrap; }
+    .apikey-row input {
+      flex: 1;
+      background: transparent;
+      border: none;
+      outline: none;
+      color: var(--text);
+      font-family: 'Inter', sans-serif;
+      font-size: 13px;
+    }
+    .apikey-row input::placeholder { color: var(--muted); }
+
+    /* ─── RESULT TABLE ─── */
+    .result-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12.5px;
+    }
+    .result-table th {
+      background: var(--s3);
+      padding: 8px 12px;
+      text-align: left;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      color: var(--muted);
+      border-bottom: 1px solid var(--border);
+    }
+    .result-table th:first-child { border-radius: 8px 0 0 0; }
+    .result-table th:last-child  { border-radius: 0 8px 0 0; }
+    .result-table td {
+      padding: 9px 12px;
+      border-bottom: 1px solid rgba(48,54,61,.6);
+      vertical-align: middle;
+      max-width: 0;
+    }
+    .result-table tr:last-child td { border-bottom: none; }
+    .result-table tr:hover td { background: rgba(33,38,45,.5); }
+    .cell-email { font-weight: 500; color: var(--blue); }
+    .cell-token {
+      font-family: monospace;
+      font-size: 11px;
+      color: var(--muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 200px;
+    }
+    .cell-status .badge {
+      font-size: 10px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 999px;
+      white-space: nowrap;
+    }
+    .badge-ok  { background: rgba(63,185,80,.15);  color: var(--green);  border: 1px solid rgba(63,185,80,.3); }
+    .badge-err { background: rgba(248,81,73,.12);  color: var(--red);    border: 1px solid rgba(248,81,73,.3); }
+    .badge-wait { background: rgba(88,166,255,.1); color: var(--blue);   border: 1px solid rgba(88,166,255,.2); }
+    .btn-copy {
+      font-size: 11px; padding: 3px 10px;
+      border-radius: 5px; border: 1px solid var(--border);
+      background: var(--s3); color: var(--muted);
+      cursor: pointer; font-family: 'Inter', sans-serif;
+      transition: all .15s; white-space: nowrap;
+    }
+    .btn-copy:hover { border-color: var(--blue); color: var(--blue); }
+    .btn-copy.copied { border-color: var(--green); color: var(--green); }
+
+    /* ─── MAIL RESULTS ─── */
+    .account-block {
+      background: var(--s2);
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      margin-bottom: 16px;
+      overflow: hidden;
+      animation: fadeUp .25s ease;
+    }
+    @keyframes fadeUp { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:none; } }
+
+    .acct-header {
+      padding: 12px 18px;
+      background: var(--s3);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .acct-email { font-weight: 600; font-size: 13px; color: var(--blue); flex: 1; word-break: break-all; }
+    .acct-count { font-size: 11px; color: var(--muted); }
+
+    .mail-item { border-bottom: 1px solid rgba(48,54,61,.7); }
+    .mail-item:last-child { border-bottom: none; }
+    .mail-summary {
+      padding: 11px 18px; cursor: pointer;
+      display: grid; grid-template-columns: 1fr auto; gap: 3px 12px;
+      transition: background .12s;
+    }
+    .mail-summary:hover { background: rgba(33,38,45,.6); }
+    .mail-subj { font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .mail-date { font-size: 11px; color: var(--muted); white-space: nowrap; grid-row: 1; }
+    .mail-from { font-size: 11px; color: var(--muted); grid-column: 1; }
+    .mail-code-pill {
+      display: inline-block;
+      background: rgba(227,179,65,.12);
+      color: var(--yellow);
+      border: 1px solid rgba(227,179,65,.3);
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 1px 8px;
+      margin-top: 3px;
+      letter-spacing: .08em;
+    }
+
+    .mail-body-wrap { display: none; border-top: 1px solid var(--border); background: var(--bg); }
+    .mail-body-wrap.open { display: block; }
+    .mail-tabs {
+      padding: 8px 16px; display: flex; gap: 6px;
+      border-bottom: 1px solid var(--border); background: var(--s2);
+    }
+    .mail-tab {
+      font-size: 11px; font-weight: 600; padding: 4px 10px;
+      border-radius: 5px; border: 1px solid transparent;
+      cursor: pointer; background: transparent; color: var(--muted);
+      font-family: 'Inter', sans-serif;
+    }
+    .mail-tab.active { background: var(--s3); border-color: var(--border); color: var(--text); }
+    .mail-content { padding: 14px 16px; max-height: 460px; overflow-y: auto; }
+    .iframe-box { background: #fff; border-radius: 7px; overflow: hidden; height: 420px; }
+    .iframe-box iframe { width: 100%; height: 100%; border: none; }
+    .raw-txt { font-family: monospace; font-size: 11px; white-space: pre-wrap; color: var(--muted); word-break: break-all; }
+
+    .err-msg { padding: 14px 18px; font-size: 12px; color: var(--red); }
+    .empty-msg { padding: 18px; text-align: center; color: var(--muted); font-size: 13px; }
+
+    /* ─── SUMMARY BAR (tab 2) ─── */
+    .summary-bar {
+      display: flex; gap: 12px; flex-wrap: wrap;
+      padding: 12px 16px;
+      background: var(--s2); border: 1px solid var(--border);
+      border-radius: var(--r); margin-bottom: 16px;
+      font-size: 12px;
+    }
+    .stat { display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 56px; }
+    .stat-num { font-size: 20px; font-weight: 800; line-height: 1; }
+    .stat-lbl { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+    .num-blue { color: var(--blue); }
+    .num-green { color: var(--green); }
+    .num-red { color: var(--red); }
+
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: var(--s2); }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 999px; }
+  </style>
+</head>
+<body>
+
+<!-- TOP BAR -->
+<div class="topbar">
+  <div class="logo">&#128300; Hotmail Tool</div>
+  <div class="topbar-tabs">
+    <button class="topbar-tab active" onclick="switchPanel('oauth2')">&#128273; Lay OAuth2</button>
+    <button class="topbar-tab" onclick="switchPanel('mail')">&#128231; Doc Mail</button>
+  </div>
+  <div style="margin-left:auto;display:flex;align-items:center;gap:8px;">
+    <div class="topbar-dot" id="serverDot"></div>
+    <span class="topbar-status" id="serverStatus">Proxy: localhost:3000</span>
+  </div>
+</div>
+
+<div class="main">
+
+  <!-- ══════════════════════════════════════════
+       PANEL 1 : LAY OAUTH2
+  ══════════════════════════════════════════ -->
+  <div class="panel active" id="panel-oauth2">
+
+    <div class="card">
+      <div class="card-head"><span>&#128273;</span> Lay OAuth2 Token</div>
+
+      <!-- API Key -->
+      <div class="apikey-row">
+        <label>API Key:</label>
+        <input type="text" id="apikeyInput" placeholder="Nhap API key cua dongvanfb.net..." />
+      </div>
+
+      <!-- Input -->
+      <textarea id="oauth2Input" rows="6" placeholder="Moi dong mot tai khoan:
+email|password
+
+Vi du:
+HamptonMetcalfe425946@outlook.com|zytsj801419
+pisangbredna67@hotmail.com|taV0kK70"></textarea>
+      <div class="hint">
+        Dinh dang: <code>email|password</code> — moi tai khoan mot dong<br>
+        API Key lay tai: <code>dongvanfb.net</code>
+      </div>
+
+      <div class="btn-row">
+        <button class="btn btn-blue" id="btnGetOauth" onclick="startGetOauth2()">&#9654; Lay OAuth2</button>
+        <button class="btn btn-ghost" onclick="clearOauth2()">&#128465; Xoa</button>
+        <button class="btn btn-ghost" onclick="pasteClipboard('oauth2Input')">&#128203; Dan</button>
+        <button class="btn btn-green" id="btnUseInMail" style="display:none" onclick="sendToMail()">&#128231; Dung de Doc Mail &#8594;</button>
+      </div>
+    </div>
+
+    <!-- Progress -->
+    <div class="prog-wrap" id="prog-oauth2">
+      <div class="prog-bar-bg"><div class="prog-bar" id="progBar-oauth2"></div></div>
+      <div class="prog-text" id="progText-oauth2"></div>
+    </div>
+
+    <!-- Result Table -->
+    <div class="card" id="oauth2ResultCard" style="display:none;padding:0;overflow:hidden;">
+      <table class="result-table" id="oauth2Table">
+        <thead>
+          <tr>
+            <th style="width:200px">Email</th>
+            <th>OAuth2 (refresh_token)</th>
+            <th style="width:80px">Client ID</th>
+            <th style="width:70px">Status</th>
+            <th style="width:60px"></th>
+          </tr>
+        </thead>
+        <tbody id="oauth2Tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════
+       PANEL 2 : DOC MAIL
+  ══════════════════════════════════════════ -->
+  <div class="panel" id="panel-mail">
+
+    <div class="card">
+      <div class="card-head"><span>&#128231;</span> Doc Mail Outlook</div>
+      <textarea id="mailInput" rows="6" placeholder="Moi dong mot tai khoan:
+email|password|refresh_token|client_id
+
+Vi du:
+HamptonMetcalfe425946@outlook.com|zytsj801419|M.C532_BAY...|9e5f94bc-..."></textarea>
+      <div class="hint">
+        Dinh dang: <code>email|password|refresh_token|client_id</code><br>
+        Hoac dung Tab &quot;Lay OAuth2&quot; de tu dong lay token roi bam <strong>Doc Mail</strong>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-blue" id="btnReadMail" onclick="startReadMail()">&#9654; Doc Mail</button>
+        <button class="btn btn-ghost" onclick="clearMail()">&#128465; Xoa</button>
+        <button class="btn btn-ghost" onclick="pasteClipboard('mailInput')">&#128203; Dan</button>
+      </div>
+    </div>
+
+    <!-- Progress -->
+    <div class="prog-wrap" id="prog-mail">
+      <div class="prog-bar-bg"><div class="prog-bar" id="progBar-mail"></div></div>
+      <div class="prog-text" id="progText-mail"></div>
+    </div>
+
+    <!-- Stats -->
+    <div class="summary-bar" id="mailStats" style="display:none">
+      <div class="stat"><div class="stat-num num-blue" id="stat-total">0</div><div class="stat-lbl">Tai khoan</div></div>
+      <div class="stat"><div class="stat-num num-green" id="stat-ok">0</div><div class="stat-lbl">Thanh cong</div></div>
+      <div class="stat"><div class="stat-num num-red" id="stat-err">0</div><div class="stat-lbl">Loi</div></div>
+      <div class="stat"><div class="stat-num num-blue" id="stat-msgs">0</div><div class="stat-lbl">Tong mail</div></div>
+    </div>
+
+    <!-- Mail result blocks -->
+    <div id="mailResults"></div>
+  </div>
+
+</div>
+
+<script src="read_mail.js"></script>
+</body>
+</html>

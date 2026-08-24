@@ -1,0 +1,8 @@
+=====================================================
+Vui lòng tự thao tác trên trình duyệt đang mở:
+1. Click Continue with email
+2. Click Sign up
+3. Nhập 1 email (có thể gõ bừa email) và password
+4. Nhấn Continue để tới màn hình nhập OTP
+=====================================================
+SAU KHI ĐÃ TỚI MÀN HÌNH OTP, HÃY NHẤN ENTER TẠI ĐÂY...

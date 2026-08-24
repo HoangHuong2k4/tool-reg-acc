@@ -49,6 +49,16 @@ def setup_db_if_not_exists():
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS mail_lists (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                mail_type TEXT DEFAULT 'hotmail',
+                content TEXT NOT NULL,
+                item_count INTEGER DEFAULT 0,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
         try:
             conn.execute("ALTER TABLE accounts ADD COLUMN twofa TEXT")
         except sqlite3.OperationalError:
@@ -65,7 +75,8 @@ def setup_db_if_not_exists():
             "PROXY_MERCHANT": "a20f20d6-9512-40fd-9a12-eeff809fdaeb",
             "PROXY_ID": "953319",
             "PROXYXOAY_KEY": "",
-            "CAPCUT_PASSWORD": "capcut123"
+            "CAPCUT_PASSWORD": "capcut123",
+            "GPM_API_URL": "http://127.0.0.1:19995"
         }
         for k, v in default_settings.items():
             conn.execute("INSERT OR IGNORE INTO settings (`key`, `value`) VALUES (?, ?)", (k, v))
@@ -80,7 +91,8 @@ def load_settings():
         "PROXY_MERCHANT": "",
         "PROXY_ID": "",
         "PROXYXOAY_KEY": "",
-        "CAPCUT_PASSWORD": "capcut123"
+        "CAPCUT_PASSWORD": "capcut123",
+        "GPM_API_URL": "http://127.0.0.1:19995"
     }
     try:
         with get_db() as conn:
@@ -127,6 +139,8 @@ class BotState:
 state_capcut = BotState("CapCut")
 state_higgsfield = BotState("Higgsfield")
 state_gpt = BotState("GPT")
+state_gpm = BotState("GPM")
+state_dreamina = BotState("Dreamina")
 
 def patched_get_proxy():
     print(f"[Proxy] Dùng proxy: {PROXY_HOST}:{PROXY_PORT}")
@@ -392,7 +406,7 @@ def capcut_task_start():
     threads = int(data.get("threads", 1))
     join_link = data.get("join_link", "")
     mail_type = data.get("mail_type", "hotmail")
-    mail_api_source = data.get("mail_api_source", "dongvanfb")
+    mail_api_source = data.get("mail_api_source", "mixmmo")
     browser_type = data.get("browser_type", "chrome")
     headless = bool(data.get("headless", False))
     incognito = bool(data.get("incognito", False))
@@ -535,7 +549,7 @@ def retry_links_start():
     browser_type = data.get("browser_type", "chrome")
     headless = bool(data.get("headless", False))
     incognito = bool(data.get("incognito", False))
-    mail_api_source = data.get("mail_api_source", "dongvanfb")
+    mail_api_source = data.get("mail_api_source", "mixmmo")
     threads = int(data.get("threads", 2))
 
     # Check count before starting
@@ -1108,6 +1122,441 @@ def _run_gpt_task(count, threads, mail_type, check_momo=True):
         state_gpt.log_queue.put(json.dumps({"type": "done", "ok": 0, "fail": 0}))
     finally:
         state_gpt.is_running = False
+
+# ─── GPM API & AUTOMATION ─────────────────────────────────────────────────────
+@app.route("/api/gpm/profiles")
+def gpm_profiles():
+    api_url = request.args.get("api_url") or load_settings().get("GPM_API_URL", "http://127.0.0.1:19995")
+    from src.bots.capcut_gpm import GpmClient
+    client = GpmClient(api_url)
+    res = client.list_profiles()
+    return jsonify(res)
+
+@app.route("/api/gpm/profile/create", methods=["POST"])
+def gpm_profile_create():
+    data = request.json or {}
+    name = data.get("name", "").strip() or f"CapCut_{datetime.now().strftime('%H%M%S')}"
+    group_id = data.get("group_id", "").strip()
+    raw_proxy = data.get("raw_proxy", "").strip()
+    api_url = data.get("api_url") or load_settings().get("GPM_API_URL", "http://127.0.0.1:19995")
+    from src.bots.capcut_gpm import GpmClient
+    client = GpmClient(api_url)
+    res = client.create_profile(name, group_id=group_id, raw_proxy=raw_proxy)
+    return jsonify(res)
+
+@app.route("/api/gpm/profile/start", methods=["POST"])
+def gpm_profile_start():
+    data = request.json or {}
+    profile_id = data.get("profile_id", "").strip()
+    api_url = data.get("api_url") or load_settings().get("GPM_API_URL", "http://127.0.0.1:19995")
+    if not profile_id:
+        return jsonify({"success": False, "error": "Chưa chọn profile ID"})
+    from src.bots.capcut_gpm import GpmClient
+    client = GpmClient(api_url)
+    res = client.start_profile(profile_id)
+    return jsonify(res)
+
+@app.route("/api/gpm/profile/stop", methods=["POST"])
+def gpm_profile_stop():
+    data = request.json or {}
+    profile_id = data.get("profile_id", "").strip()
+    api_url = data.get("api_url") or load_settings().get("GPM_API_URL", "http://127.0.0.1:19995")
+    if not profile_id:
+        return jsonify({"success": False, "error": "Chưa chọn profile ID"})
+    from src.bots.capcut_gpm import GpmClient
+    client = GpmClient(api_url)
+    res = client.close_profile(profile_id)
+    return jsonify(res)
+
+@app.route("/api/gpm/status")
+def gpm_status():
+    return jsonify({"is_running": state_gpm.is_running})
+
+@app.route("/api/gpm/task/start", methods=["POST"])
+def gpm_task_start():
+    if state_gpm.is_running:
+        return jsonify({"success": False, "error": "Đang chạy task GPM khác rồi!"})
+    data = request.json or {}
+    raw_pids = data.get("profile_ids", [])
+    if isinstance(raw_pids, str):
+        profile_ids = [p.strip() for p in raw_pids.replace(",", "\n").splitlines() if p.strip()]
+    else:
+        profile_ids = [str(p).strip() for p in raw_pids if str(p).strip()]
+
+    if not profile_ids:
+        return jsonify({"success": False, "error": "Vui lòng chọn hoặc nhập ít nhất 1 GPM Profile ID!"})
+
+    threads = int(data.get("threads", 1))
+    mail_type = data.get("mail_type", "hotmail")
+    mail_api_source = data.get("mail_api_source", "mixmmo")
+    mode = int(data.get("mode", 1))
+    join_link = data.get("join_link", "")
+    gpm_api_url = data.get("gpm_api_url") or load_settings().get("GPM_API_URL", "http://127.0.0.1:19995")
+
+    state_gpm.task_stop.clear()
+    while not state_gpm.log_queue.empty():
+        try: state_gpm.log_queue.get_nowait()
+        except: break
+
+    try:
+        with get_db() as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT MAX(id) as max_id FROM accounts WHERE app IN ('capcut', 'capcut_gpm')")
+            row = cursor.fetchone()
+            state_gpm.last_start_id = row['max_id'] if row and row['max_id'] else 0
+    except Exception:
+        pass
+
+    state_gpm.is_running = True
+    state_gpm.task_thread = threading.Thread(
+        target=_run_gpm_task,
+        args=(profile_ids, threads, mail_type, mail_api_source, mode, join_link, gpm_api_url),
+        daemon=True
+    )
+    state_gpm.task_thread.start()
+    return jsonify({"success": True, "count": len(profile_ids)})
+
+@app.route("/api/gpm/task/stop", methods=["POST"])
+def gpm_task_stop():
+    state_gpm.task_stop.set()
+    if hasattr(state_gpm.module, "ACTIVE_DRIVERS"):
+        for d in state_gpm.module.ACTIVE_DRIVERS:
+            try: d.quit()
+            except: pass
+        state_gpm.module.ACTIVE_DRIVERS.clear()
+    return jsonify({"success": True})
+
+@app.route("/api/gpm/task/stream")
+def gpm_task_stream():
+    def generate():
+        yield f"data: {json.dumps({'type':'log','level':'INFO','time':datetime.now().strftime('%H:%M:%S'),'msg':'🔗 Kết nối log stream GPM...'})}\n\n"
+        while True:
+            try:
+                msg = state_gpm.log_queue.get(timeout=25)
+                yield f"data: {msg}\n\n"
+            except queue.Empty:
+                yield f"data: {json.dumps({'type':'ping'})}\n\n"
+    return Response(stream_with_context(generate()), mimetype="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+def _run_gpm_task(profile_ids, threads, mail_type, mail_api_source, mode, join_link, gpm_api_url):
+    import importlib
+    try:
+        state_gpm.module = importlib.import_module("src.bots.capcut_gpm")
+        bot = state_gpm.module
+        bot.log = state_gpm.log
+        bot.GLOBAL_STOP_EVENT = state_gpm.task_stop
+
+        def gpm_save_db(uid, email, password, *args, **kwargs):
+            jl = args[0] if len(args) > 0 else kwargs.get("join_link", "")
+            msToken = args[1] if len(args) > 1 else kwargs.get("msToken", "")
+            try:
+                with get_db() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("INSERT INTO accounts (app, uid, email, password, join_link, ms_token) VALUES (?, ?, ?, ?, ?, ?)", 
+                                   ("capcut_gpm", uid, email, password, jl, msToken))
+                    conn.commit()
+            except Exception as e:
+                state_gpm.log(f"Lỗi lưu DB: {e}", "ERR")
+
+        if mail_type == "hotmail":
+            import src.bots.capcut_hotmail as ch
+            ch.load_hotmails_to_queue(limit=len(profile_ids))
+
+        res = bot.register_gpm_multiple(
+            profile_ids=profile_ids,
+            threads=threads,
+            mail_type=mail_type,
+            mode=mode,
+            join_link=join_link,
+            mail_api_source=mail_api_source,
+            gpm_api_url=gpm_api_url,
+            get_link=(mode == 3)
+        )
+
+        state_gpm.log_queue.put(json.dumps({"type": "done", "ok": res["ok"], "fail": res["fail"]}))
+    except Exception as e:
+        state_gpm.log(f"Lỗi GPM Task: {e}", "ERR")
+        state_gpm.log_queue.put(json.dumps({"type": "done", "ok": 0, "fail": 0}))
+    finally:
+        state_gpm.is_running = False
+
+@app.route("/api/gpm/accounts")
+def gpm_accounts():
+    accounts = []
+    session_only = request.args.get('session', 'false').lower() == 'true'
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            if session_only:
+                cursor.execute("SELECT id, uid, email, password, join_link FROM accounts WHERE app IN ('capcut_gpm', 'capcut') AND id > ? ORDER BY id ASC", (state_gpm.last_start_id,))
+            else:
+                cursor.execute("SELECT id, uid, email, password, join_link FROM accounts WHERE app IN ('capcut_gpm', 'capcut') ORDER BY id ASC")
+            accounts = cursor.fetchall()
+    except Exception as e:
+        print("Lỗi get gpm accounts:", e)
+    return jsonify({"accounts": accounts})
+
+@app.route("/api/gpm/accounts/clear", methods=["POST"])
+def gpm_accounts_clear():
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM accounts WHERE app='capcut_gpm'")
+            conn.commit()
+    except Exception:
+        pass
+    return jsonify({"success": True})
+
+# ─── MAIL LIST PERSISTENCE API ──────────────────────────────────────────────────
+@app.route("/api/maillists", methods=["GET"])
+def maillists_get():
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT id, title, mail_type, content, item_count, created_at FROM mail_lists ORDER BY id DESC")
+            rows = cursor.fetchall()
+            lists = [dict(r) for r in rows]
+            return jsonify({"success": True, "data": lists})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+@app.route("/api/maillists", methods=["POST"])
+def maillists_save():
+    data = request.json or {}
+    title = data.get("title", "").strip() or f"Mail List {datetime.now().strftime('%d/%m %H:%M')}"
+    mail_type = data.get("mail_type", "hotmail")
+    content = data.get("content", "").strip()
+    if not content:
+        return jsonify({"success": False, "error": "Nội dung danh sách trống!"})
+    lines = [l.strip() for l in content.splitlines() if l.strip()]
+    item_count = len(lines)
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("INSERT INTO mail_lists (title, mail_type, content, item_count) VALUES (?, ?, ?, ?)",
+                           (title, mail_type, content, item_count))
+            conn.commit()
+            return jsonify({"success": True, "id": cursor.lastrowid, "message": "Lưu danh sách mail thành công!"})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+@app.route("/api/maillists/<int:list_id>", methods=["DELETE"])
+def maillists_delete(list_id):
+    try:
+        with get_db() as conn:
+            conn.execute("DELETE FROM mail_lists WHERE id = ?", (list_id,))
+            conn.commit()
+            return jsonify({"success": True, "message": "Đã xóa danh sách mail!"})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+
+# ─── DREAMINA API ────────────────────────────────────────────────────────────
+@app.route("/api/dreamina/accounts")
+def dreamina_accounts():
+    accounts = []
+    session_only = request.args.get('session', 'false').lower() == 'true'
+    try:
+        with get_db() as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            if session_only:
+                cursor.execute("SELECT email, password FROM accounts WHERE app='dreamina' AND id > ? ORDER BY id ASC", (state_dreamina.last_start_id,))
+            else:
+                cursor.execute("SELECT email, password FROM accounts WHERE app='dreamina' ORDER BY id ASC")
+            accounts = [dict(row) for row in cursor.fetchall()]
+    except Exception:
+        pass
+    return jsonify({"accounts": accounts})
+
+@app.route("/api/dreamina/accounts/raw")
+def dreamina_accounts_raw():
+    text = ""
+    session_only = request.args.get('session', 'false').lower() == 'true'
+    try:
+        with get_db() as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            if session_only:
+                cursor.execute("SELECT email, password FROM accounts WHERE app='dreamina' AND id > ? ORDER BY id ASC", (state_dreamina.last_start_id,))
+            else:
+                cursor.execute("SELECT email, password FROM accounts WHERE app='dreamina' ORDER BY id ASC")
+            for row in cursor.fetchall():
+                text += f"{row['email']}\t{row['password']}\n"
+    except Exception:
+        pass
+    return text, 200, {"Content-Type": "text/plain; charset=utf-8"}
+
+@app.route("/api/dreamina/accounts/raw_ep")
+def dreamina_accounts_raw_ep():
+    text = ""
+    session_only = request.args.get('session', 'false').lower() == 'true'
+    try:
+        with get_db() as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            if session_only:
+                cursor.execute("SELECT email, password FROM accounts WHERE app='dreamina' AND id > ? ORDER BY id ASC", (state_dreamina.last_start_id,))
+            else:
+                cursor.execute("SELECT email, password FROM accounts WHERE app='dreamina' ORDER BY id ASC")
+            for row in cursor.fetchall():
+                text += f"{row['email']}|{row['password']}\n"
+    except Exception:
+        pass
+    return text, 200, {"Content-Type": "text/plain; charset=utf-8"}
+
+@app.route("/api/dreamina/accounts/clear", methods=["POST"])
+def dreamina_accounts_clear():
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM accounts WHERE app='dreamina'")
+            conn.commit()
+    except Exception:
+        pass
+    return jsonify({"success": True})
+
+@app.route("/api/dreamina/hotmail/count")
+def dreamina_hotmail_count():
+    count = 0
+    if os.path.exists(CAPCUT_HOTMAIL_FILE):
+        with open(CAPCUT_HOTMAIL_FILE, "r", encoding="utf-8") as f:
+            count = sum(1 for l in f if l.strip() and "|" in l)
+    return jsonify({"count": count})
+
+@app.route("/api/dreamina/hotmail/upload", methods=["POST"])
+def dreamina_hotmail_upload():
+    f = request.files.get("file")
+    if not f: return jsonify({"error": "No file"}), 400
+    lines = [l.strip() for l in f.read().decode("utf-8").splitlines() if l.strip()]
+    with open(CAPCUT_HOTMAIL_FILE, "w", encoding="utf-8") as fp:
+        fp.write("\n".join(lines) + "\n")
+    valid_count = sum(1 for l in lines if "|" in l)
+    return jsonify({"count": valid_count})
+
+@app.route("/api/dreamina/status")
+def dreamina_status():
+    return jsonify({"is_running": state_dreamina.is_running})
+
+@app.route("/api/dreamina/task/start", methods=["POST"])
+def dreamina_task_start():
+    if state_dreamina.is_running:
+        return jsonify({"success": False, "error": "Đang chạy rồi!"})
+    data = request.json or {}
+    count = int(data.get("count", 1))
+    threads = int(data.get("threads", 1))
+    headless = bool(data.get("headless", False))
+    browser_type = data.get("browser_type", "chrome")
+    mail_api_source = data.get("mail_api_source", "mixmmo")
+
+    state_dreamina.task_stop.clear()
+    while not state_dreamina.log_queue.empty():
+        try: state_dreamina.log_queue.get_nowait()
+        except: break
+
+    try:
+        with get_db() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT MAX(id) FROM accounts WHERE app='dreamina'")
+            row = cur.fetchone()
+            state_dreamina.last_start_id = row[0] if row and row[0] else 0
+    except:
+        state_dreamina.last_start_id = 0
+
+    state_dreamina.is_running = True
+    state_dreamina.task_thread = threading.Thread(
+        target=_run_dreamina_task,
+        args=(count, threads, browser_type, headless, mail_api_source),
+        daemon=True
+    )
+    state_dreamina.task_thread.start()
+    return jsonify({"success": True})
+
+@app.route("/api/dreamina/task/stop", methods=["POST"])
+def dreamina_task_stop():
+    state_dreamina.task_stop.set()
+    dreamina_close_browsers()
+    return jsonify({"success": True})
+
+@app.route("/api/dreamina/task/close_browsers", methods=["POST"])
+def dreamina_close_browsers():
+    if state_dreamina.module and hasattr(state_dreamina.module, "ACTIVE_DRIVERS"):
+        for d in state_dreamina.module.ACTIVE_DRIVERS:
+            try: d.quit()
+            except: pass
+        state_dreamina.module.ACTIVE_DRIVERS.clear()
+    return jsonify({"success": True})
+
+@app.route("/api/dreamina/task/stream")
+def dreamina_task_stream():
+    def generate():
+        yield f"data: {json.dumps({'type':'log','level':'INFO','time':datetime.now().strftime('%H:%M:%S'),'msg':'Ket noi log stream Dreamina...'})}\n\n"
+        while True:
+            try:
+                msg = state_dreamina.log_queue.get(timeout=25)
+                yield f"data: {msg}\n\n"
+            except queue.Empty:
+                yield f"data: {json.dumps({'type':'ping'})}\n\n"
+    return Response(stream_with_context(generate()), mimetype="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+def _run_dreamina_task(count, threads, browser_type, headless, mail_api_source):
+    import importlib
+    try:
+        root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+        if root_dir not in sys.path:
+            sys.path.insert(0, root_dir)
+
+        state_dreamina.module = importlib.import_module("src.bots.dreamina_hotmail")
+        bot = state_dreamina.module
+        bot.log = state_dreamina.log
+        bot.get_rotated_proxy = patched_get_proxy
+        bot.GLOBAL_STOP_EVENT = state_dreamina.task_stop
+
+        # Patch save_account to use DB
+        def dreamina_save_db(email, password):
+            try:
+                with get_db() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("INSERT INTO accounts (app, uid, email, password) VALUES (?, '', ?, ?)",
+                                   ("dreamina", email, password))
+                    conn.commit()
+                state_dreamina.log_queue.put(json.dumps({"type": "account", "email": email, "password": password}))
+            except Exception as e:
+                state_dreamina.log(f"Lỗi lưu DB: {e}", "ERR")
+
+        bot.save_account = dreamina_save_db
+
+        bot.load_hotmails_to_queue(limit=count)
+
+        done = {"ok": 0, "fail": 0}
+        def worker(i):
+            time.sleep((i % threads) * 2.5)
+            while not bot.HOTMAIL_QUEUE.empty() and not state_dreamina.task_stop.is_set():
+                res = bot.register_one_account(i, keep_open=False, batch_size=threads,
+                                               use_proxy=True, headless=headless,
+                                               browser_type=browser_type,
+                                               mail_api_source=mail_api_source)
+                state_dreamina.log_queue.put(json.dumps({"type": "result", "success": bool(res)}))
+                if res: done["ok"] += 1
+                else: done["fail"] += 1
+
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as ex:
+            futures = [ex.submit(worker, idx+1) for idx in range(threads)]
+            concurrent.futures.wait(futures)
+
+        if state_dreamina.task_stop.is_set():
+            state_dreamina.log_queue.put(json.dumps({"type": "stopped"}))
+        else:
+            state_dreamina.log(f"✅ Xong! {done['ok']} thành công / {done['fail']} thất bại", "OK")
+            state_dreamina.log_queue.put(json.dumps({"type": "done", "ok": done["ok"], "fail": done["fail"]}))
+    except Exception as e:
+        state_dreamina.log(f"Lỗi task Dreamina: {type(e).__name__}: {e}", "ERR")
+        state_dreamina.log_queue.put(json.dumps({"type": "done", "ok": 0, "fail": 0}))
+    finally:
+        state_dreamina.is_running = False
 
 def _auto_proxy_rotator():
     import time

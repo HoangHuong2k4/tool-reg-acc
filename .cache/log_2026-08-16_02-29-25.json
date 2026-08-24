@@ -1,0 +1,14 @@
+{
+  "email": "ZelaSwan2760@outlook.com",
+  "success": true,
+  "timestamp": "2026-08-16_02-29-25",
+  "results": {
+    "init": {
+      "status": 200,
+      "ok": true
+    },
+    "image": {
+      "status": 200
+    }
+  }
+}

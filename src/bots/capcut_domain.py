@@ -677,7 +677,7 @@ def step3_enter_birthday(driver):
     # Chờ màn hình ngày sinh
     wait_for_element(driver, By.CSS_SELECTOR,
         '.lv_sign_in_panel_wide-birthday-detail, .gate_birthday-picker', timeout=20)
-    time.sleep(0.5)
+    time.sleep(0.1)
 
     # Nhập Năm
     try:
@@ -685,7 +685,7 @@ def step3_enter_birthday(driver):
             '.gate_birthday-picker-input, input[placeholder="Năm"]')
         set_react_input(driver, year_input, DOB_YEAR)
         log(f"Đã nhập năm: {DOB_YEAR}", "OK")
-        time.sleep(0.5)
+        time.sleep(0.1)
     except Exception as e:
         log(f"Không tìm thấy ô nhập năm: {e}", "WARN")
 
@@ -695,7 +695,7 @@ def step3_enter_birthday(driver):
         if selectors:
             month_sel = selectors[0]
             try_click(driver, month_sel, "Month dropdown")
-            time.sleep(0.8)
+            time.sleep(0.2)
 
             # Tìm option Tháng 12
             options = driver.find_elements(By.CSS_SELECTOR,
@@ -713,7 +713,7 @@ def step3_enter_birthday(driver):
                 visible_opts = [o for o in options if o.is_displayed()]
                 if len(visible_opts) >= 12:
                     try_click(driver, visible_opts[11], "Tháng 12 (index)")
-            time.sleep(0.5)
+            time.sleep(0.1)
     except Exception as e:
         log(f"Lỗi chọn tháng: {e}", "WARN")
 
@@ -723,7 +723,7 @@ def step3_enter_birthday(driver):
         if len(selectors) >= 2:
             day_sel = selectors[1]
             try_click(driver, day_sel, "Day dropdown")
-            time.sleep(0.8)
+            time.sleep(0.2)
 
             options = driver.find_elements(By.CSS_SELECTOR,
                 '.lv-select-option, [role="option"], .lv-select-item')
@@ -739,12 +739,12 @@ def step3_enter_birthday(driver):
                 visible_opts = [o for o in options if o.is_displayed()]
                 if len(visible_opts) >= 12:
                     try_click(driver, visible_opts[11], "Ngày 12 (index)")
-            time.sleep(0.5)
+            time.sleep(0.1)
     except Exception as e:
         log(f"Lỗi chọn ngày: {e}", "WARN")
 
     # Bấm Tiếp theo
-    time.sleep(0.5)
+    time.sleep(0.2)
     try:
         next_btn = driver.find_element(By.CSS_SELECTOR,
             '.lv_sign_in_panel_wide-birthday-next, .lv_sign_in_panel_wide-primary-button')
@@ -807,6 +807,8 @@ def step4_enter_otp(driver, email):
         except Exception as e2:
             log(f"Fallback OTP cũng lỗi: {e2}", "ERR")
         return False
+
+step4_enter_otp_domain = step4_enter_otp
 
 def step5_open_capcut(driver):
     """Bước 5: Bấm 'Mở CapCut' để hoàn tất (bỏ qua join team)"""

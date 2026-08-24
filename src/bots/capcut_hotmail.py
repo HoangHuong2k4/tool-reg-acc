@@ -260,16 +260,27 @@ def log(msg, level="INFO"):
 
 GLOBAL_STOP_EVENT = None
 
-def wait_for_otp(email, password, refresh_token, client_id, timeout=120, interval=4, after_ts=0, mail_api_source="dongvanfb"):
+def wait_for_otp(email, password, refresh_token, client_id, timeout=120, interval=4, after_ts=0, mail_api_source="mixmmo"):
     api_url = HOTMAIL_API_URL if mail_api_source == "dongvanfb" else "https://mixmmo.com/api/get-hotmail-messages.php"
     log(f"Đang chờ OTP cho {email} qua {mail_api_source.upper()} API (tối đa {timeout}s)...", "INFO")
-    headers = {"Content-Type": "application/json"}
-    payload = {
-        "email": email,
-        "pass": password,
-        "refresh_token": refresh_token,
-        "client_id": client_id,
-    }
+    
+    if mail_api_source == "dongvanfb":
+        headers = {"Content-Type": "application/json"}
+        payload = {
+            "email": email,
+            "pass": password,
+            "refresh_token": refresh_token,
+            "client_id": client_id,
+        }
+    else:
+        headers = {"Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"}
+        payload = {
+            "action": "get_hotmail_messages",
+            "account": f"{email}|{password}|{refresh_token}|{client_id}",
+            "mode": "oauth",
+            "folder": "inbox",
+            "start_timestamp": "0"
+        }
     
     elapsed = 0
     while elapsed < timeout:
@@ -277,18 +288,28 @@ def wait_for_otp(email, password, refresh_token, client_id, timeout=120, interva
             log("Task bị dừng bởi người dùng, thoát chờ OTP!", "WARN")
             return None
         try:
-            resp = requests.post(api_url, headers=headers, json=payload, timeout=20)
+            if mail_api_source == "dongvanfb":
+                resp = requests.post(api_url, headers=headers, json=payload, timeout=60)
+            else:
+                resp = requests.post(api_url, headers=headers, data=payload, timeout=60)
+                
             data = resp.json()
             
-            if data.get("status"):
+            if data.get("status") or data.get("success"):
                 if data.get("messages"):
                     for msg in data["messages"]:
+                        otp = msg.get("code", "").strip()
+                        if otp and otp.isdigit() and len(otp) == 6:
+                            log(f"Nhận được OTP: {C.BOLD}{otp}{C.RST}", "OK")
+                            return otp
+                            
                         subject = msg.get("subject", "")
                         message = msg.get("message", "")
+                        bodyText = msg.get("bodyText", "")
                         
                         clean_message = re.sub(r'<style[^>]*>.*?</style>', ' ', message, flags=re.IGNORECASE)
                         clean_message = re.sub(r'<[^>]+>', ' ', clean_message)
-                        text_to_search = subject + " " + clean_message
+                        text_to_search = subject + " " + clean_message + " " + bodyText
                         
                         match = re.search(r'\b(\d{6})\b', text_to_search)
                         if match:
@@ -709,7 +730,7 @@ def step3_enter_birthday(driver):
                 log("Đã đăng nhập thẳng vào tài khoản cũ, bỏ qua đăng ký!", "OK")
                 return "ALREADY_LOGGED_IN"
         raise e
-    time.sleep(0.5)
+    time.sleep(0.1)
 
     # Nhập Năm
     try:
@@ -717,7 +738,7 @@ def step3_enter_birthday(driver):
             '.gate_birthday-picker-input, input[placeholder="Năm"]')
         set_react_input(driver, year_input, DOB_YEAR)
         log(f"Đã nhập năm: {DOB_YEAR}", "OK")
-        time.sleep(0.5)
+        time.sleep(0.1)
     except Exception as e:
         log(f"Không tìm thấy ô nhập năm: {e}", "WARN")
 
@@ -727,7 +748,7 @@ def step3_enter_birthday(driver):
         if selectors:
             month_sel = selectors[0]
             try_click(driver, month_sel, "Month dropdown")
-            time.sleep(0.8)
+            time.sleep(0.2)
 
             # Tìm option Tháng 12
             options = driver.find_elements(By.CSS_SELECTOR,
@@ -745,7 +766,7 @@ def step3_enter_birthday(driver):
                 visible_opts = [o for o in options if o.is_displayed()]
                 if len(visible_opts) >= 12:
                     try_click(driver, visible_opts[11], "Tháng 12 (index)")
-            time.sleep(0.5)
+            time.sleep(0.1)
     except Exception as e:
         log(f"Lỗi chọn tháng: {e}", "WARN")
 
@@ -755,7 +776,7 @@ def step3_enter_birthday(driver):
         if len(selectors) >= 2:
             day_sel = selectors[1]
             try_click(driver, day_sel, "Day dropdown")
-            time.sleep(0.8)
+            time.sleep(0.2)
 
             options = driver.find_elements(By.CSS_SELECTOR,
                 '.lv-select-option, [role="option"], .lv-select-item')
@@ -771,12 +792,12 @@ def step3_enter_birthday(driver):
                 visible_opts = [o for o in options if o.is_displayed()]
                 if len(visible_opts) >= 12:
                     try_click(driver, visible_opts[11], "Ngày 12 (index)")
-            time.sleep(0.5)
+            time.sleep(0.1)
     except Exception as e:
         log(f"Lỗi chọn ngày: {e}", "WARN")
 
     # Bấm Tiếp theo
-    time.sleep(0.5)
+    time.sleep(0.2)
     try:
         next_btn = driver.find_element(By.CSS_SELECTOR,
             '.lv_sign_in_panel_wide-birthday-next, .lv_sign_in_panel_wide-primary-button')
@@ -795,7 +816,7 @@ def step3_enter_birthday(driver):
     time.sleep(2)
 
 
-def step4_enter_otp(driver, email, password, refresh_token, client_id, mail_api_source="dongvanfb"):
+def step4_enter_otp(driver, email, password, refresh_token, client_id, mail_api_source="mixmmo"):
     """Bước 4: Chờ OTP và nhập vào ô xác nhận"""
     from selenium.webdriver.common.by import By
 
@@ -1379,7 +1400,7 @@ def save_pending_link(email, password, refresh_token, client_id, cookies):
     log(f"Đã lưu acc {email} vào danh sách chờ lấy link ({NO_LINK_FILE})", "INFO")
 
 def retry_get_payment_link_for_acc(email, password, refresh_token, client_id, cookies,
-                                    headless=False, browser_type="chrome", mail_api_source="dongvanfb",
+                                    headless=False, browser_type="chrome", mail_api_source="mixmmo",
                                     index=1, batch_size=1):
     """Thử lấy link thanh toán cho 1 acc đã lưu (dùng cookie, hoặc đăng nhập lại)."""
     log(f"[Retry #{index}] Đang xử lý: {email}", "INFO")
@@ -1476,7 +1497,7 @@ def retry_get_payment_link_for_acc(email, password, refresh_token, client_id, co
             except: pass
 
 
-def register_one_account(index, join_link=None, keep_open=False, batch_size=3, predefined_proxy=None, headless=False, browser_type="chrome", get_link=False, mail_api_source="dongvanfb", incognito=False, **kwargs):
+def register_one_account(index, join_link=None, keep_open=False, batch_size=3, predefined_proxy=None, headless=False, browser_type="chrome", get_link=False, mail_api_source="mixmmo", incognito=False, **kwargs):
     try:
         acc = HOTMAIL_QUEUE.get_nowait()
     except queue.Empty:
