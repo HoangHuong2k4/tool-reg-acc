@@ -774,7 +774,7 @@ def _run_capcut_task(mode, count, threads, join_link, mail_type, mail_api_source
             with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as ex:
                 futures = [ex.submit(worker, i+1) for i in range(threads)]
                 concurrent.futures.wait(futures)
-        else:
+        elif mode != 4:
             def worker(i):
                 try:
                     time.sleep((i % threads) * 2.5)
@@ -795,6 +795,28 @@ def _run_capcut_task(mode, count, threads, join_link, mail_type, mail_api_source
                         future.result()
                     except Exception as e:
                         print("Exception in domain mail worker:", e)
+                    if state_capcut.task_stop.is_set(): break
+
+        # ==== MODE 4: API Mode (Không mở Chrome để đăng ký, chỉ join team) ====
+        if mode == 4:
+            proxy_dict = bot.get_rotated_proxy() if hasattr(bot, 'get_rotated_proxy') else None
+            def api_worker(i):
+                try:
+                    if state_capcut.task_stop.is_set(): return
+                    import time as _t; _t.sleep((i % threads) * 1.5)
+                    res = bot.register_one_account_api(i, join_link, count, proxy_dict)
+                    state_capcut.log_queue.put(json.dumps({"type": "result", "success": bool(res)}))
+                    if res: done["ok"] += 1
+                    else: done["fail"] += 1
+                except Exception as e:
+                    state_capcut.log(f"API Worker Error: {e}", "ERR")
+
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as ex:
+                futures = [ex.submit(api_worker, idx + 1) for idx in range(count)]
+                for future in concurrent.futures.as_completed(futures):
+                    try: future.result()
+                    except Exception as e: print("Exception in api_worker:", e)
                     if state_capcut.task_stop.is_set(): break
 
         if state_capcut.task_stop.is_set():

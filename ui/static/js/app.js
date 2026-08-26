@@ -233,13 +233,18 @@ window.onload=()=>{
 
 // ==== CAPCUT ====
 let ccMode=3, ccMailType='hotmail', ccMailApiSource='dongvanfb', ccBrowser=localStorage.getItem('ccBrowser')||'chrome', ccHeadless=(localStorage.getItem('ccHeadless')==='true'), ccIncognito=(localStorage.getItem('ccIncognito')==='true'), ccFilter='ALL', ccLogs=[], ccOk=0, ccFail=0, ccTotal=0;
-function ccSetMode(m){ccMode=m;document.getElementById('cc-mode1').classList.toggle('active',m===1);document.getElementById('cc-mode2').classList.toggle('active',m===2);if(document.getElementById('cc-mode3'))document.getElementById('cc-mode3').classList.toggle('active',m===3);document.getElementById('cc-joinLinkGroup').style.display=m===2?'block':'none';}
+function ccSetMode(m){ccMode=m;[1,2,3,4].forEach(i=>{const el=document.getElementById('cc-mode'+i);if(el)el.classList.toggle('active',m===i);});document.getElementById('cc-joinLinkGroup').style.display=(m===2||m===4)?'block':'none';const isApiMode=m===4;document.getElementById('cc-browserGroup').style.display=isApiMode?'none':'block';document.getElementById('cc-headlessGroup').style.display=isApiMode?'none':'block';}
 function ccSetMailType(m){
   ccMailType=m;
   document.getElementById('cc-mailHotmail').classList.toggle('active',m==='hotmail');
   document.getElementById('cc-mailDomain').classList.toggle('active',m==='domain');
   document.getElementById('cc-hotmailGroup').style.display=m==='hotmail'?'block':'none';
   if(document.getElementById('cc-apiSourceGroup')) document.getElementById('cc-apiSourceGroup').style.display=m==='hotmail'?'block':'none';
+  // Ẩn nút API Mode nếu chọn Hotmail (vì API Mode chỉ dùng Mail Domain)
+  const mode4Btn = document.getElementById('cc-mode4');
+  if(mode4Btn) mode4Btn.style.display = m==='hotmail'?'none':'block';
+  // Nếu đang ở mode 4 mà chuyển sang hotmail, reset về mode 1
+  if(m==='hotmail' && ccMode===4) ccSetMode(1);
 }
 function ccSetApiSource(s){
   ccMailApiSource=s;
@@ -342,7 +347,7 @@ async function ccStartTask(){
   const count=parseInt(document.getElementById('cc-count').value)||1;
   const threads=parseInt(document.getElementById('cc-threads').value)||1;
   const jl=document.getElementById('cc-joinLink').value.trim();
-  if(ccMode===2 && !jl){showToast('⚠️','Vui lòng nhập Link Join Team!');return;}
+  if((ccMode===2||ccMode===4) && !jl){showToast('⚠️','Vui lòng nhập Link Join Team!');return;}
   try{
     const r=await fetch('/api/capcut/task/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:ccMode,count,threads,join_link:jl,mail_type:ccMailType,mail_api_source:ccMailApiSource,browser_type:ccBrowser,headless:ccHeadless,incognito:ccIncognito})});
     const d=await r.json();

@@ -1352,6 +1352,206 @@ def register_multiple(count, threads, join_link, keep_open=False):
     log(f"KẾT QUẢ TỔNG CỘNG: {results['ok']} thành công / {results['fail']} thất bại", "OK")
     log(f"{'='*50}\n", "INFO")
 
+
+# ──────────────────────────────────────────────────────────────────────
+# CHẾĐ 3: ĐĂNG KÝ NHANH BẰỠC API (KHÔNG CẦN MỜ CHROME ĐỂ ĐĂNG KÝ)
+# Đầu đăng ký qua API CapCut, cuối dùng Selenium chỉ để Join Team
+# ──────────────────────────────────────────────────────────────────────
+
+def _encrypt_hex(text):
+    """Mã hóa text giống bên Node.js (XOR 0x05 rồi ra hex)."""
+    return ''.join(f"{(ord(c) ^ 0x05):02x}" for c in text)
+
+def api_send_code(encrypted_email, encrypted_password, proxy_dict=None):
+    """Gọi API gửi OTP về email. Return True nếu thành công."""
+    url = "https://www.capcut.com/passport/web/email/send_code/"
+    params = {
+        "aid": "348188",
+        "account_sdk_source": "web",
+        "language": "en",
+        "verifyFp": "verify_m7euzwhw_PNtb4tlY_I0az_4me0_9Hrt_sEBZgW5GGPdn",
+        "check_region": "1"
+    }
+    data = {
+        "mix_mode": "1",
+        "email": encrypted_email,
+        "password": encrypted_password,
+        "type": "34",
+        "fixed_mix_mode": "1"
+    }
+    headers = {"Content-Type": "application/x-www-form-urlencoded"}
+    proxies = {"http": f"http://{proxy_dict['user']}:{proxy_dict['pass']}@{proxy_dict['host']}:{proxy_dict['port']}",
+               "https": f"http://{proxy_dict['user']}:{proxy_dict['pass']}@{proxy_dict['host']}:{proxy_dict['port']}"} if proxy_dict and proxy_dict.get("user") else \
+               ({"http": f"http://{proxy_dict['host']}:{proxy_dict['port']}", "https": f"http://{proxy_dict['host']}:{proxy_dict['port']}"} if proxy_dict else None)
+    try:
+        resp = requests.post(url, params=params, data=data, headers=headers, proxies=proxies, timeout=20)
+        result = resp.json()
+        return result.get("message") == "success"
+    except Exception as e:
+        log(f"api_send_code lỗi: {e}", "ERR")
+        return False
+
+def api_verify_login(encrypted_email, encrypted_password, encrypted_code, proxy_dict=None):
+    """Gọi API xác minh OTP + đăng ký. Return (uid, ms_token, cookies_str) nếu OK."""
+    import random
+    url = "https://www.capcut.com/passport/web/email/register_verify_login/"
+    params = {
+        "aid": "348188",
+        "account_sdk_source": "web",
+        "language": "en",
+        "verifyFp": "verify_m7euzwhw_PNtb4tlY_I0az_4me0_9Hrt_sEBZgW5GGPdn",
+        "check_region": "1"
+    }
+    import datetime
+    bday = datetime.date(random.randint(1995, 2004), random.randint(1, 12), random.randint(1, 28)).isoformat()
+    data = {
+        "mix_mode": "1",
+        "email": encrypted_email,
+        "code": encrypted_code,
+        "password": encrypted_password,
+        "type": "34",
+        "birthday": bday,
+        "force_user_region": "ID",
+        "biz_param": "{}",
+        "check_region": "1",
+        "fixed_mix_mode": "1"
+    }
+    headers = {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    }
+    proxies = {"http": f"http://{proxy_dict['user']}:{proxy_dict['pass']}@{proxy_dict['host']}:{proxy_dict['port']}",
+               "https": f"http://{proxy_dict['user']}:{proxy_dict['pass']}@{proxy_dict['host']}:{proxy_dict['port']}"} if proxy_dict and proxy_dict.get("user") else \
+               ({"http": f"http://{proxy_dict['host']}:{proxy_dict['port']}", "https": f"http://{proxy_dict['host']}:{proxy_dict['port']}"} if proxy_dict else None)
+    try:
+        resp = requests.post(url, params=params, data=data, headers=headers, proxies=proxies, timeout=20)
+        result = resp.json()
+        if result.get("message") != "success":
+            log(f"verify_login thất bại: {result}", "ERR")
+            return None, None, []
+        uid = str(result.get("data", {}).get("user_id", ""))
+        raw_cookies = resp.headers.get("Set-Cookie", "")
+        ms_token = ""
+        for part in raw_cookies.split(","):
+            if "msToken=" in part:
+                ms_token = part.split("msToken=")[1].split(";")[0].strip()
+                break
+        # Thu thập tất cả set-cookie thành dict
+        cookies_list = []
+        for c in resp.cookies:
+            cookies_list.append({"name": c.name, "value": c.value, "domain": ".capcut.com"})
+        return uid, ms_token, cookies_list
+    except Exception as e:
+        log(f"api_verify_login lỗi: {e}", "ERR")
+        return None, None, []
+
+def register_one_account_api(index, join_link, total, proxy_dict=None):
+    """Chế độ 3: Đăng ký nhanh qua API, chỉ mở Selenium để Join Team."""
+    email = None
+    try:
+        password = get_settings_from_db().get("CAPCUT_PASSWORD", "HoangNam$") or "HoangNam$"
+
+        # Bước 1: Tạo email từ regmail
+        log(f"[{index}/{total}] Tạo email mới từ regmail...", "INFO")
+        email = create_random_email()
+        if not email:
+            log("Không tạo được email!", "ERR")
+            return False
+        log(f"Email: {C.BOLD}{email}{C.RST}", "INFO")
+
+        enc_email = _encrypt_hex(email)
+        enc_pass  = _encrypt_hex(password)
+
+        # Bước 2: Gửi mã OTP qua API
+        log(f"[{index}/{total}] Gửi OTP...", "INFO")
+        ok = api_send_code(enc_email, enc_pass, proxy_dict)
+        if not ok:
+            log("Gửi OTP thất bại!", "ERR")
+            return False
+
+        # Bước 3: Chờ OTP từ regmail
+        log(f"[{index}/{total}] Chờ OTP...", "INFO")
+        otp = wait_for_otp(email, timeout=120)
+        if not otp:
+            log("Không nhận được OTP!", "ERR")
+            return False
+        log(f"OTP: {C.BOLD}{otp}{C.RST}", "OK")
+
+        # Bước 4: Xác minh đăng ký
+        log(f"[{index}/{total}] Xác minh đăng ký...", "INFO")
+        enc_otp = _encrypt_hex(otp)
+        uid, ms_token, cookies_list = api_verify_login(enc_email, enc_pass, enc_otp, proxy_dict)
+        if not uid:
+            log("Đăng ký thất bại!", "ERR")
+            return False
+        log(f"UID: {C.BOLD}{uid}{C.RST} | msToken: {ms_token[:20] if ms_token else '(trống)'}...", "OK")
+
+        # Bước 5: Mở Chrome join team (nếu có link)
+        if join_link and join_link.strip():
+            log(f"[{index}/{total}] Mở Chrome để join team...", "INFO")
+            driver = None
+            try:
+                driver = setup_driver(predefined_proxy=proxy_dict, headless=True)
+                if driver:
+                    # Nạp cookies vào driver
+                    driver.get("https://www.capcut.com")
+                    time.sleep(2)
+                    for c in cookies_list:
+                        try:
+                            driver.add_cookie(c)
+                        except: pass
+                    
+                    joined = step5_join_team(driver, join_link)
+                    if not joined:
+                        log("Join team thất bại (link đầy hoặc lỗi)!", "ERR")
+                        return False
+                    
+                    # Kiểm tra URL có vào được workspace không
+                    time.sleep(3)
+                    current = driver.current_url
+                    if not any(x in current for x in ["my-edit", "workspace", "my-cloud"]):
+                        log("Team đầy slot - không vào được workspace!", "ERR")
+                        return False
+                    log("Đã vào workspace thành công!", "OK")
+            finally:
+                if driver:
+                    try: driver.quit()
+                    except: pass
+
+        # Bước 6: Lưu tài khoản
+        save_account(uid, email, password, join_link or "", ms_token or "")
+        log(f"[{index}/{total}] THÀNH CÔNG: {email}", "OK")
+        return True
+
+    except Exception as e:
+        log(f"Lỗi register_one_account_api [{index}]: {e}", "ERR")
+        return False
+    finally:
+        if email:
+            delete_mailbox(email)
+
+def register_multiple_api(count, threads, join_link, proxy_dict=None):
+    """Chạy nhiều luồng chế độ API."""
+    import concurrent.futures
+    results = {"ok": 0, "fail": 0}
+
+    def worker(i):
+        time.sleep((i - 1) % threads * 1.5)
+        return register_one_account_api(i, join_link, count, proxy_dict)
+
+    for batch_start in range(0, count, threads):
+        batch_end = min(batch_start + threads, count)
+        cur = batch_end - batch_start
+        log(f"--- ĐỢT API: luồng {batch_start+1} đến {batch_end} ({cur} luồng) ---", "WARN")
+        with concurrent.futures.ThreadPoolExecutor(max_workers=cur) as ex:
+            fts = [ex.submit(worker, i + 1) for i in range(batch_start, batch_end)]
+            for ft in concurrent.futures.as_completed(fts):
+                if ft.result(): results["ok"] += 1
+                else: results["fail"] += 1
+
+    log(f"KếT QUẢ API MODE: {results['ok']} thành công / {results['fail']} thất bại", "OK")
+
+
 if __name__ == "__main__":
     print(f"""
 {C.BOLD}{C.INFO}
@@ -1371,10 +1571,11 @@ if __name__ == "__main__":
         print(f"\n{C.WARN}=== MENU CHỨC NĂNG ==={C.RST}")
         print("1. Chỉ tạo tài khoản ngẫu nhiên (Lưu vào file txt - KHÔNG TỰ ĐÓNG TRÌNH DUYỆT)")
         print("2. Tạo tài khoản + Auto Join Team + Gửi lên Google Sheet")
-        choice_func = input(f"👉 Chọn 1 hoặc 2: ").strip()
+        print(f"{C.INFO}3. ⚡ ĐĂNG KÝ NHANH QUA API + Auto Join Team (Không mở Chrome để đăng ký - Nhanh hơn){C.RST}")
+        choice_func = input(f"👉 Chọn 1, 2 hoặc 3: ").strip()
 
-        if choice_func not in ["1", "2"]:
-            print(f"{C.ERR}Lựa chọn không hợp lệ! Vui lòng nhập 1 hoặc 2.{C.RST}")
+        if choice_func not in ["1", "2", "3"]:
+            print(f"{C.ERR}Lựa chọn không hợp lệ! Vui lòng nhập 1, 2 hoặc 3.{C.RST}")
             continue
 
         join_link = None
@@ -1382,6 +1583,8 @@ if __name__ == "__main__":
         try:
             if choice_func == "2":
                 join_link = input(f"\n{C.WARN}1. Nhập Link Join Team (Bắt buộc): {C.RST}").strip()
+            elif choice_func == "3":
+                join_link = input(f"\n{C.WARN}1. Nhập Link Join Team (Bắt buộc để vào nhóm): {C.RST}").strip()
             else:
                 keep_open = True
                 
@@ -1398,11 +1601,17 @@ if __name__ == "__main__":
         log(f"Sẽ tạo {count} tài khoản, mở {threads} tab cùng lúc.", "INFO")
         if choice_func == "2":
             log(f"Tự động gửi thông tin lên Google Sheets và lưu vào {OUTPUT_FILE}.", "INFO")
+        elif choice_func == "3":
+            log(f"Chế độ API: không mở Chrome để đăng ký, chỉ mở để Join Team. Lưu vào {OUTPUT_FILE}.", "INFO")
         else:
             log(f"Chỉ lưu tài khoản vào file {OUTPUT_FILE} (Giữ trình duyệt mở).", "INFO")
         print()
 
-        register_multiple(count, threads, join_link, keep_open)
+        if choice_func == "3":
+            proxy_dict = get_rotated_proxy()
+            register_multiple_api(count, threads, join_link, proxy_dict)
+        else:
+            register_multiple(count, threads, join_link, keep_open)
         
         print(f"\n{C.OK}✅ ĐÃ CHẠY XONG!{C.RST}")
         if not keep_open:

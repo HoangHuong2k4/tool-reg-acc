@@ -159,13 +159,14 @@
                   Join Team</div>
                 <div class="radio-btn active" id="cc-mode3" onclick="ccSetMode(3)" style="flex:none;text-align:left;">🔗 Tạo
                   acc + Auto Lấy Link</div>
+                <div class="radio-btn" id="cc-mode4" onclick="ccSetMode(4)" style="flex:none;text-align:left;border:1px solid var(--accent);color:var(--accent);">⚡ API Mode + Join Team</div>
               </div>
             </div>
             <div class="form-group" id="cc-joinLinkGroup" style="display:none;">
               <label>Link Join Team</label>
               <input type="text" id="cc-joinLink" placeholder="Nhập link join team...">
             </div>
-            <div class="form-group">
+            <div class="form-group" id="cc-browserGroup">
               <label>Trình duyệt</label>
               <div class="radio-group">
                 <div class="nav-btn active" id="cc-browserChrome" onclick="ccSetBrowser('chrome')">🌐 Chrome</div>
@@ -173,7 +174,7 @@
                 <div class="nav-btn" id="cc-browserCamoufox" onclick="ccSetBrowser('camoufox')">🦊 Camoufox</div>
               </div>
             </div>
-            <div class="form-group">
+            <div class="form-group" id="cc-headlessGroup">
               <div class="toggle-btn" id="cc-headlessToggle" onclick="ccToggleHeadless()">
                 <span>Chạy ẩn (Headless)</span>
                 <div class="toggle-switch"></div>
@@ -1109,6 +1110,8 @@ naokiqvxgini@outlook.com	capcut123
   <script>
     async function ccAddManualAccounts() {
       const raw = document.getElementById('cc-manualAccInput').value.trim();
+      const jl = document.getElementById('cc-joinLink').value.trim();
+      if((ccMode===2||ccMode===4) && !jl){showToast('⚠️','Vui lòng nhập Link Join Team!');return;}
       if (!raw) { showToast('⚠️', 'Vui lòng nhập ít nhất 1 dòng!'); return; }
       const status = document.getElementById('cc-manualAccStatus');
       status.textContent = '⏳ Đang thêm...'; status.style.color = 'var(--muted)';
