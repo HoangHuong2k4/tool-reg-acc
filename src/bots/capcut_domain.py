@@ -329,14 +329,17 @@ def get_rotated_proxy():
         log(f"Lỗi gọi API proxy: {e}", "ERR")
     return None
 
-def setup_driver(index=1, keep_open=False, use_api_proxy=True, batch_size=3, use_proxy=True, predefined_proxy=None, is_func2=False, shared_relay_port=None, headless=False, browser_type="chrome", incognito=False):
+def setup_driver(index=1, keep_open=False, use_api_proxy=True, batch_size=3, use_proxy=True, predefined_proxy=None, is_func2=False, shared_relay_port=None, headless=False, browser_type="chrome", incognito=False, profile_dir=None):
     from selenium import webdriver
     from selenium.webdriver.chrome.options import Options
     options = Options()
     if incognito:
         options.add_argument("--incognito")
+    if profile_dir:
+        options.add_argument(f"--user-data-dir={profile_dir}")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--remote-debugging-port=0")
     options.add_argument("--disable-blink-features=AutomationControlled")
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
     options.add_experimental_option("useAutomationExtension", False)
@@ -1158,10 +1161,15 @@ def wait_for_dashboard(driver, timeout=60):
                 log("Đã vào workspace / team thành công", "OK")
                 time.sleep(4) # Chờ cho trang load hẳn để lấy UID
                 return True
+            
+            body = driver.find_element("tag name", "body").text
+            if "reached the upper limit" in body or "Cannot join" in body:
+                log("Team đầy slot (phát hiện lỗi)!", "ERR")
+                return False
         except Exception:
             pass
         time.sleep(1)
-    log("Hết thời gian chờ load dashboard (mạng quá yếu)!", "WARN")
+    log("Hết thời gian chờ load dashboard (mạng quá yếu hoặc kẹt captcha)!", "WARN")
     return False
 
 def save_account(uidname, email, password, join_link, msToken=""):
@@ -1438,12 +1446,153 @@ def api_verify_login(encrypted_email, encrypted_password, encrypted_code, proxy_
                 break
         # Thu thập tất cả set-cookie thành dict
         cookies_list = []
+        cookie_names = []
         for c in resp.cookies:
             cookies_list.append({"name": c.name, "value": c.value, "domain": ".capcut.com"})
+            cookie_names.append(c.name)
+        log(f"Received API cookies: {', '.join(cookie_names)}", "INFO")
         return uid, ms_token, cookies_list
     except Exception as e:
         log(f"api_verify_login lỗi: {e}", "ERR")
         return None, None, []
+
+def api_get_nickname(cookies_list, proxy_dict=None):
+    """Gọi API lấy nickname thực của tài khoản sau khi đăng ký."""
+    url = "https://www.capcut.com/passport/web/user/info/"
+    params = {
+        "aid": "348188",
+        "account_sdk_source": "web",
+        "language": "en"
+    }
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Referer": "https://www.capcut.com/"
+    }
+    # Chuyển cookies_list thành dict cho requests
+    cookie_dict = {c["name"]: c["value"] for c in cookies_list if "name" in c and "value" in c}
+    proxies = None
+    if proxy_dict and proxy_dict.get("user"):
+        proxies = {"http": f"http://{proxy_dict['user']}:{proxy_dict['pass']}@{proxy_dict['host']}:{proxy_dict['port']}",
+                   "https": f"http://{proxy_dict['user']}:{proxy_dict['pass']}@{proxy_dict['host']}:{proxy_dict['port']}"}
+    elif proxy_dict:
+        proxies = {"http": f"http://{proxy_dict['host']}:{proxy_dict['port']}",
+                   "https": f"http://{proxy_dict['host']}:{proxy_dict['port']}"}
+    try:
+        resp = requests.get(url, params=params, headers=headers, cookies=cookie_dict, proxies=proxies, timeout=15)
+        data = resp.json()
+        nick = (
+            data.get("data", {}).get("nick_name")
+            or data.get("data", {}).get("nickname")
+            or data.get("data", {}).get("user_name")
+            or data.get("data", {}).get("name")
+        )
+        if nick: return nick
+    except Exception:
+        pass
+        
+    try:
+        # Thử lấy qua workspace info (vì acc mới CapCut thường lấy tên là owner_name của workspace)
+        ws_url = "https://edit-api-sg.capcut.com/cc/v1/workspace/mget_workspace_info"
+        ws_headers = {
+            "User-Agent": headers["User-Agent"],
+            "Content-Type": "application/json",
+            "Referer": "https://www.capcut.com/"
+        }
+        ws_resp = requests.post(ws_url, json={}, headers=ws_headers, cookies=cookie_dict, proxies=proxies, timeout=15)
+        ws_data = ws_resp.json()
+        if "data" in ws_data and "workspace_infos" in ws_data["data"]:
+            for ws in ws_data["data"]["workspace_infos"]:
+                if ws.get("owner_name"):
+                    return ws["owner_name"]
+    except Exception as e:
+        log(f"api_get_nickname mget_workspace_info lỗi: {e}", "WARN")
+        
+    return None
+
+def join_team_camoufox(join_link, cookies_list, proxy_dict=None):
+    from camoufox.sync_api import Camoufox
+    import json
+    
+    proxy = None
+    if proxy_dict:
+        proxy = {"server": f"http://{proxy_dict['host']}:{proxy_dict['port']}"}
+        if proxy_dict.get('user'):
+            proxy["username"] = proxy_dict["user"]
+            proxy["password"] = proxy_dict["pass"]
+            
+    uidname = ""
+    log("Khởi động Camoufox (chạy ẩn ngầm chống phát hiện)...", "INFO")
+    try:
+        with Camoufox(headless=True, proxy=proxy) as browser:
+            page = browser.new_page()
+            page.goto("https://www.capcut.com")
+            
+            # Format cookies for playwright
+            pw_cookies = []
+            sessionid = ""
+            for c in cookies_list:
+                pw_cookies.append({
+                    "name": c["name"],
+                    "value": c["value"],
+                    "domain": ".capcut.com",
+                    "path": "/"
+                })
+                if c["name"] == "sessionid": sessionid = c["value"]
+                
+            page.context.add_cookies(pw_cookies)
+            if sessionid:
+                page.evaluate(f"localStorage.setItem('sessionid', '{sessionid}');")
+                
+            page.reload()
+            page.wait_for_timeout(3000)
+            
+            log("Bước 5 (Camoufox): Vào link Join Team...", "INFO")
+            page.goto(join_link)
+            page.wait_for_timeout(3000)
+            
+            # Click nút Tham gia
+            join_btn = page.locator('button[class*="JoinPanelBtn"], button[class*="join-button"], button.lv-btn-primary').first
+            if join_btn.is_visible():
+                join_btn.click()
+                log("Clicked: Tham gia team", "OK")
+            else:
+                join_btn_text = page.locator("text=/Tham gia|Join|Submit/i").first
+                if join_btn_text.is_visible():
+                    join_btn_text.click()
+                    log("Clicked: Tham gia team (text)", "OK")
+                    
+            log("Chờ load trang dashboard (Camoufox)...", "INFO")
+            # Chờ chuyển URL hoặc check text
+            try:
+                page.wait_for_url(lambda url: "my-edit" in url or "workspace" in url or "my-cloud" in url, timeout=60000)
+                log("Đã vào workspace / team thành công (Camoufox)", "OK")
+                page.wait_for_timeout(4000)
+                
+                # Extract UID
+                script_content = page.evaluate('document.getElementById("__GTW_USER_INFO__")?.textContent;')
+                if script_content:
+                    try:
+                        data = json.loads(script_content)
+                        if '__userInfoStringify' in data:
+                            inner = json.loads(data['__userInfoStringify'])
+                            uidname = inner.get('data', {}).get('user_info', {}).get('nick_name', '')
+                    except: pass
+                if not uidname:
+                    try:
+                        uidname = page.locator('.detail-item.nickname').first.text_content().strip()
+                    except: pass
+                    
+            except Exception as e:
+                body_text = page.locator("body").text_content() or ""
+                if "reached the upper limit" in body_text or "Cannot join" in body_text:
+                    log("Team đầy slot (phát hiện lỗi)!", "ERR")
+                else:
+                    log("Hết thời gian chờ load dashboard (mạng quá yếu hoặc kẹt captcha)!", "WARN")
+                    
+    except Exception as e:
+        log(f"Lỗi Camoufox: {e}", "ERR")
+        
+    return uidname
 
 def register_one_account_api(index, join_link, total, proxy_dict=None):
     """Chế độ 3: Đăng ký nhanh qua API, chỉ mở Selenium để Join Team."""
@@ -1484,39 +1633,24 @@ def register_one_account_api(index, join_link, total, proxy_dict=None):
         if not uid:
             log("Đăng ký thất bại!", "ERR")
             return False
-        log(f"UID: {C.BOLD}{uid}{C.RST} | msToken: {ms_token[:20] if ms_token else '(trống)'}...", "OK")
+        log(f"UID (số): {C.BOLD}{uid}{C.RST} | msToken: {ms_token[:20] if ms_token else '(trống)'}...", "OK")
 
-        # Bước 5: Mở Chrome join team (nếu có link)
+        # Lấy nickname thực từ API profile (thử lấy trước, nếu không được cũng không sao vì lát Camoufox sẽ lấy từ DOM)
+        nickname = api_get_nickname(cookies_list, proxy_dict)
+        if nickname:
+            uid = nickname
+            log(f"Nickname: {C.BOLD}{uid}{C.RST}", "OK")
+
+        # Bước 5: Join team bằng Camoufox
         if join_link and join_link.strip():
-            log(f"[{index}/{total}] Mở Chrome để join team...", "INFO")
-            driver = None
-            try:
-                driver = setup_driver(predefined_proxy=proxy_dict, headless=True)
-                if driver:
-                    # Nạp cookies vào driver
-                    driver.get("https://www.capcut.com")
-                    time.sleep(2)
-                    for c in cookies_list:
-                        try:
-                            driver.add_cookie(c)
-                        except: pass
-                    
-                    joined = step5_join_team(driver, join_link)
-                    if not joined:
-                        log("Join team thất bại (link đầy hoặc lỗi)!", "ERR")
-                        return False
-                    
-                    # Kiểm tra URL có vào được workspace không
-                    time.sleep(3)
-                    current = driver.current_url
-                    if not any(x in current for x in ["my-edit", "workspace", "my-cloud"]):
-                        log("Team đầy slot - không vào được workspace!", "ERR")
-                        return False
-                    log("Đã vào workspace thành công!", "OK")
-            finally:
-                if driver:
-                    try: driver.quit()
-                    except: pass
+            log(f"[{index}/{total}] Mở Camoufox để join team...", "INFO")
+            new_uidname = join_team_camoufox(join_link, cookies_list, proxy_dict)
+            if not new_uidname:
+                log("Không thể join team hoặc không lấy được thông tin từ DOM!", "ERR")
+                return False
+            
+            uid = new_uidname
+            log(f"UID từ DOM: {C.BOLD}{uid}{C.RST}", "OK")
 
         # Bước 6: Lưu tài khoản
         save_account(uid, email, password, join_link or "", ms_token or "")
@@ -1536,7 +1670,8 @@ def register_multiple_api(count, threads, join_link, proxy_dict=None):
     results = {"ok": 0, "fail": 0}
 
     def worker(i):
-        time.sleep((i - 1) % threads * 1.5)
+        # Tăng delay giữa các luồng lên 10s để tránh dính Captcha/Spam khi Join Team cùng lúc
+        time.sleep((i - 1) % threads * 10)
         return register_one_account_api(i, join_link, count, proxy_dict)
 
     for batch_start in range(0, count, threads):
