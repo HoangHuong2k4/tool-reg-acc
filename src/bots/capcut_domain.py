@@ -1525,7 +1525,7 @@ def join_team_camoufox(join_link, cookies_list, proxy_dict=None):
     try:
         with Camoufox(headless=True, proxy=proxy) as browser:
             page = browser.new_page()
-            page.goto("https://www.capcut.com")
+            page.goto("https://www.capcut.com", timeout=60000, wait_until="domcontentloaded")
             
             # Format cookies for playwright
             pw_cookies = []
@@ -1543,11 +1543,11 @@ def join_team_camoufox(join_link, cookies_list, proxy_dict=None):
             if sessionid:
                 page.evaluate(f"localStorage.setItem('sessionid', '{sessionid}');")
                 
-            page.reload()
+            page.reload(timeout=60000, wait_until="domcontentloaded")
             page.wait_for_timeout(3000)
             
             log("Bước 5 (Camoufox): Vào link Join Team...", "INFO")
-            page.goto(join_link)
+            page.goto(join_link, timeout=90000, wait_until="domcontentloaded")
             page.wait_for_timeout(3000)
             
             # Click nút Tham gia
@@ -1564,7 +1564,7 @@ def join_team_camoufox(join_link, cookies_list, proxy_dict=None):
             log("Chờ load trang dashboard (Camoufox)...", "INFO")
             # Chờ chuyển URL hoặc check text
             try:
-                page.wait_for_url(lambda url: "my-edit" in url or "workspace" in url or "my-cloud" in url, timeout=60000)
+                page.wait_for_url(lambda url: "my-edit" in url or "workspace" in url or "my-cloud" in url, timeout=90000)
                 log("Đã vào workspace / team thành công (Camoufox)", "OK")
                 page.wait_for_timeout(4000)
                 
