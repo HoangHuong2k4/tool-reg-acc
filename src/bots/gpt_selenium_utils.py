@@ -235,24 +235,25 @@ def wait_any_element(driver, selectors, timeout=20):
 
 
 def set_react_input(driver, element, value):
-    """Nhập giá trị vào React input (kích hoạt onChange) — mô phỏng setNativeValue()."""
-    from selenium.webdriver.common.keys import Keys
+    """Nhập giá trị vào React input siêu tốc (kích hoạt onChange) bằng JS native setter."""
     try:
         driver.execute_script("arguments[0].scrollIntoView({block:'center'});", element)
-        time.sleep(0.2)
         element.click()
     except:
         driver.execute_script("arguments[0].focus();", element)
-    time.sleep(0.2)
-    # Clear current value
-    element.send_keys(Keys.CONTROL + "a")
-    element.send_keys(Keys.DELETE)
-    time.sleep(0.1)
-    # Gõ từng ký tự để trigger React onChange
-    for char in value:
-        element.send_keys(char)
-        time.sleep(0.03)
-    time.sleep(0.3)
+        
+    js_code = """
+    let element = arguments[0];
+    let value = arguments[1];
+    let nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+    if (!nativeInputValueSetter) {
+        nativeInputValueSetter = Object.getOwnPropertyDescriptor(element.constructor.prototype, 'value').set;
+    }
+    nativeInputValueSetter.call(element, value);
+    element.dispatchEvent(new Event('input', { bubbles: true }));
+    element.dispatchEvent(new Event('change', { bubbles: true }));
+    """
+    driver.execute_script(js_code, element, value)
 
 
 def try_click(driver, element, label=""):
@@ -272,9 +273,11 @@ def try_click(driver, element, label=""):
 
 
 def _sentinel_delay(seconds=3, label="Sentinel"):
-    """Chờ Sentinel/Turnstile captcha khởi tạo xong."""
-    logger.info(f"[Delay] Chờ {seconds}s cho {label} load...")
-    time.sleep(seconds)
+    """Chờ Sentinel/Turnstile captcha khởi tạo xong (đã được bóp thời gian để chạy siêu tốc)."""
+    # Ép thời gian chờ xuống tối đa 1.2s để chuyển bước cực nhanh
+    actual_wait = min(seconds, 1.2)
+    logger.info(f"[Delay] Chờ {actual_wait}s cho {label} load... (gốc: {seconds}s)")
+    time.sleep(actual_wait)
 
 
 def _save_screenshot(driver, label="error"):
@@ -867,7 +870,7 @@ def _step_setup_2fa(driver, stop_event=None):
     # === Navigate to Settings ===
     logger.info("[Step8] Đang truy cập Settings...")
     driver.get("https://chatgpt.com/#settings")
-    time.sleep(3)
+    time.sleep(1)
     
     # === Xử lý Modal "You're all set" nếu nó hiện trễ ở màn hình Settings ===
     try:
@@ -1027,7 +1030,7 @@ def _step_setup_2fa(driver, stop_event=None):
     # === Click Verify với retry ===
     _click_verify_with_retry(driver)
 
-    time.sleep(3)
+    time.sleep(1)
     return totp_secret
 
 
@@ -1177,15 +1180,24 @@ def _step_check_promo(driver, stop_event=None):
 
     logger.info("[Promo] Kiểm tra ưu đãi Plus 1 Month Free...")
     try:
+        time.sleep(1) # Chờ 2FA lưu xong một chút
+        
         driver.get("https://chatgpt.com/?promo_campaign=plus-1-month-free#pricing")
-        time.sleep(4)
+        time.sleep(2)
         _check_stop(stop_event)
 
         try:
             wait_for_element(driver, By.CSS_SELECTOR, '[data-testid="plus-pricing-modal-column-top-half"], #plus-pricing, [data-testid="select-plan-button-plus-upgrade"]', timeout=15)
         except Exception:
-            logger.warning("[Promo] Không tải được trang Pricing.")
-            return has_uudai, has_momo
+            logger.warning("[Promo] Không tìm thấy modal Pricing. Thử tải lại trang...")
+            driver.refresh()
+            time.sleep(2)
+            try:
+                wait_for_element(driver, By.CSS_SELECTOR, '[data-testid="plus-pricing-modal-column-top-half"], #plus-pricing, [data-testid="select-plan-button-plus-upgrade"]', timeout=15)
+            except Exception:
+                logger.warning("[Promo] Vẫn không tải được trang Pricing sau khi refresh.")
+                _save_screenshot(driver, "promo_failed")
+                return has_uudai, has_momo
 
         claim_btn = None
         try:
@@ -1211,7 +1223,7 @@ def _step_check_promo(driver, stop_event=None):
             _fix_radix_pointer_events(driver)
             try_click(driver, claim_btn, "Claim Promo")
 
-            time.sleep(5)
+            time.sleep(0.5)
             _check_stop(stop_event)
             logger.info("[Promo] Kiểm tra phương thức MoMo trên trang checkout...")
             try:
