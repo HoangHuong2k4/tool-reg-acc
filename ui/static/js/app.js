@@ -626,6 +626,7 @@ async function gptLoadAccounts(){
         <td><div style="display:flex;align-items:center;gap:6px;"><span class="tag tag-ok" style="margin:0;">✅ OK</span><button class="copy-btn" title="Copy (Tab Separated)" onclick="navigator.clipboard.writeText('${escHtml(a.email)}\\t${escHtml(a.password)}\\t${escHtml(twofa)}');showToast('📋','Đã copy!');"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button></div></td>
       </tr>`;
     }).join('');
+    gptFilterAccounts();
   }catch(e){}
 }
 
@@ -1452,3 +1453,32 @@ drmLoadAccounts();
 // Textarea live count
 const _drmTa = document.getElementById('drm-hotmailTextarea');
 if(_drmTa) _drmTa.addEventListener('input', drmCountTextareaLines);
+
+function gptFilterAccounts() {
+    const input = document.getElementById('gptSearchInput');
+    if (!input) return;
+    const filter = input.value.toLowerCase();
+    const tbody = document.getElementById('gpt-accountsBody');
+    if (!tbody) return;
+    const trs = tbody.getElementsByTagName('tr');
+    
+    for (let i = 0; i < trs.length; i++) {
+        // Skip the "Chưa có tài khoản nào" row if it exists
+        if (trs[i].cells.length === 1 && trs[i].cells[0].colSpan > 1) {
+            continue;
+        }
+        
+        let match = false;
+        const tds = trs[i].getElementsByTagName('td');
+        for (let j = 0; j < tds.length; j++) {
+            if (tds[j]) {
+                const txtValue = tds[j].textContent || tds[j].innerText;
+                if (txtValue.toLowerCase().indexOf(filter) > -1) {
+                    match = true;
+                    break;
+                }
+            }
+        }
+        trs[i].style.display = match ? "" : "none";
+    }
+}

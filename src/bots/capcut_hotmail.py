@@ -398,7 +398,7 @@ def setup_driver(index=1, keep_open=False, use_api_proxy=True, batch_size=3, use
         options.add_experimental_option("detach", True)
     
     # Chia đều màn hình theo số tab (max 4 cột, thừa thì chồng lên)
-    cols = min(batch_size, 2)       # số cột thực tế
+    cols = min(batch_size, 4)       # số cột thực tế
     SCREEN_W = 1920; SCREEN_H = 1080
     window_width  = SCREEN_W // cols
     window_height = SCREEN_H

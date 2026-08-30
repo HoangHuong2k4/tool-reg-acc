@@ -1171,7 +1171,7 @@ def _click_verify_with_retry(driver, max_attempts=3):
 
 def _step_check_promo(driver, stop_event=None):
     """
-    Truy cập trang pricing của ChatGPT, kiểm tra có promo (0đ) không.
+    Truy cập trang pricing của ChatGPT, kiểm tra có promo (0đ) không thông qua UI.
     Nếu có, click "Claim free offer", check MoMo ở trang thanh toán.
     Returns: (has_uudai: str, has_momo: str) - "có" hoặc "không"
     """
@@ -1180,20 +1180,23 @@ def _step_check_promo(driver, stop_event=None):
 
     logger.info("[Promo] Kiểm tra ưu đãi Plus 1 Month Free...")
     try:
-        time.sleep(1) # Chờ 2FA lưu xong một chút
+        time.sleep(1.5) # Chờ 2FA lưu xong
         
-        driver.get("https://chatgpt.com/?promo_campaign=plus-1-month-free#pricing")
-        time.sleep(2)
+        # Dùng JS để chuyển hướng, đảm bảo React Router nhận diện
+        driver.execute_script("window.location.href = 'https://chatgpt.com/?promo_campaign=plus-1-month-free#pricing';")
+        time.sleep(3)
         _check_stop(stop_event)
 
+        pricing_selectors = '[data-testid="plus-pricing-modal-column-top-half"], #plus-pricing, [data-testid="select-plan-button-plus-upgrade"]'
+        
         try:
-            wait_for_element(driver, By.CSS_SELECTOR, '[data-testid="plus-pricing-modal-column-top-half"], #plus-pricing, [data-testid="select-plan-button-plus-upgrade"]', timeout=15)
+            wait_for_element(driver, By.CSS_SELECTOR, pricing_selectors, timeout=15)
         except Exception:
             logger.warning("[Promo] Không tìm thấy modal Pricing. Thử tải lại trang...")
             driver.refresh()
-            time.sleep(2)
+            time.sleep(3)
             try:
-                wait_for_element(driver, By.CSS_SELECTOR, '[data-testid="plus-pricing-modal-column-top-half"], #plus-pricing, [data-testid="select-plan-button-plus-upgrade"]', timeout=15)
+                wait_for_element(driver, By.CSS_SELECTOR, pricing_selectors, timeout=15)
             except Exception:
                 logger.warning("[Promo] Vẫn không tải được trang Pricing sau khi refresh.")
                 _save_screenshot(driver, "promo_failed")
@@ -1223,12 +1226,12 @@ def _step_check_promo(driver, stop_event=None):
             _fix_radix_pointer_events(driver)
             try_click(driver, claim_btn, "Claim Promo")
 
-            time.sleep(0.5)
+            time.sleep(4) # Chờ trang Stripe load iframe
             _check_stop(stop_event)
             logger.info("[Promo] Kiểm tra phương thức MoMo trên trang checkout...")
             try:
                 found_momo = False
-                for _ in range(10):
+                for _ in range(8):
                     _check_stop(stop_event)
                     # 1. Thử tìm ngoài iframe
                     momo_tabs = driver.find_elements(By.CSS_SELECTOR, 'button[data-testid="momo"], #momo-tab, [value="momo"]')
@@ -1251,7 +1254,7 @@ def _step_check_promo(driver, stop_event=None):
                             except: pass
                     
                     if found_momo: break
-                    time.sleep(2)
+                    time.sleep(1.5)
 
                 if found_momo:
                     has_momo = "có"
@@ -1377,7 +1380,6 @@ def run_selenium_registration_standalone(
                 save_account_callback(email, password, totp_secret, has_momo_str == "có")
         else:
             try:
-                from database import get_db
                 with get_db() as conn:
                     try:
                         conn.execute("ALTER TABLE accounts ADD COLUMN uudai TEXT")
