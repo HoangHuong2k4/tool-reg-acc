@@ -123,14 +123,22 @@ def signin_openai(session: BrowserSession, csrf_token: str, email: str) -> str:
         authorize_url: auth.openai.com 的授权 URL
     """
     # 构造 URL 查询参数
-    query_params = {
-        "prompt": "login",
-        "ext-oai-did": session.device_id,
-        "auth_session_logging_id": session.auth_session_logging_id,
-        "ext-passkey-client-capabilities": _PASSKEY_CLIENT_CAPABILITIES,
-        "screen_hint": "login_or_signup",
-        "login_hint": email,
-    }
+    if getattr(session, "require_password", False):
+        query_params = {
+            "prompt": "login",
+            "screen_hint": "login_or_signup",
+        }
+    else:
+        query_params = {
+            "prompt": "login",
+            "ext-oai-did": session.device_id,
+            "auth_session_logging_id": session.auth_session_logging_id,
+            "ext-passkey-client-capabilities": _PASSKEY_CLIENT_CAPABILITIES,
+            "screen_hint": "login_or_signup",
+        }
+        if email:
+            query_params["login_hint"] = email
+            
     url = "https://chatgpt.com/api/auth/signin/openai?" + urlencode(query_params)
 
     # 构造请求头

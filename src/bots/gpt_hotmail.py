@@ -22,13 +22,7 @@ _BOT_DIR   = os.path.dirname(os.path.abspath(__file__))
 _ROOT_DIR  = os.path.abspath(os.path.join(_BOT_DIR, "..", ".."))
 _DATA_DIR  = os.path.join(_ROOT_DIR, "data")
 
-# Thêm src/ và gpt_engine vào sys.path để config và core có thể được import đúng cách
-_SRC_DIR = os.path.abspath(os.path.join(_BOT_DIR, ".."))
-_GPT_ENGINE_DIR = os.path.join(_SRC_DIR, "gpt_engine")
-if _SRC_DIR not in sys.path:
-    sys.path.insert(0, _SRC_DIR)
-if _GPT_ENGINE_DIR not in sys.path:
-    sys.path.insert(0, _GPT_ENGINE_DIR)
+from src.bots.gpt_selenium_utils import run_selenium_registration_standalone
 
 # ─── File paths ───────────────────────────────────────────────────────────────
 HOTMAIL_GPT_FILE = os.path.join(_DATA_DIR, "hotmail-gpt.txt")
@@ -51,7 +45,7 @@ def get_rotated_proxy():
     # type: () -> Optional[dict]
     return None
 
-def save_account(email, password, totp_secret, has_momo=False):
+def save_account(email, password, totp_secret, has_momo=False, has_uudai=False):
     # type: (str, str, str, bool) -> None
     pass
 
@@ -153,22 +147,8 @@ def load_hotmails_to_queue(limit=999):
 
 def _inject_to_gpt_db(accounts):
     # type: (List[dict]) -> None
-    """Inject email vào DB nội bộ của gpt_engine."""
-    try:
-        from gpt_engine.core.db import import_outlook_accounts
-        records = [
-            {
-                "email":         a["email"],
-                "password":      a["password"],
-                "client_id":     a["client_id"],
-                "refresh_token": a["refresh_token"],
-            }
-            for a in accounts
-        ]
-        inserted, skipped = import_outlook_accounts(records)
-        log("Đã inject {} email vào DB (bỏ qua {} trùng)".format(inserted, skipped), "INFO")
-    except Exception as e:
-        log("Lỗi inject email vào DB: {}".format(e), "WARN")
+    """(Deprecated) Removed gpt_engine DB inject"""
+    pass
 
 
 # ─── Log Forwarding cho Web UI ──────────────────────────────────────────────
@@ -205,92 +185,94 @@ logging.getLogger("").addHandler(_web_ui_handler)
 # ─── Registration ─────────────────────────────────────────────────────────────
 
 GLOBAL_HOTMAIL_ACCOUNTS = {}
+GLOBAL_STOP_EVENT = threading.Event()
 SEEN_OTPS = {}
 
-def custom_wait_for_otp(email_addr, after_ts, **kwargs):
-    acc = GLOBAL_HOTMAIL_ACCOUNTS.get(email_addr)
-    if not acc:
-        log(f"[OTP-Hook] Không tìm thấy thông tin tài khoản cho {email_addr}", "ERR")
+def get_otp_callback_hotmail(email_addr, after_ts=0, mail_api_source="dongvanfb"):
+    if email_addr not in ACCOUNT_DATA:
         return None
         
-    log(f"[OTP-Hook] Đang lấy mã OTP cho {email_addr} từ API DongVanFB (với logic OpenAI)...", "INFO")
+    log(f"[OTP-Hook] Đang lấy mã OTP cho {email_addr} từ API {mail_api_source.upper()} (với logic OpenAI)...", "INFO")
     
-    def mixmmo_wait(email, password, refresh_token, client_id, timeout=120, interval=4, after_ts=0):
+    def wait_for_otp(email, password, refresh_token, client_id, timeout=120, interval=4, mail_api_source="dongvanfb"):
         import requests, time, re
-        headers = {"Content-Type": "application/json"}
-        payload = {
-            "email": email,
-            "pass": password,
-            "refresh_token": refresh_token,
-            "client_id": client_id
-        }
+        
+        api_url = "https://tools.dongvanfb.net/api/get_messages_oauth2" if mail_api_source == "dongvanfb" else "https://mixmmo.com/api/get-hotmail-messages.php"
+        
+        if mail_api_source == "dongvanfb":
+            headers = {"Content-Type": "application/json"}
+            payload = {
+                "email": email,
+                "pass": password,
+                "refresh_token": refresh_token,
+                "client_id": client_id
+            }
+        else:
+            headers = {"Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"}
+            payload = {
+                "action": "get_hotmail_messages",
+                "account": f"{email}|{password}|{refresh_token}|{client_id}",
+                "mode": "oauth",
+                "folder": "inbox",
+                "start_timestamp": "0"
+            }
         
         seen_otps = SEEN_OTPS.setdefault(email, set())
-        
         elapsed = 0
         while elapsed < timeout:
             try:
-                resp = requests.post("https://tools.dongvanfb.net/api/get_messages_oauth2", headers=headers, json=payload, timeout=20)
+                resp = requests.post(api_url, headers=headers, data=payload if mail_api_source != "dongvanfb" else None, json=payload if mail_api_source == "dongvanfb" else None, timeout=20)
                 data = resp.json()
                 
-                if data.get("status"):
-                    messages = data.get("messages")
+                messages = []
+                if mail_api_source == "dongvanfb" and data.get("status"):
+                    messages = data.get("messages", [])
+                elif mail_api_source == "mixmmo" and data.get("success"):
+                    messages = data.get("data", [])
                     
-                    if messages:
-                        for msg in messages:
-                            subject = msg.get("subject", "")
-                            message = msg.get("message", "")
-                            
-                            # Sử dụng logic của gpt_engine để trích xuất OTP chính xác nhất (tránh lấy nhầm 6 số khác)
-                            from gpt_engine.core.otp_utils import extract_otp
-                            
-                            # Giả lập format tin nhắn để truyền vào hàm extract_otp
-                            simulated_email_dict = {
-                                "subject": subject,
-                                "text": message,
-                                "content": message
-                            }
-                            otp = extract_otp(simulated_email_dict)
-                            
-                            if not otp:
-                                # Fallback regex nếu hàm trên không lấy được
-                                clean_message = re.sub(r'<style[^>]*>.*?</style>', ' ', message, flags=re.IGNORECASE)
-                                clean_message = re.sub(r'<[^>]+>', ' ', clean_message)
-                                text_to_search = subject + " " + clean_message
-                                # Tìm "code is XXXXXX" hoặc các pattern tương tự
-                                if "openai" in text_to_search.lower() or "chatgpt" in text_to_search.lower():
-                                    match = re.search(r'\b(\d{6})\b', text_to_search)
-                                    if match:
-                                        otp = match.group(1)
-                            
-                            if otp and otp not in seen_otps:
-                                seen_otps.add(otp)
-                                log(f"Nhận được OTP DongVanFB: {otp}", "OK")
-                                return otp
+                for msg in messages:
+                    subject = msg.get("subject", "")
+                    message = msg.get("message", "") if mail_api_source == "dongvanfb" else msg.get("body", "")
+                    
+                    clean_message = re.sub(r'<style[^>]*>.*?</style>', ' ', message, flags=re.IGNORECASE)
+                    clean_message = re.sub(r'<[^>]+>', ' ', clean_message)
+                    text_to_search = subject + " " + clean_message
+                    otp = None
+                    if "openai" in text_to_search.lower() or "chatgpt" in text_to_search.lower():
+                        match = re.search(r'\b(\d{6})\b', text_to_search)
+                        if match:
+                            otp = match.group(1)
+                    
+                    if otp and otp not in seen_otps:
+                        seen_otps.add(otp)
+                        log(f"Nhận được OTP ({mail_api_source.upper()}): {otp}", "OK")
+                        return otp
             except Exception as e:
-                log(f"Lỗi gọi API DongVanFB: {e}", "WARN")
+                log(f"Lỗi gọi API {mail_api_source.upper()}: {e}", "WARN")
                 
             time.sleep(interval)
             elapsed += interval
         
-        log("Hết thời gian chờ OTP DongVanFB!", "ERR")
+        log(f"Hết thời gian chờ OTP {mail_api_source.upper()}!", "ERR")
         return None
     
-    return mixmmo_wait(
+    acc = ACCOUNT_DATA[email_addr]
+    return wait_for_otp(
         email=acc["email"],
         password=acc["password"],
         refresh_token=acc["refresh_token"],
         client_id=acc["client_id"],
         timeout=180,
         interval=4,
-        after_ts=after_ts
+        mail_api_source=mail_api_source
     )
 
-def register_one_account(thread_id):
-    # type: (int) -> bool
+def register_one_account(thread_id, batch_size=1, browser_type="chrome", headless=False, incognito=False, max_retries=2, mail_api_source="dongvanfb", keep_open=False, direct_proxy=False):
+    # type: (int, str, bool, bool, int, str) -> bool
     """
-    Lấy một email từ queue, inject vào DB gpt_engine, chạy đăng ký ChatGPT,
+    Lấy một email từ queue, chạy đăng ký ChatGPT bằng standalone Selenium,
     lưu kết quả và đánh dấu email đã dùng.
+    Hỗ trợ retry khi lỗi OTP và dừng giữa chừng qua GLOBAL_STOP_EVENT.
     """
     if HOTMAIL_QUEUE.empty():
         return False
@@ -300,64 +282,51 @@ def register_one_account(thread_id):
     GLOBAL_HOTMAIL_ACCOUNTS[email] = acc
     log("[Thread-{}] Bắt đầu đăng ký GPT: {}".format(thread_id, email), "INFO")
 
-    # Inject email vào DB của gpt_engine
-    _inject_to_gpt_db([acc])
-
     proxy_url = _format_proxy(get_rotated_proxy())
 
     try:
-        from gpt_engine.main import run_registration, configure_logging
-        import gpt_engine.config.email as _email_cfg
+        for attempt in range(1, max_retries + 1):
+            if GLOBAL_STOP_EVENT.is_set():
+                log(f"[Thread-{thread_id}] Dừng do stop event", "WARN")
+                return False
 
-        # Khởi tạo hook wait_for_otp của gpt_engine để sử dụng API dongvanfb
-        from gpt_engine.core import email_provider
-        import gpt_engine.main as gem
-        
-        gem_logger = logging.getLogger("gpt_engine")
-        if _web_ui_handler not in gem_logger.handlers:
-            gem_logger.addHandler(_web_ui_handler)
-            gem_logger.setLevel(logging.INFO)
-            gem_logger.propagate = False
+            if attempt > 1:
+                log(f"[Thread-{thread_id}] Thử lại lần {attempt}/{max_retries}: {email}", "INFO")
+                time.sleep(5)
+            
+            # Dùng mật khẩu từ settings (mặc định chatgpt123@@) để đồng nhất
+            gpt_password = getattr(sys.modules[__name__], "GPT_PASSWORD", "chatgpt123@@")
+            res = run_selenium_registration_standalone(
+                email=email,
+                password=gpt_password,
+                proxy=proxy_url,
+                headless=headless,
+                browser_type=browser_type,
+                incognito=incognito, keep_open=keep_open, direct_proxy=direct_proxy,
+                get_otp_callback=lambda e: get_otp_callback_hotmail(e, time.time(), mail_api_source),
+                save_account_callback=save_account,
+                thread_id=thread_id, batch_size=batch_size,
+                stop_event=GLOBAL_STOP_EVENT
+            )
 
-        # Thiết lập trực tiếp trên module được import trong main
-        import gpt_engine.config.twofa as _twofa_cfg
-        gem._email_cfg.USE_EMAIL_SERVICE = True
-        _email_cfg.USE_EMAIL_SERVICE = True
-        gem._twofa_cfg.ENABLE_2FA = True
-        _twofa_cfg.ENABLE_2FA = True
+            if res.get("success"):
+                totp = res.get("totp_secret") or ""
+                log("[Thread-{}] ✅ Thành công: {} | 2FA: {}".format(
+                    thread_id, email, "có" if totp else "không"), "OK")
+                # Save account callback already called inside
+                _mark_used(acc["original_line"])
+                return True
 
+            err = res.get("error", "Unknown")
+            # Retry nếu lỗi liên quan OTP timeout, không retry lỗi khác
+            if "OTP" in err and attempt < max_retries:
+                log(f"[Thread-{thread_id}] ⚠️ Lỗi OTP, sẽ thử lại: {err}", "WARN")
+                continue
 
-        email_provider.wait_for_otp = custom_wait_for_otp
-        gem.wait_for_otp = custom_wait_for_otp
-        try:
-            import core.email_provider as core_ep  # type: ignore
-            core_ep.wait_for_otp = custom_wait_for_otp
-        except Exception:
-            pass
-
-        from gpt_engine.main import run_registration, configure_logging, generate_display_name
-        configure_logging(verbose=False)
-        result = run_registration(
-            email=email,
-            name=generate_display_name(),
-            proxy=proxy_url,
-            batch_dir=None,
-            check_momo=CHECK_MOMO,
-        )
-
-        if result and result.get("success"):
-            totp = result.get("totp_secret") or ""
-            has_momo = result.get("has_momo", False)
-            momo_display = str(has_momo) if isinstance(has_momo, str) else ("có" if has_momo else "không")
-            log("[Thread-{}] ✅ Thành công: {} | 2FA: {} | MoMo: {}".format(
-                thread_id, email, "có" if totp else "không", momo_display), "OK")
-            save_account(email, acc["password"], totp, has_momo)
-            _mark_used(acc["original_line"])
-            return True
-        else:
-            err = result.get("error", "Unknown") if result else "No result"
             log("[Thread-{}] ❌ Thất bại: {} — {}".format(thread_id, email, err), "ERR")
             return False
+
+        return False
 
     except Exception as e:
         import traceback
@@ -365,3 +334,10 @@ def register_one_account(thread_id):
             thread_id, email, type(e).__name__, e), "ERR")
         log(traceback.format_exc(), "ERR")
         return False
+    finally:
+        GLOBAL_HOTMAIL_ACCOUNTS.pop(email, None)
+        try:
+            HOTMAIL_QUEUE.task_done()
+        except ValueError:
+            pass
+

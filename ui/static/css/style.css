@@ -67,7 +67,7 @@ input[type="number"]{font-family:'JetBrains Mono',monospace;}
 
 /* ── Radio / Pill Selector ── */
 .radio-group{display:flex;gap:4px;flex-wrap:wrap;}
-.radio-btn{flex:1;min-width:70px;padding:5px 7px;border-radius:5px;border:1px solid var(--border);background:var(--bg2);cursor:pointer;text-align:center;font-size:10px;font-weight:500;transition:all .2s;user-select:none;white-space:nowrap;}
+.radio-btn{flex:1;min-width:70px;padding:5px 7px;border-radius:5px;border:1px solid var(--border);background:var(--bg2);cursor:pointer;text-align:center;font-size:10px;font-weight:500;transition:all .2s;user-select:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .radio-btn:hover{border-color:var(--accent);}
 .radio-btn.active{border-color:var(--accent);background:rgba(255,255,255,0.05);color:var(--accent);}
 

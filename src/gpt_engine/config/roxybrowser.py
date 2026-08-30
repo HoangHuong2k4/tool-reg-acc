@@ -13,12 +13,18 @@ from config.env_loader import env_str, apply_env_overrides
 
 
 # 注册驱动：
-#   "protocol"     = 原有 curl_cffi 纯协议注册（容易封号，不建议）
-#   "roxy"         = 调用 RoxyBrowser 指纹浏览器 + Selenium 自动化注册
-#   "cloak"        = 调用 CloakBrowser + Playwright/Selenium 适配层注册
-#   "browser_use"  = Browser Use Cloud stealth Chromium + Playwright
-#   "skyvern"      = Skyvern Browser Sessions + Playwright
-REGISTRATION_DRIVER: str = "protocol"
+# ==============================================================================
+# [4] 核心模式：注册驱动选择
+#   可选值: "protocol", "roxy", "cloak", "browser_use", "skyvern", "playwright_ui"
+#   说明: 
+#   - protocol: 纯 API/协议流注册（默认，极快但风控高）。
+#   - roxy: 使用本地 RoxyBrowser 客户端起指纹浏览器注册。
+#   - cloak: 使用本地 CloakBrowser。
+#   - browser_use: 无需本地指纹器，云端 stealth playwright (Browser Use)
+#   - skyvern: 无需本地指纹器，Skyvern 开源引擎
+#   - playwright_ui: Automation qua Playwright giả lập trình duyệt (để vượt lỗi 400 Bad Request)
+# ==============================================================================
+REGISTRATION_DRIVER: str = "playwright_ui"
 
 # RoxyBrowser 本地 API
 ROXY_API_BASE: str = "http://127.0.0.1:50100"

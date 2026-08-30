@@ -67,6 +67,10 @@ def setup_db_if_not_exists():
             conn.execute("ALTER TABLE accounts ADD COLUMN momo TEXT")
         except sqlite3.OperationalError:
             pass
+        try:
+            conn.execute("ALTER TABLE accounts ADD COLUMN uudai TEXT")
+        except sqlite3.OperationalError:
+            pass
 
         
         default_settings = {
@@ -76,7 +80,8 @@ def setup_db_if_not_exists():
             "PROXY_ID": "953319",
             "PROXYXOAY_KEY": "",
             "CAPCUT_PASSWORD": "capcut123",
-            "GPM_API_URL": "http://127.0.0.1:19995"
+            "GPM_API_URL": "http://127.0.0.1:19995",
+            "GMAIL94_TOKEN": ""
         }
         for k, v in default_settings.items():
             conn.execute("INSERT OR IGNORE INTO settings (`key`, `value`) VALUES (?, ?)", (k, v))
@@ -92,7 +97,9 @@ def load_settings():
         "PROXY_ID": "",
         "PROXYXOAY_KEY": "",
         "CAPCUT_PASSWORD": "capcut123",
-        "GPM_API_URL": "http://127.0.0.1:19995"
+        "GPM_API_URL": "http://127.0.0.1:19995",
+        "GMAIL94_TOKEN": "",
+        "GMAIL94_PASSWORD": ""
     }
     try:
         with get_db() as conn:
@@ -980,7 +987,7 @@ def gpt_accounts():
         with get_db() as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
-            cursor.execute("SELECT email, password, twofa, momo FROM accounts WHERE app='gpt' ORDER BY id ASC")
+            cursor.execute("SELECT email, password, twofa, momo, uudai FROM accounts WHERE app='gpt' ORDER BY id ASC")
             accounts = [dict(row) for row in cursor.fetchall()]
     except Exception:
         pass
@@ -993,9 +1000,9 @@ def gpt_accounts_raw():
         with get_db() as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
-            cursor.execute("SELECT email, password, twofa FROM accounts WHERE app='gpt' ORDER BY id ASC")
+            cursor.execute("SELECT email, password, twofa, momo, uudai FROM accounts WHERE app='gpt' ORDER BY id ASC")
             for row in cursor.fetchall():
-                text += f"{row['email']}\t{row['password']}\t{row['twofa'] or ''}\n"
+                text += f"{row['email']}\t{row['password']}\t{row['twofa'] or ''}\t{row['momo'] or 'không'}\t{row['uudai'] or 'không'}\n"
     except Exception:
         pass
     return text, 200, {"Content-Type": "text/plain; charset=utf-8"}
@@ -1007,9 +1014,9 @@ def gpt_accounts_raw_ep():
         with get_db() as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
-            cursor.execute("SELECT email, password, twofa FROM accounts WHERE app='gpt' ORDER BY id ASC")
+            cursor.execute("SELECT email, password, twofa, momo, uudai FROM accounts WHERE app='gpt' ORDER BY id ASC")
             for row in cursor.fetchall():
-                text += f"{row['email']}|{row['password']}|{row['twofa'] or ''}\n"
+                text += f"{row['email']}\t{row['password']}\t{row['twofa'] or ''}\t{row['momo'] or 'không'}\t{row['uudai'] or 'không'}\n"
     except Exception:
         pass
     return text, 200, {"Content-Type": "text/plain; charset=utf-8"}
@@ -1059,6 +1066,24 @@ def gpt_task_start():
     threads = int(data.get("threads", 1))
     mail_type = data.get("mail_type", "outlook")
     check_momo = data.get("check_momo", True)
+    mail_api_source = data.get("mail_api_source", "dongvanfb")
+    
+    driver_mode = data.get("driver_mode", "playwright_ui")
+    browser_type = data.get("browser_type", "chrome")
+    headless = data.get("headless", False)
+    incognito = data.get("incognito", False)
+    keep_open = data.get("keep_open", False)
+    
+    import sys, os
+    gpt_engine_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "gpt_engine"))
+    if gpt_engine_dir not in sys.path:
+        sys.path.insert(0, gpt_engine_dir)
+        
+    import config.roxybrowser as _roxy_cfg
+    _roxy_cfg.REGISTRATION_DRIVER = driver_mode
+    _roxy_cfg.BROWSER_USE_HEADLESS = headless
+    _roxy_cfg.BROWSER_TYPE = browser_type
+    _roxy_cfg.BROWSER_INCOGNITO = incognito
 
     state_gpt.task_stop.clear()
     while not state_gpt.log_queue.empty():
@@ -1066,13 +1091,29 @@ def gpt_task_start():
         except: break
 
     state_gpt.is_running = True
-    state_gpt.task_thread = threading.Thread(target=_run_gpt_task, args=(count, threads, mail_type, check_momo), daemon=True)
+    state_gpt.task_thread = threading.Thread(
+        target=_run_gpt_task, 
+        args=(count, threads, mail_type, check_momo, browser_type, headless, incognito, mail_api_source, keep_open), 
+        daemon=True
+    )
     state_gpt.task_thread.start()
     return jsonify({"success": True})
 
 @app.route("/api/gpt/task/stop", methods=["POST"])
 def gpt_task_stop():
     state_gpt.task_stop.set()
+    return jsonify({"success": True})
+
+@app.route("/api/gpt/task/close_browsers", methods=["POST"])
+def gpt_close_browsers():
+    try:
+        from src.bots.gpt_selenium_utils import ACTIVE_DRIVERS
+        for d in ACTIVE_DRIVERS:
+            try: d.quit()
+            except: pass
+        ACTIVE_DRIVERS.clear()
+    except Exception as e:
+        pass
     return jsonify({"success": True})
 
 @app.route("/api/gpt/task/stream")
@@ -1087,63 +1128,152 @@ def gpt_task_stream():
                 yield f"data: {json.dumps({'type':'ping'})}\n\n"
     return Response(stream_with_context(generate()), mimetype="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
-def _run_gpt_task(count, threads, mail_type, check_momo=True):
+def _run_gpt_task(count, threads, mail_type, check_momo=True, browser_type="chrome", headless=False, incognito=False, mail_api_source="dongvanfb", keep_open=False):
     state_gpt.check_momo = check_momo
+    state_gpt.browser_type = browser_type
+    state_gpt.headless = headless
+    state_gpt.incognito = incognito
     import importlib
     try:
-        state_gpt.module = importlib.import_module("src.bots.gpt_hotmail")
+        # ── Chọn bot module theo mail_type ──────────────────────────────────
+        if mail_type == "gmail94":
+            state_gpt.module = importlib.import_module("src.bots.gpt_gmail94")
+        elif mail_type == "domain":
+            state_gpt.module = importlib.import_module("src.bots.gpt_domain")
+        else:
+            state_gpt.module = importlib.import_module("src.bots.gpt_hotmail")
+
         bot = state_gpt.module
         bot.log = state_gpt.log
         bot.get_rotated_proxy = patched_get_proxy
-        
-        # Patch để dừng OTP ngang
-        import src.bots.capcut_hotmail as ch
-        ch.GLOBAL_STOP_EVENT = state_gpt.task_stop
 
-        # Đẩy config MoMo xuống bot
+        # Patch để dừng OTP ngang
+        try:
+            import src.bots.capcut_hotmail as ch
+            ch.GLOBAL_STOP_EVENT = state_gpt.task_stop
+        except Exception:
+            pass
+
+        # Đẩy config MoMo và Password xuống bot
+        cfg = load_settings()
         bot.CHECK_MOMO = state_gpt.check_momo
+        bot.GPT_PASSWORD = cfg.get("GMAIL94_PASSWORD", "chatgpt123@@").strip()
+        if not bot.GPT_PASSWORD:
+            bot.GPT_PASSWORD = "chatgpt123@@"
+
+        # Nếu dùng Gmail94: inject token từ Settings DB
+        if mail_type == "gmail94":
+            token = cfg.get("GMAIL94_TOKEN", "").strip()
+            if not token:
+                state_gpt.log("Gmail94 Token chưa được cấu hình! Vào Settings để nhập.", "ERR")
+                state_gpt.log_queue.put(json.dumps({"type": "done", "ok": 0, "fail": 0}))
+                return
+            bot.GMAIL94_TOKEN = token
+            bot.GMAIL94_PASSWORD = cfg.get("GMAIL94_PASSWORD", "")
+            state_gpt.log(f"[Gmail94] Đang dùng token: {token[:8]}...", "INFO")
 
         # Patch save_account to use DB
-        def gpt_save_db(email, password, totp_secret, has_momo=False):
+        def gpt_save_db(email, password, totp_secret, has_momo=False, has_uudai=False):
             try:
                 with get_db() as conn:
                     cursor = conn.cursor()
                     momo_str = str(has_momo) if isinstance(has_momo, str) else ("có" if has_momo else "không")
-                    cursor.execute("INSERT INTO accounts (app, uid, email, password, twofa, momo) VALUES (?, '', ?, ?, ?, ?)", 
-                                   ("gpt", email, password, totp_secret, momo_str))
+                    uudai_str = str(has_uudai) if isinstance(has_uudai, str) else ("có" if has_uudai else "không")
+                    cursor.execute("INSERT INTO accounts (app, uid, email, password, twofa, momo, uudai) VALUES (?, '', ?, ?, ?, ?, ?)",
+                                   ("gpt", email, password, totp_secret, momo_str, uudai_str))
                     conn.commit()
             except Exception as e:
                 state_gpt.log(f"Lỗi lưu DB: {e}", "ERR")
-                
+
         bot.save_account = gpt_save_db
 
-
         done = {"ok": 0, "fail": 0}
-        
-        bot.load_hotmails_to_queue(limit=count)
-        def worker(i):
-            time.sleep((i % threads) * 2.5)
-            while not bot.HOTMAIL_QUEUE.empty() and not state_gpt.task_stop.is_set():
-                res = bot.register_one_account(i)
-                state_gpt.log_queue.put(json.dumps({"type": "result", "success": bool(res)}))
-                if res: done["ok"] += 1
-                else: done["fail"] += 1
 
-        import concurrent.futures
-        with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as ex:
-            futures = [ex.submit(worker, idx+1) for idx in range(threads)]
-            concurrent.futures.wait(futures)
+        if mail_type == "gmail94":
+            # Gmail94: count = số Gmail cần mua (mỗi Gmail = 4 biến thể GPT)
+            # Chia đều số lần mua Gmail cho các thread
+            per_thread = max(1, (count + threads - 1) // threads)
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as ex:
+                futures = []
+                remaining_count = count
+                for idx in range(threads):
+                    this_count = min(per_thread, remaining_count)
+                    if this_count <= 0:
+                        break
+                    remaining_count -= this_count
+                    def _worker_g94(i=idx+1, c=this_count):
+                        time.sleep((i % threads) * 3.0)
+                        local = 0
+                        while local < c and not state_gpt.task_stop.is_set():
+                            def _on_res(s):
+                                state_gpt.log_queue.put(json.dumps({"type": "result", "success": s}))
+                            
+                            ok_n, fail_n = bot.register_one_purchase(
+                                i, 
+                                browser_type=state_gpt.browser_type, 
+                                headless=state_gpt.headless, 
+                                incognito=state_gpt.incognito, 
+                                keep_open=keep_open,
+                                on_result=_on_res
+                            )
+                            done["ok"]   += ok_n
+                            done["fail"] += fail_n
+                            local += 1
+                    futures.append(ex.submit(_worker_g94))
+                concurrent.futures.wait(futures)
+        else:
+            # Hotmail: load từ file và dùng HOTMAIL_QUEUE
+            bot.load_hotmails_to_queue(limit=count)
+            def worker(i):
+                time.sleep((i % threads) * 2.5)
+                while not bot.HOTMAIL_QUEUE.empty() and not state_gpt.task_stop.is_set():
+                    res = bot.register_one_account(i, browser_type=state_gpt.browser_type, headless=state_gpt.headless, incognito=state_gpt.incognito, mail_api_source=mail_api_source, keep_open=keep_open)
+                    state_gpt.log_queue.put(json.dumps({"type": "result", "success": bool(res)}))
+                    if res: done["ok"] += 1
+                    else: done["fail"] += 1
+
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as ex:
+                futures = [ex.submit(worker, idx+1) for idx in range(threads)]
+                concurrent.futures.wait(futures)
 
         if state_gpt.task_stop.is_set():
             state_gpt.log_queue.put(json.dumps({"type": "stopped"}))
         else:
-            state_gpt.log(f"✅ Xong! {done['ok']} thành công / {done['fail']} thất bại", "OK")
+            state_gpt.log(f"Xong! {done['ok']} thanh cong / {done['fail']} that bai", "OK")
             state_gpt.log_queue.put(json.dumps({"type": "done", "ok": done["ok"], "fail": done["fail"]}))
     except Exception as e:
-        state_gpt.log(f"Lỗi task: {type(e).__name__}: {e}", "ERR")
+        state_gpt.log(f"Loi task: {type(e).__name__}: {e}", "ERR")
         state_gpt.log_queue.put(json.dumps({"type": "done", "ok": 0, "fail": 0}))
     finally:
         state_gpt.is_running = False
+
+
+# ─── Gmail94 Token API ────────────────────────────────────────────────────────
+@app.route("/api/gpt/gmail94/token", methods=["GET"])
+def gmail94_token_get():
+    cfg = load_settings()
+    token = cfg.get("GMAIL94_TOKEN", "")
+    # Mask token khi tra ve
+    masked = token[:8] + "..." + token[-4:] if len(token) > 12 else ("***" if token else "")
+    return jsonify({"has_token": bool(token), "masked": masked})
+
+
+@app.route("/api/gpt/gmail94/token", methods=["POST"])
+def gmail94_token_set():
+    data = request.json or {}
+    token = data.get("token", "").strip()
+    if not token:
+        return jsonify({"success": False, "error": "Token khong duoc de trong!"})
+    try:
+        with get_db() as conn:
+            conn.execute("INSERT OR REPLACE INTO settings (`key`, `value`) VALUES (?, ?)",
+                         ("GMAIL94_TOKEN", token))
+            conn.commit()
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
 
 # ─── GPM API & AUTOMATION ─────────────────────────────────────────────────────
 @app.route("/api/gpm/profiles")

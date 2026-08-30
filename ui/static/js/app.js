@@ -53,6 +53,21 @@ async function loadSettings() {
     if(document.getElementById('setting-gpm-api-url')) {
         document.getElementById('setting-gpm-api-url').value = d.GPM_API_URL || 'http://127.0.0.1:19995';
     }
+    // Gmail94 token
+    const gmail94Input = document.getElementById('setting-gmail94-token');
+    const gmail94Status = document.getElementById('settings-gmail94-status');
+    if(gmail94Input) {
+      const tok = d.GMAIL94_TOKEN || '';
+      gmail94Input.value = tok;
+      if(gmail94Status) {
+        gmail94Status.textContent = tok ? '(✅ Đã có token)' : '(⚠️ Chưa có token)';
+        gmail94Status.style.color = tok ? '#10b981' : 'var(--muted)';
+      }
+    }
+    const gmail94PassInput = document.getElementById('setting-gmail94-password');
+    if(gmail94PassInput) {
+      gmail94PassInput.value = d.GMAIL94_PASSWORD || '';
+    }
     if(typeof toggleProxySettings === 'function') toggleProxySettings();
   } catch(e) {}
 }
@@ -72,12 +87,30 @@ async function saveSettings() {
   if(document.getElementById('setting-gpm-api-url')) {
       data.GPM_API_URL = document.getElementById('setting-gpm-api-url').value.trim() || 'http://127.0.0.1:19995';
   }
+  // Gmail94 token & password
+  const gmail94Input = document.getElementById('setting-gmail94-token');
+  if(gmail94Input) {
+    data.GMAIL94_TOKEN = gmail94Input.value.trim();
+  }
+  const gmail94PassInput = document.getElementById('setting-gmail94-password');
+  if(gmail94PassInput) {
+    data.GMAIL94_PASSWORD = gmail94PassInput.value.trim();
+  }
   try {
     const r = await fetch('/api/settings', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data)});
     const d = await r.json();
-    if(d.success) showToast('✅', 'Đã lưu cấu hình!');
-    else showToast('❌', 'Lỗi lưu cấu hình');
+    if(d.success) {
+      showToast('✅', 'Đã lưu cấu hình!');
+      // Reload để cập nhật status Gmail94
+      loadSettings();
+    } else showToast('❌', 'Lỗi lưu cấu hình');
   } catch(e) { showToast('❌', 'Lỗi kết nối'); }
+}
+
+function toggleGmail94TokenVisibility() {
+  const inp = document.getElementById('setting-gmail94-token');
+  if(!inp) return;
+  inp.type = inp.type === 'password' ? 'text' : 'password';
 }
 
 async function loadProxyStatus(){
@@ -227,6 +260,11 @@ window.onload=()=>{
   
   hfSetBrowser(hfBrowser);
   if(hfHeadless) document.getElementById('hf-headlessToggle').classList.add('active');
+  
+  gptSetBrowser(gptBrowser);
+  if(gptHeadless) document.getElementById('gpt-headlessToggle').classList.add('active');
+  if(gptIncognito) document.getElementById('gpt-incognitoToggle').classList.add('active');
+  if(gptKeepOpen) document.getElementById('gpt-keepOpenToggle').classList.add('active');
   
   checkRunningStatus();
 };
@@ -476,11 +514,75 @@ function hfSetUI(running){
 
 // ==== GPT ====
 let gptMailType='outlook', gptFilter='ALL', gptLogs=[], gptOk=0, gptFail=0, gptTotal=0;
+let gptBrowser = localStorage.getItem('gptBrowser') || 'chrome';
+let gptHeadless = (localStorage.getItem('gptHeadless') === 'true');
+let gptIncognito = (localStorage.getItem('gptIncognito') === 'true');
+let gptKeepOpen = (localStorage.getItem('gptKeepOpen') === 'true');
+
+function gptSetBrowser(b) {
+  gptBrowser = b;
+  localStorage.setItem('gptBrowser', b);
+  document.getElementById('gpt-browserChrome').classList.toggle('active', b === 'chrome');
+  document.getElementById('gpt-browserFirefox').classList.toggle('active', b === 'firefox');
+  document.getElementById('gpt-browserCamoufox').classList.toggle('active', b === 'camoufox');
+}
+
+function gptToggleHeadless() {
+  gptHeadless = !gptHeadless;
+  localStorage.setItem('gptHeadless', gptHeadless);
+  document.getElementById('gpt-headlessToggle').classList.toggle('active', gptHeadless);
+}
+
+function gptToggleIncognito() {
+  gptIncognito = !gptIncognito;
+  localStorage.setItem('gptIncognito', gptIncognito);
+  document.getElementById('gpt-incognitoToggle').classList.toggle('active', gptIncognito);
+}
+
+function gptToggleKeepOpen() {
+  gptKeepOpen = !gptKeepOpen;
+  localStorage.setItem('gptKeepOpen', gptKeepOpen);
+  document.getElementById('gpt-keepOpenToggle').classList.toggle('active', gptKeepOpen);
+}
+
+let gptApiSource = 'dongvanfb';
+function gptSetApiSource(src) {
+  gptApiSource = src;
+  document.getElementById('gpt-sourceDongvanfb').classList.toggle('active', src === 'dongvanfb');
+  document.getElementById('gpt-sourceMixmmo').classList.toggle('active', src === 'mixmmo');
+}
 
 function gptSetMailType(m){
   gptMailType = m;
-  // Only hotmail is supported
-  document.getElementById('gpt-mailHotmail').classList.toggle('active', true);
+  document.getElementById('gpt-mailHotmail').classList.toggle('active', m === 'outlook');
+  document.getElementById('gpt-mailGmail94').classList.toggle('active', m === 'gmail94');
+  const d_btn = document.getElementById('gpt-mailDomain');
+  if(d_btn) d_btn.classList.toggle('active', m === 'domain');
+  
+  // Hien/an hotmail file group
+  const hotmailGroup = document.getElementById('gpt-hotmailGroup');
+  if(hotmailGroup) hotmailGroup.style.display = (m === 'outlook') ? 'block' : 'none';
+  const apiGroup = document.getElementById('gpt-apiSourceGroup');
+  if(apiGroup) apiGroup.style.display = (m === 'outlook') ? 'block' : 'none';
+  // Cap nhat label va hint cho count input
+  const lbl = document.getElementById('gpt-countLabel');
+  const hint = document.getElementById('gpt-countHint');
+  if(m === 'gmail94'){
+    if(lbl) lbl.textContent = 'Số Gmail cần mua (mỗi Gmail = 4 GPT)';
+    if(hint) hint.style.display = 'block';
+    gptUpdateCountHint();
+  } else {
+    if(lbl) lbl.textContent = 'Số lượng tài khoản cần tạo';
+    if(hint) hint.style.display = 'none';
+  }
+}
+
+function gptUpdateCountHint(){
+  if(gptMailType !== 'gmail94') return;
+  const count = parseInt(document.getElementById('gpt-count').value) || 0;
+  const total = count * 4;
+  const el = document.getElementById('gpt-countHintTotal');
+  if(el) el.textContent = total;
 }
 
 async function gptLoadHotmailCount(){
@@ -508,19 +610,27 @@ async function gptLoadAccounts(){
     const r=await fetch('/api/gpt/accounts');const d=await r.json();
     const tbody=document.getElementById('gpt-accountsBody');
     if(!d.accounts||d.accounts.length===0){
-      tbody.innerHTML='<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:20px;">Chưa có tài khoản nào</td></tr>';
+      tbody.innerHTML='<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:20px;">Chưa có tài khoản nào</td></tr>';
       return;
     }
     tbody.innerHTML=d.accounts.slice().reverse().slice(0,50).map(a=>{
       const twofa = a.twofa || '';
       const momoHtml = (a.momo === 'có') ? '<span style="color:#d82d8b;font-weight:bold;">Có</span>' : '<span style="color:var(--muted)">Không</span>';
-      return `<tr><td>${escHtml(a.email)}</td><td><code style="color:var(--muted)">${escHtml(a.password)}</code></td><td><code style="color:var(--accent);font-size:10px;">${escHtml(twofa)||'<span style="color:var(--muted)">N/A</span>'}</code></td><td>${momoHtml}</td><td><div style="display:flex;align-items:center;gap:6px;"><span class="tag tag-ok" style="margin:0;">✅ OK</span><button class="copy-btn" title="Copy Email|Pass|2FA" onclick="navigator.clipboard.writeText('${escHtml(a.email)}|${escHtml(a.password)}|${escHtml(twofa)}');showToast('📋','Đã copy!');"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button></div></td></tr>`;
+      const uudaiHtml = (a.uudai === 'có') ? '<span style="color:#0285FF;font-weight:bold;">Có</span>' : '<span style="color:var(--muted)">Không</span>';
+      return `<tr>
+        <td onclick="navigator.clipboard.writeText('${escHtml(a.email)}');showToast('📋','Đã copy Email!');" style="cursor:pointer;" title="Click để copy Email">${escHtml(a.email)}</td>
+        <td onclick="navigator.clipboard.writeText('${escHtml(a.password)}');showToast('📋','Đã copy Mật khẩu!');" style="cursor:pointer;" title="Click để copy Mật khẩu"><code style="color:var(--muted)">${escHtml(a.password)}</code></td>
+        <td onclick="navigator.clipboard.writeText('${escHtml(twofa)}');showToast('📋','Đã copy 2FA!');" style="cursor:pointer;" title="Click để copy 2FA"><code style="color:var(--accent);font-size:10px;">${escHtml(twofa)||'<span style="color:var(--muted)">N/A</span>'}</code></td>
+        <td>${momoHtml}</td>
+        <td>${uudaiHtml}</td>
+        <td><div style="display:flex;align-items:center;gap:6px;"><span class="tag tag-ok" style="margin:0;">✅ OK</span><button class="copy-btn" title="Copy (Tab Separated)" onclick="navigator.clipboard.writeText('${escHtml(a.email)}\\t${escHtml(a.password)}\\t${escHtml(twofa)}');showToast('📋','Đã copy!');"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button></div></td>
+      </tr>`;
     }).join('');
   }catch(e){}
 }
 
 async function gptCopyAccounts(){
-  try{const r=await fetch('/api/gpt/accounts/raw_ep');const t=await r.text();await navigator.clipboard.writeText(t);showToast('📋','Đã copy (Email|Pass|2FA)!');}catch(e){}
+  try{const r=await fetch('/api/gpt/accounts/raw_ep');const t=await r.text();await navigator.clipboard.writeText(t);showToast('📋','Đã copy (Email|Pass|2FA|MoMo|Uudai)!');}catch(e){}
 }
 
 async function gptClearAccounts(){
@@ -538,9 +648,13 @@ async function gptStartTask(){
   const count=parseInt(document.getElementById('gpt-count').value)||1;
   const threads=parseInt(document.getElementById('gpt-workers').value)||1;
   const checkMomo=document.getElementById('gpt-checkMomo').checked;
-  
-  gptOk=0;gptFail=0;gptTotal=count;gptUpdateStats();
-  const r=await fetch('/api/gpt/task/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({count,threads,mail_type:gptMailType,check_momo:checkMomo})});
+
+  // Gmail94: mỗi lần mua 1 Gmail sẽ tạo 4 biến thể GPT
+  gptOk=0;gptFail=0;
+  gptTotal = (gptMailType === 'gmail94') ? count * 4 : count;
+  gptUpdateStats();
+
+  const r=await fetch('/api/gpt/task/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({count,threads,mail_type:gptMailType,check_momo:checkMomo,mail_api_source:gptApiSource,keep_open:gptKeepOpen,driver_mode:'playwright_ui',browser_type:gptBrowser,headless:gptHeadless,incognito:gptIncognito})});
   const d=await r.json();
   if(!d.success){showToast('❌',d.error);return;}
   gptIsRunning=true;gptSetUI(true);gptStartSSE();
@@ -550,6 +664,10 @@ async function gptStopTask(){
   gptIsRunning=false; gptSetUI(false); if(gptEvt)gptEvt.close();
   await fetch('/api/gpt/task/stop',{method:'POST'});
   showToast('⏹','Đã dừng GPT.');
+}
+
+async function gptCloseBrowsers(){
+  try{await fetch('/api/gpt/task/close_browsers',{method:'POST'});showToast('💥','Đã đóng tất cả trình duyệt GPT!');}catch(e){}
 }
 
 function gptStartSSE(){

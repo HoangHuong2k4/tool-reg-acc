@@ -351,7 +351,7 @@ def setup_driver(index=1, keep_open=False, use_api_proxy=True, batch_size=3, use
     SCREEN_W = 1920; SCREEN_H = 1080
     window_width  = SCREEN_W // cols
     window_height = SCREEN_H
-    idx = (index - 1) % cols        # tab > 4 sẽ chồng lên cột 0..3
+    idx = index % cols        # tab > 4 sẽ chồng lên cột 0..3
     x = idx * window_width
     y = 0
     

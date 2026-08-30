@@ -336,77 +336,95 @@ def build_sentinel_header(session: BrowserSession, sentinel_resp: dict, flow: st
 
 
 # ============================================================
-# 密码分支专用函数（已停用，保留作备用）
-# 当前 OpenAI 主流程：follow_authorize 自动跳到 /email-verification 并发 OTP，
-# 不再走密码注册路径。如未来需要恢复密码注册（点击"使用密码继续"按钮的分支），
-# 可参考下方实现解封即可。
+# 密码分支专用函数（已解封，由 GMAIL94_PASSWORD 触发）
 # ============================================================
 
-# def get_create_account_page(session: BrowserSession) -> None:
-#     """
-#     [备用] 步骤5: 访问创建账号-密码页面（密码分支）。
-#     GET https://auth.openai.com/create-account/password
-#     """
-#     url = "https://auth.openai.com/create-account/password"
-#     headers = session.get_auth_navigate_headers(referer="https://auth.openai.com/email-verification")
-#     headers["sec-fetch-site"] = "same-origin"
-#
-#     logger.info("[步骤5] 访问创建账号-密码页（切换密码分支）...")
-#     resp = session.get(url, headers=headers, allow_redirects=True)
-#     resp.raise_for_status()
-#     logger.info(f"[步骤5] 创建账号-密码页访问成功, 落点: {resp.url}")
+import uuid
+
+def _get_datadog_headers():
+    return {
+        "x-datadog-origin": "rum",
+        "x-datadog-parent-id": str(uuid.uuid4().int >> 64)[:19],
+        "x-datadog-sampling-priority": "1",
+        "x-datadog-trace-id": str(uuid.uuid4().int >> 64)[:19],
+    }
+
+def submit_email_for_password_flow(session: BrowserSession, email: str, sentinel_header: str, so_header: str = None) -> dict:
+    """提交 email 以便进入 create-account/password 页面"""
+    url = "https://auth.openai.com/api/accounts/authorize/continue"
+    headers = session.get_auth_headers(referer="https://auth.openai.com/login")
+    headers["openai-sentinel-token"] = sentinel_header
+    headers.update(_get_datadog_headers())
+    if so_header:
+        headers["openai-sentinel-so-token"] = so_header
+    
+    payload = {
+        "username": {"value": email, "kind": "email"},
+        "screen_hint": "signup"
+    }
+    
+    logger.info(f"[步骤4.1] 提交邮箱以便创建密码: {email}")
+    resp = session.post(url, headers=headers, json=payload)
+    resp.raise_for_status()
+    return resp.json()
+
+def get_create_account_page(session: BrowserSession) -> None:
+    """访问创建账号-密码页面（密码分支）。"""
+    url = "https://auth.openai.com/create-account/password"
+    headers = session.get_auth_navigate_headers(referer="https://auth.openai.com/login")
+    headers["sec-fetch-site"] = "same-origin"
+
+    logger.info("[步骤5] 访问创建账号-密码页（切换密码分支）...")
+    resp = session.get(url, headers=headers, allow_redirects=True)
+    resp.raise_for_status()
+    logger.info(f"[步骤5] 创建账号-密码页访问成功, 落点: {resp.url}")
 
 
-# def register_user(session: BrowserSession, email: str, password: str, sentinel_header: str) -> dict:
-#     """
-#     [备用] 步骤7: 提交注册请求（邮箱+密码）。
-#     POST https://auth.openai.com/api/accounts/user/register
-#
-#     Returns:
-#         注册响应 JSON，例如:
-#         {
-#             "continue_url": "https://auth.openai.com/api/accounts/email-otp/send",
-#             "method": "GET",
-#             "page": {"type": "email_otp_send", "backstack_behavior": "default"}
-#         }
-#     """
-#     url = "https://auth.openai.com/api/accounts/user/register"
-#
-#     headers = session.get_auth_headers(referer="https://auth.openai.com/create-account/password")
-#     headers["openai-sentinel-token"] = sentinel_header
-#
-#     body = json.dumps({
-#         "password": password,
-#         "username": email,
-#     })
-#
-#     logger.info(f"[步骤7] 提交注册请求, 邮箱: {email}")
-#     resp = session.post(url, headers=headers, data=body)
-#
-#     if resp.status_code != 200:
-#         logger.error(f"[步骤7] 请求失败, 状态码: {resp.status_code}")
-#         logger.error(f"[步骤7] 响应内容: {resp.text}")
-#         resp.raise_for_status()
-#
-#     data = resp.json()
-#     logger.info(f"[步骤7] 注册请求成功: {data.get('page', {}).get('type')}")
-#     return data
+def register_user(session: BrowserSession, email: str, password: str, sentinel_header: str, so_header: str = None) -> dict:
+    """
+    步骤7: 提交注册请求（邮箱+密码）。
+    POST https://auth.openai.com/api/accounts/user/register
+    """
+    url = "https://auth.openai.com/api/accounts/user/register"
+
+    headers = session.get_auth_headers(referer="https://auth.openai.com/create-account/password")
+    headers["openai-sentinel-token"] = sentinel_header
+    headers.update(_get_datadog_headers())
+    if so_header:
+        headers["openai-sentinel-so-token"] = so_header
+
+    payload = {
+        "password": password,
+        "username": email,
+    }
+
+    logger.info(f"[步骤7] 提交注册请求, 邮箱: {email}")
+    resp = session.post(url, headers=headers, json=payload)
+
+    if resp.status_code != 200:
+        logger.error(f"[步骤7] 请求失败, 状态码: {resp.status_code}")
+        logger.error(f"[步骤7] 响应内容: {resp.text}")
+        resp.raise_for_status()
+
+    data = resp.json()
+    logger.info(f"[步骤7] 注册请求成功: {data.get('page', {}).get('type')}")
+    return data
 
 
-# def send_email_otp(session: BrowserSession) -> None:
-#     """
-#     [备用] 步骤8: 触发发送邮箱验证码。
-#     GET https://auth.openai.com/api/accounts/email-otp/send
-#     """
-#     url = "https://auth.openai.com/api/accounts/email-otp/send"
-#
-#     headers = session.get_auth_navigate_headers(referer="https://auth.openai.com/create-account/password")
-#     headers["sec-fetch-site"] = "same-origin"
-#     headers["sec-fetch-user"] = "?1"
-#
-#     logger.info("[步骤8] 触发发送邮箱验证码...")
-#     resp = session.get(url, headers=headers, allow_redirects=True)
-#     logger.info(f"[步骤8] 验证码发送请求完成, 状态码: {resp.status_code}")
+def trigger_send_email_otp(session: BrowserSession) -> None:
+    """
+    步骤8: 触发发送邮箱验证码。
+    GET https://auth.openai.com/api/accounts/email-otp/send
+    """
+    url = "https://auth.openai.com/api/accounts/email-otp/send"
+
+    headers = session.get_auth_headers(referer="https://auth.openai.com/create-account/password")
+    headers["accept"] = "application/json"
+    headers.update(_get_datadog_headers())
+
+    logger.info("[步骤8] 触发发送邮箱验证码...")
+    resp = session.get(url, headers=headers, allow_redirects=True)
+    logger.info(f"[步骤8] 验证码发送请求完成, 状态码: {resp.status_code}")
 
 
 def navigate_about_you(session: BrowserSession, about_url: typing.Union[str, None] = None) -> str:

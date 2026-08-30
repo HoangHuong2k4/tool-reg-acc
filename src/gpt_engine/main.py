@@ -171,27 +171,12 @@ def run_registration(
     otp_code: str = None,
     batch_dir=None,
     check_momo: bool = True,
+    password: str = None,
 ):
     """
-    执行完整的 ChatGPT 注册流程（OTP-only，无密码）。
-
-    OpenAI 当前默认流程：signin 时携带 login_hint+screen_hint=login_or_signup
-    → follow_authorize 重定向链自动落到 /email-verification 并触发 OTP 发送
-    → 用户输入验证码 → validate_email_otp → about-you 提交昵称生日 → 完成。
-
-    Args:
-        email: 注册邮箱
-        name: 用户显示名称
-        birthday: 生日，格式 YYYY-MM-DD
-        proxy: 代理地址（不传则从 PROXY_POOL 随机抽）
-        otp_code: 邮箱验证码（如果为None，会等待手动输入）
+    执行完整的 ChatGPT 注册流程。
+    支持 Passwordless(OTP-only) 默认流程 或 密码创建流程。
     """
-    # 可选注册驱动：
-    #   protocol     = 原有纯协议（curl_cffi）
-    #   roxy         = RoxyBrowser 指纹浏览器 + Selenium
-    #   cloak        = CloakBrowser + Playwright/Selenium 适配层
-    #   browser_use  = Browser Use Cloud stealth Chromium + Playwright
-    #   skyvern      = Skyvern Browser Sessions + Playwright
     driver_mode = str(getattr(_roxy_cfg, "REGISTRATION_DRIVER", "protocol") or "protocol").strip().lower()
     if driver_mode in ("roxy", "roxybrowser", "fingerprint", "browser"):
         from core.roxy_registration import run_roxy_registration
@@ -233,13 +218,27 @@ def run_registration(
             otp_code=otp_code,
             batch_dir=batch_dir,
         )
+    if driver_mode in ("playwright_ui", "playwright", "playwrightui"):
+        from core.playwright_ui_registration import run_playwright_registration
+        headless = getattr(_roxy_cfg, "BROWSER_USE_HEADLESS", False)
+        browser_type = getattr(_roxy_cfg, "BROWSER_TYPE", "chrome")
+        incognito = getattr(_roxy_cfg, "BROWSER_INCOGNITO", False)
+        return run_playwright_registration(
+            email=email,
+            proxy=proxy,
+            headless=headless,
+            browser_type=browser_type,
+            incognito=incognito
+        )
     if driver_mode not in ("protocol", "api", "http"):
         raise RuntimeError(
-            f"不支持的 REGISTRATION_DRIVER={driver_mode!r}，可选 protocol / roxy / cloak / browser_use / skyvern"
+            f"不支持的 REGISTRATION_DRIVER={driver_mode!r}，可选 protocol / roxy / cloak / browser_use / skyvern / playwright_ui"
         )
 
     # 创建浏览器会话（proxy=None 时自动从 config.PROXY_POOL 随机抽一个）
     session = BrowserSession(proxy=proxy)
+    if password:
+        session.require_password = True
 
     # 从代理 URL 中抽取 sid 段做日志，避免把账号密码完整打印
     proxy_label = "无"
@@ -300,6 +299,35 @@ def run_registration(
         # 不需要 /create-account/password、register_user、单独 send_email_otp 调用。
         follow_authorize(session, authorize_url)
         human_delay("navigate")
+
+        if getattr(session, "require_password", False):
+            logger.info(f"[密码分支] 正在执行创建密码流程 (GMAIL94_PASSWORD)...")
+            from core.openai_auth import (
+                submit_email_for_password_flow, get_create_account_page,
+                register_user, trigger_send_email_otp
+            )
+            
+            # 1. Generate token for signup and submit email
+            sentinel_resp_signup = request_sentinel_token(session, "signup")
+            sentinel_header_signup, so_header_signup = build_sentinel_header(session, sentinel_resp_signup, "signup")
+            submit_email_for_password_flow(session, email, sentinel_header_signup, so_header_signup)
+            human_delay("api")
+            
+            # 2. Visit password page
+            get_create_account_page(session)
+            human_delay("navigate")
+            
+            # 3. Generate token for password create and submit password
+            sentinel_resp_pw = request_sentinel_token(session, "username_password_create")
+            sentinel_header_pw, so_header_pw = build_sentinel_header(session, sentinel_resp_pw, "username_password_create")
+            register_user(session, email, password, sentinel_header_pw, so_header_pw)
+            human_delay("api")
+            
+            # 4. Send OTP
+            trigger_send_email_otp(session)
+            human_delay("api")
+            
+            otp_after_ts = time.time()  # Cập nhật mốc thời gian OTP sau khi gửi
 
         # ==================== 阶段3: 验证码验证 ====================
         # Sentinel Token 不提前生成；等 OTP 到手后紧贴 validate 请求生成，
