@@ -121,11 +121,11 @@ class LocalProxyRelay:
         return data
 
     def _tunnel(self, a, b):
-        a.settimeout(60)
-        b.settimeout(60)
+        a.settimeout(600)
+        b.settimeout(600)
         try:
             while True:
-                r, _, _ = select.select([a, b], [], [], 30)
+                r, _, _ = select.select([a, b], [], [], 300)
                 if not r:
                     break
                 for s in r:
@@ -373,7 +373,7 @@ def init_selenium_driver(browser_type, headless, incognito, proxy, thread_id=1, 
             
         if proxy:
             parsed = urllib.parse.urlparse(proxy)
-            if parsed.username and parsed.password and not direct_proxy:
+            if parsed.username and parsed.password:
                 relay = LocalProxyRelay(parsed.hostname, parsed.port, parsed.username, parsed.password, 0).start()
                 ff_options.set_preference("network.proxy.type", 1)
                 ff_options.set_preference("network.proxy.http", "127.0.0.1")
@@ -404,10 +404,63 @@ def init_selenium_driver(browser_type, headless, incognito, proxy, thread_id=1, 
         
         if proxy:
             parsed = urllib.parse.urlparse(proxy)
-            if parsed.username and parsed.password and not direct_proxy:
-                relay = LocalProxyRelay(parsed.hostname, parsed.port, parsed.username, parsed.password, 0).start()
-                chrome_options.add_argument(f"--proxy-server=http://127.0.0.1:{relay.local_port}")
-                chrome_options.add_argument("--proxy-bypass-list=<-loopback>")
+            if parsed.username and parsed.password:
+                import os, tempfile, shutil, uuid
+                ext_dir = os.path.join(tempfile.gettempdir(), f"proxy_ext_{uuid.uuid4().hex}")
+                os.makedirs(ext_dir, exist_ok=True)
+                
+                manifest_json = """{
+                    "version": "1.0.0",
+                    "manifest_version": 2,
+                    "name": "Chrome Proxy",
+                    "permissions": [
+                        "proxy",
+                        "tabs",
+                        "unlimitedStorage",
+                        "storage",
+                        "<all_urls>",
+                        "webRequest",
+                        "webRequestBlocking"
+                    ],
+                    "background": {
+                        "scripts": ["background.js"]
+                    },
+                    "minimum_chrome_version":"22.0.0"
+                }"""
+                
+                background_js = f"""
+                var config = {{
+                        mode: "fixed_servers",
+                        rules: {{
+                          singleProxy: {{
+                            scheme: "http",
+                            host: "{parsed.hostname}",
+                            port: parseInt({parsed.port})
+                          }},
+                          bypassList: ["localhost"]
+                        }}
+                      }};
+                chrome.proxy.settings.set({{value: config, scope: "regular"}}, function() {{}});
+                function callbackFn(details) {{
+                    return {{
+                        authCredentials: {{
+                            username: "{parsed.username}",
+                            password: "{parsed.password}"
+                        }}
+                    }};
+                }}
+                chrome.webRequest.onAuthRequired.addListener(
+                        callbackFn,
+                        {{urls: ["<all_urls>"]}},
+                        ['blocking']
+                );
+                """
+                with open(os.path.join(ext_dir, "manifest.json"), "w") as f:
+                    f.write(manifest_json)
+                with open(os.path.join(ext_dir, "background.js"), "w") as f:
+                    f.write(background_js)
+                
+                chrome_options.add_argument(f"--load-extension={ext_dir}")
             else:
                 chrome_options.add_argument(f"--proxy-server=http://{parsed.hostname}:{parsed.port}")
                 
