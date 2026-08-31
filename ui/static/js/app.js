@@ -668,54 +668,47 @@ function gptSetTab(tab) {
     gptLoadAccounts();
 }
 
+let gptAllAccountsData = [];
+
 async function gptLoadAccounts(){
   try{
     const r=await fetch(`/api/gpt/accounts?session=${gptCurrentTab === 'session'}`);const d=await r.json();
     const tbody=document.getElementById('gpt-accountsBody');
     if(!d.accounts||d.accounts.length===0){
+      gptAllAccountsData = [];
       tbody.innerHTML='<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:20px;">Chưa có tài khoản nào</td></tr>';
       return;
     }
-    tbody.innerHTML=d.accounts.slice().reverse().slice(0,50).map(a=>{
+    // Lưu toàn bộ để Copy Filter có thể copy hết
+    gptAllAccountsData = d.accounts.slice().reverse();
+    // Render toàn bộ ra UI để lúc lọc/copy theo giao diện không bị thiếu
+    tbody.innerHTML=gptAllAccountsData.map(a=>{
       const twofa = a.twofa || '';
       
       // 1. Format Trial (Ưu Đãi)
-      let uudaiHtml = '<span style="color:var(--muted)">Không</span>';
+      let uudaiHtml = '<span style="color:var(--muted)">—</span>';
       if (a.uudai && a.uudai !== 'không') {
-          let text = a.uudai;
-          if (text.toLowerCase() === 'có') text = 'Có trial';
-          
-          const badgeStyle = "display:inline-block; padding:2px 8px; border-radius:12px; font-size:10px; font-weight:500; white-space:nowrap;";
-          if (text.toLowerCase().includes('có trial')) {
-              uudaiHtml = `<span style="${badgeStyle} background: rgba(0, 212, 255, 0.08); border: 1px solid rgba(0, 212, 255, 0.25); color: #00d4ff;">• ${text}</span>`;
+          const raw = a.uudai.toLowerCase();
+          const badgeStyle = "display:inline-block;padding:2px 8px;border-radius:12px;font-size:10px;font-weight:600;white-space:nowrap;";
+          if (raw.includes('có trial') || raw.includes('0đ') || raw.includes('gói 0')) {
+              uudaiHtml = `<span style="${badgeStyle}background:rgba(0,212,255,0.1);border:1px solid rgba(0,212,255,0.3);color:#00d4ff;">✓ Trial 0đ</span>`;
           } else {
-              uudaiHtml = `<span style="${badgeStyle} background: rgba(255, 215, 0, 0.08); border: 1px solid rgba(255, 215, 0, 0.25); color: #ffd700;">• ${text}</span>`;
+              // Lấy số tiền từ chuỗi "Không trial - 522.500 đ" → "522.500đ"
+              const match = a.uudai.match(/([\d.,]+)\s*đ/);
+              const amount = match ? match[1] + 'đ' : a.uudai;
+              uudaiHtml = `<span style="${badgeStyle}background:rgba(255,215,0,0.08);border:1px solid rgba(255,215,0,0.2);color:#ffd700;">${amount}</span>`;
           }
       }
       
-      // 2. Format Payment Methods (MoMo)
+      // 2. Format Payment Methods (MoMo) - chỉ hiện Có/Không
       const pms = (a.momo && a.momo !== 'không' && a.momo !== 'lỗi') ? a.momo.toLowerCase() : '';
       const hasMomo = pms.includes('momo') || pms === 'có'; // Fallback cho DB cũ
-      
-      const badgeStyle = "display:inline-block; padding:2px 7px; border-radius:10px; font-size:10px; font-weight:500; margin-right:3px; margin-bottom:2px; white-space:nowrap;";
-      const appleStyle = pms.includes('apple_pay') ? "background:rgba(255,255,255,0.08);color:#e5e7eb;border:1px solid rgba(255,255,255,0.2);" : "";
-      const cardStyle = pms.includes('card') ? "background:rgba(59,130,246,0.1);color:#60a5fa;border:1px solid rgba(59,130,246,0.25);" : "";
-      const gpayStyle = pms.includes('google_pay') ? "background:rgba(16,185,129,0.1);color:#34d399;border:1px solid rgba(16,185,129,0.25);" : "";
-      const momoStyle = hasMomo ? "background:rgba(168,85,247,0.15);color:#d8b4fe;border:1px solid rgba(168,85,247,0.35);" : "";
-      
+
       let momoHtml = '';
-      if(pms) {
-          if (pms === 'có') {
-             momoHtml = `<span style="${badgeStyle} ${momoStyle}">MoMo</span>`;
-          } else {
-             if (pms.includes('apple_pay')) momoHtml += `<span style="${badgeStyle} ${appleStyle}">Apple Pay</span>`;
-             if (pms.includes('card')) momoHtml += `<span style="${badgeStyle} ${cardStyle}">Card</span>`;
-             if (pms.includes('google_pay')) momoHtml += `<span style="${badgeStyle} ${gpayStyle}">GPay</span>`;
-             if (pms.includes('link')) momoHtml += `<span style="${badgeStyle} background:rgba(20,184,166,0.1);color:#2dd4bf;border:1px solid rgba(20,184,166,0.25);">Link</span>`;
-             if (hasMomo) momoHtml += `<span style="${badgeStyle} ${momoStyle}">MoMo</span>`;
-          }
+      if (hasMomo) {
+          momoHtml = `<span style="display:inline-block;padding:2px 10px;border-radius:10px;font-size:10px;font-weight:600;background:rgba(168,85,247,0.18);color:#d8b4fe;border:1px solid rgba(168,85,247,0.4);">✓ Có MoMo</span>`;
       } else {
-          momoHtml = `<span style="color:var(--muted)">Không</span>`;
+          momoHtml = `<span style="color:var(--muted);font-size:11px;">Không</span>`;
       }
       
       // Highlight màu dòng nếu có MoMo
@@ -750,6 +743,54 @@ async function gptLoadAccounts(){
 
 async function gptCopyAccounts(){
   try{const r=await fetch('/api/gpt/accounts/raw_ep');const t=await r.text();await navigator.clipboard.writeText(t);showToast('📋','Đã copy (Email|Pass|2FA|MoMo|Uudai)!');}catch(e){}
+}
+
+// Copy các dòng đang visible sau khi filter, tính chuẩn theo giao diện (UI)
+async function gptCopyFiltered() {
+  try {
+    const tbody = document.getElementById('gpt-accountsBody');
+    if (!tbody) return;
+    
+    const trs = tbody.getElementsByTagName('tr');
+    const copiedLines = [];
+    
+    for (let i = 0; i < trs.length; i++) {
+      const tr = trs[i];
+      if (tr.style.display !== 'none' && !tr.innerText.includes('Chưa có tài khoản nào')) {
+        const tds = tr.getElementsByTagName('td');
+        if (tds.length >= 5) {
+          const email = tds[0].textContent.trim();
+          const pass = tds[1].textContent.trim();
+          const twofa = tds[2].textContent.trim();
+          // Cột 3 và 4 chứa HTML có span, lấy textContent để có chuỗi sạch
+          const momo = tds[3].textContent.trim();
+          const uudai = tds[4].textContent.trim();
+          
+          copiedLines.push(`${email}\t${pass}\t${twofa}\t${momo}\t${uudai}`);
+        }
+      }
+    }
+    
+    if (copiedLines.length === 0) {
+      showToast('⚠️', 'Không có tài khoản nào khớp với bộ lọc!');
+      return;
+    }
+    
+    const text = copiedLines.join('\n');
+    await navigator.clipboard.writeText(text);
+    showToast('📋', `Đã copy ${copiedLines.length} tài khoản từ bảng! (Dạng Tab Excel)`);
+  } catch(e) {
+    showToast('❌', 'Lỗi copy: ' + e.message);
+  }
+}
+
+// Toggle ẩn/hiện thông tin nhạy cảm
+window.gptHideSensitive = false;
+function gptToggleHide() {
+  window.gptHideSensitive = !window.gptHideSensitive;
+  const btn = document.getElementById('gptToggleHideBtn');
+  if (btn) btn.textContent = window.gptHideSensitive ? '👁️ Hiện' : '🙈 Ẩn';
+  gptLoadAccounts();
 }
 
 async function gptClearAccounts(){
@@ -1590,29 +1631,67 @@ if(_drmTa) _drmTa.addEventListener('input', drmCountTextareaLines);
 
 function gptFilterAccounts() {
     const input = document.getElementById('gptSearchInput');
-    if (!input) return;
-    const filter = input.value.toLowerCase();
+    const badgeSelect = document.getElementById('gptBadgeFilter');
+    const textFilter = input ? input.value.toLowerCase().trim() : '';
+    const badgeFilter = badgeSelect ? badgeSelect.value : 'all';
+    
     const tbody = document.getElementById('gpt-accountsBody');
     if (!tbody) return;
     const trs = tbody.getElementsByTagName('tr');
     
+    let visibleCount = 0;
     for (let i = 0; i < trs.length; i++) {
-        // Skip the "Chưa có tài khoản nào" row if it exists
+        // Skip the empty/colspan rows
         if (trs[i].cells.length === 1 && trs[i].cells[0].colSpan > 1) {
             continue;
         }
         
-        let match = false;
         const tds = trs[i].getElementsByTagName('td');
-        for (let j = 0; j < tds.length; j++) {
-            if (tds[j]) {
-                const txtValue = tds[j].textContent || tds[j].innerText;
-                if (txtValue.toLowerCase().indexOf(filter) > -1) {
-                    match = true;
+        if (!tds.length) continue;
+        
+        // Badge filter: dựa vào nội dung text của cột MoMo (index 3) và Ưu Đãi (index 4)
+        let badgeMatch = true;
+        if (badgeFilter !== 'all') {
+            const momoText = (tds[3] ? tds[3].textContent : '').toLowerCase();
+            const trialText = (tds[4] ? tds[4].textContent : '').toLowerCase();
+            const hasMomo = momoText.includes('momo');
+            const hasTrial = trialText.includes('có trial') || trialText.includes('0 đ') || trialText.includes('0đ') || trialText.includes('gói 0');
+            
+            if (badgeFilter === 'momo') badgeMatch = hasMomo;
+            else if (badgeFilter === 'trial') badgeMatch = hasTrial;
+            else if (badgeFilter === 'momo_trial') badgeMatch = hasMomo && hasTrial;
+            else if (badgeFilter === 'trial_no_momo') badgeMatch = hasTrial && !hasMomo;
+        }
+        
+        // Text filter
+        let textMatch = true;
+        if (textFilter) {
+            textMatch = false;
+            for (let j = 0; j < tds.length; j++) {
+                if (tds[j] && (tds[j].textContent || tds[j].innerText).toLowerCase().indexOf(textFilter) > -1) {
+                    textMatch = true;
                     break;
                 }
             }
         }
-        trs[i].style.display = match ? "" : "none";
+        
+        const visible = badgeMatch && textMatch;
+        trs[i].style.display = visible ? '' : 'none';
+        if (visible) visibleCount++;
+    }
+    
+    // Cập nhật label nút Copy
+    const copyFilteredBtn = document.getElementById('gptCopyBtn');
+    if (copyFilteredBtn && (badgeFilter !== 'all' || textFilter)) {
+        copyFilteredBtn.textContent = `📋 Copy (${visibleCount})`;
+        copyFilteredBtn.style.color = '#00d4ff';
+        copyFilteredBtn.style.borderColor = 'rgba(0, 212, 255, 0.35)';
+        copyFilteredBtn.style.background = 'rgba(0, 212, 255, 0.15)';
+    } else if (copyFilteredBtn) {
+        copyFilteredBtn.textContent = '📋 Copy';
+        copyFilteredBtn.style.color = '';
+        copyFilteredBtn.style.borderColor = '';
+        copyFilteredBtn.style.background = '';
     }
 }
+

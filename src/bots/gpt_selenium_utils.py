@@ -1209,21 +1209,32 @@ def _step_check_promo(driver, stop_event=None, proxy=None):
             def __init__(self, drv, proxy_url=None):
                 self.drv = drv
                 self.proxy_url = proxy_url
-                
-            def post(self, url, json=None, data=None, headers=None, timeout=None):
+
+            def _make_cffi_session(self):
                 from curl_cffi import requests
                 req_session = requests.Session(impersonate="chrome120")
                 if self.proxy_url:
                     req_session.proxies = {"http": self.proxy_url, "https": self.proxy_url}
-                
                 for cookie in self.drv.get_cookies():
                     req_session.cookies.set(cookie['name'], cookie['value'], domain=cookie['domain'])
-                
+                return req_session
+
+            def post(self, url, json=None, data=None, headers=None, timeout=None):
+                req_session = self._make_cffi_session()
                 try:
                     res = req_session.post(url, json=json, data=data, headers=headers, timeout=timeout)
                     return res
                 except Exception as e:
-                    logger.warning(f"[SessionMock] curl_cffi request failed for {url}: {e}")
+                    logger.warning(f"[SessionMock] curl_cffi POST failed for {url}: {e}")
+                    raise
+
+            def get(self, url, headers=None, timeout=None):
+                req_session = self._make_cffi_session()
+                try:
+                    res = req_session.get(url, headers=headers, timeout=timeout)
+                    return res
+                except Exception as e:
+                    logger.warning(f"[SessionMock] curl_cffi GET failed for {url}: {e}")
                     raise
 
         class MockBrowserSession:

@@ -1,32 +1,28 @@
 function playMomoSound() {
     try {
         const ctx = new (window.AudioContext || window.webkitAudioContext)();
-        
-        // Note 1
-        const osc1 = ctx.createOscillator();
-        const gain1 = ctx.createGain();
-        osc1.connect(gain1);
-        gain1.connect(ctx.destination);
-        osc1.type = 'sine';
-        osc1.frequency.setValueAtTime(880, ctx.currentTime); // A5
-        gain1.gain.setValueAtTime(0, ctx.currentTime);
-        gain1.gain.linearRampToValueAtTime(0.5, ctx.currentTime + 0.05);
-        gain1.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.5);
-        osc1.start(ctx.currentTime);
-        osc1.stop(ctx.currentTime + 0.5);
-        
-        // Note 2
-        const osc2 = ctx.createOscillator();
-        const gain2 = ctx.createGain();
-        osc2.connect(gain2);
-        gain2.connect(ctx.destination);
-        osc2.type = 'sine';
-        osc2.frequency.setValueAtTime(1318.51, ctx.currentTime + 0.15); // E6
-        gain2.gain.setValueAtTime(0, ctx.currentTime + 0.15);
-        gain2.gain.linearRampToValueAtTime(0.5, ctx.currentTime + 0.2);
-        gain2.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.8);
-        osc2.start(ctx.currentTime + 0.15);
-        osc2.stop(ctx.currentTime + 0.8);
+
+        function playNote(freq, startTime, duration, volume = 0.5) {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(freq, startTime);
+            gain.gain.setValueAtTime(0, startTime);
+            gain.gain.linearRampToValueAtTime(volume, startTime + 0.05);
+            gain.gain.exponentialRampToValueAtTime(0.01, startTime + duration);
+            osc.start(startTime);
+            osc.stop(startTime + duration);
+        }
+
+        const t = ctx.currentTime;
+        playNote(880,     t + 0.0,  0.55);  // A5  - nốt 1
+        playNote(1318.51, t + 0.35, 0.55);  // E6  - nốt 2
+        playNote(1046.50, t + 0.70, 0.55);  // C6  - nốt 3
+        playNote(1567.98, t + 1.05, 0.90);  // G6  - nốt 4 (cao, dài hơn)
+        playNote(1318.51, t + 1.55, 0.65);  // E6  - nốt 5 (kết)
+
     } catch(e) {
         console.log("Audio not supported");
     }

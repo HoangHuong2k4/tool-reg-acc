@@ -12,7 +12,7 @@ def check_momo_payment(session, access_token: str) -> bool:
     try:
         logger.info("[MoMoCheck] Bắt đầu check Momo payment...")
         
-        # Bước 0: Xin Account ID (ChatGPT hiện tại bắt buộc phải có chatgpt-account-id)
+        # Bước 0: Xin Account ID + check eligible_promo_campaigns (trial info)
         headers = {
             "Authorization": f"Bearer {access_token}",
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -21,6 +21,9 @@ def check_momo_payment(session, access_token: str) -> bool:
         
         acc_url = "https://chatgpt.com/backend-api/accounts/check/v4-2023-04-27?timezone_offset_min=-420"
         resp_acc = session.get(acc_url, headers=headers, timeout=20)
+        
+        # Detect trial từ eligible_promo_campaigns (đây là nguồn đáng tin nhất)
+        account_has_trial = False
         if resp_acc.status_code == 200:
             acc_data = resp_acc.json()
             # Lấy account_id từ default hoặc account_ordering
@@ -29,6 +32,23 @@ def check_momo_payment(session, access_token: str) -> bool:
                 acc_id = acc_data["account_ordering"][0]
             if acc_id:
                 headers["chatgpt-account-id"] = acc_id
+            
+            # Check eligible_promo_campaigns
+            accounts = acc_data.get("accounts") or {}
+            for _key, acc_val in accounts.items():
+                if not isinstance(acc_val, dict):
+                    continue
+                promo_campaigns = acc_val.get("eligible_promo_campaigns") or {}
+                plus_promo = promo_campaigns.get("plus") or {}
+                if plus_promo:
+                    metadata = plus_promo.get("metadata") or {}
+                    discount = metadata.get("discount") or {}
+                    pct = discount.get("percentage", 0)
+                    promo_type = metadata.get("promotion_type", "")
+                    if pct >= 100 or promo_type in ("discount", "free_trial", "trial"):
+                        account_has_trial = True
+                        logger.info(f"[MoMoCheck] ✅ Trial 0đ từ eligible_promo_campaigns! ({plus_promo.get('id')})")
+                        break
                 
         # Bước 1: Xin phiên thanh toán từ ChatGPT
         checkout_url = "https://chatgpt.com/backend-api/payments/checkout"
@@ -85,11 +105,16 @@ def check_momo_payment(session, access_token: str) -> bool:
                 "key": publishable_key,
                 "type": "deferred_intent",
                 "deferred_intent[mode]": "subscription",
-                "deferred_intent[amount]": "522500",
+                "deferred_intent[amount]": "0",
                 "deferred_intent[currency]": "vnd",
+                "deferred_intent[setup_future_usage]": "off_session",
+                "deferred_intent[payment_method_types][0]": "link",
+                "deferred_intent[payment_method_types][1]": "momo",
+                "deferred_intent[payment_method_types][2]": "card",
                 "currency": "vnd",
-                "locale": "en-US",
-                "browser_timezone": "Asia/Saigon"
+                "locale": "en-GB",
+                "browser_timezone": "Asia/Saigon",
+                "_stripe_version": "2025-03-31.basil",
             }
             url = f"https://api.stripe.com/v1/elements/sessions?{urllib.parse.urlencode(params)}"
             resp2 = session.get(url, headers=stripe_headers, timeout=20)
@@ -99,10 +124,14 @@ def check_momo_payment(session, access_token: str) -> bool:
                 return "Stripe Elements Lỗi"
                 
             data2 = resp2.json()
+            # Lấy payment methods từ nhiều fields (Elements API)
             pref = data2.get("payment_method_preference", {})
             payment_methods = pref.get("ordered_payment_method_types", [])
             if not payment_methods:
                 payment_methods = data2.get("ordered_payment_method_types_and_wallets", [])
+            if not payment_methods:
+                specs = data2.get("payment_method_specs") or []
+                payment_methods = [s["type"] for s in specs if isinstance(s, dict) and s.get("type")]
                 
         elif checkout_session_id:
             logger.info(f"[MoMoCheck] Dùng payment_pages/init API (cũ) với Checkout Session ID: {checkout_session_id[:10]}...")
@@ -135,28 +164,27 @@ def check_momo_payment(session, access_token: str) -> bool:
         has_momo = "momo" in payment_methods
         momo_str = "Có MoMo" if has_momo else "Không MoMo"
         
-        # Kiểm tra xem có phải gói 0đ không
-        due = None
-        for item in data2.get("display_items", []):
-            if item.get("type") == "custom":
-                due = item.get("custom", {}).get("amount")
-                break
+        # Trial: ưu tiên từ Account API (eligible_promo_campaigns)
+        # Fallback: kiểm tra display_items (API cũ)
+        is_0d = account_has_trial
+        if not is_0d:
+            due = None
+            for item in data2.get("display_items", []):
+                if item.get("type") == "custom":
+                    due = item.get("custom", {}).get("amount")
+                    break
+            if isinstance(due, dict) and due.get("value") == 0:
+                is_0d = True
+            elif due == 0:
+                is_0d = True
         
-        is_0d = False
-        if isinstance(due, dict) and due.get("value") == 0:
-            is_0d = True
-        elif due == 0:
-            is_0d = True
-        
-        if due == 0:
+        if is_0d:
             return f"Gói 0đ - {momo_str}"
-        elif due is not None:
-            return f"Gói {due} - {momo_str}"
         else:
-            return f"Có Trial - {momo_str}" if is_0d else momo_str
+            return momo_str
         
     except Exception as e:
-        logger.error(f"[MoMoCheck] Lỗi check MoMo: {str(e)}")
+        logger.error(f"[MoMoCheck] Lỗi check MoMo: {str(e)}") 
         return f"Lỗi: {str(e)}"
 
 def stripe_xor_base64_encode(value: str) -> str:
