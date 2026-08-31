@@ -650,9 +650,27 @@ function playMomoSound() {
     }
 }
 
+let gptCurrentTab = 'session';
+function gptSetTab(tab) {
+    gptCurrentTab = tab;
+    
+    // update tab UI if the elements exist
+    const tabSession = document.getElementById('gptTabSession');
+    const tabAll = document.getElementById('gptTabAll');
+    if(tabSession && tabAll) {
+        tabSession.style.background = tab === 'session' ? 'var(--primary)' : 'var(--bg-card)';
+        tabSession.style.color = tab === 'session' ? 'white' : 'var(--text)';
+        
+        tabAll.style.background = tab === 'all' ? 'var(--primary)' : 'var(--bg-card)';
+        tabAll.style.color = tab === 'all' ? 'white' : 'var(--text)';
+    }
+    
+    gptLoadAccounts();
+}
+
 async function gptLoadAccounts(){
   try{
-    const r=await fetch('/api/gpt/accounts');const d=await r.json();
+    const r=await fetch(`/api/gpt/accounts?session=${gptCurrentTab === 'session'}`);const d=await r.json();
     const tbody=document.getElementById('gpt-accountsBody');
     if(!d.accounts||d.accounts.length===0){
       tbody.innerHTML='<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:20px;">Chưa có tài khoản nào</td></tr>';

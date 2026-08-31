@@ -983,11 +983,15 @@ def _run_higgsfield_task(count, threads, browser_type, headless):
 @app.route("/api/gpt/accounts")
 def gpt_accounts():
     accounts = []
+    session_only = request.args.get('session', 'false').lower() == 'true'
     try:
         with get_db() as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
-            cursor.execute("SELECT email, password, twofa, momo, uudai FROM accounts WHERE app='gpt' ORDER BY id ASC")
+            if session_only:
+                cursor.execute("SELECT email, password, twofa, momo, uudai FROM accounts WHERE app='gpt' AND id > ? ORDER BY id ASC", (state_gpt.last_start_id,))
+            else:
+                cursor.execute("SELECT email, password, twofa, momo, uudai FROM accounts WHERE app='gpt' ORDER BY id ASC")
             accounts = [dict(row) for row in cursor.fetchall()]
     except Exception:
         pass
@@ -1085,6 +1089,16 @@ def gpt_task_start():
     _roxy_cfg.BROWSER_USE_HEADLESS = headless
     _roxy_cfg.BROWSER_TYPE = browser_type
     _roxy_cfg.BROWSER_INCOGNITO = incognito
+
+    try:
+        with get_db() as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT MAX(id) as max_id FROM accounts WHERE app='gpt'")
+            row = cursor.fetchone()
+            state_gpt.last_start_id = row['max_id'] if row and row['max_id'] else 0
+    except Exception:
+        pass
 
     state_gpt.task_stop.clear()
     while not state_gpt.log_queue.empty():

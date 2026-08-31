@@ -643,9 +643,14 @@
             </div>
           </div>
           <div class="accounts-wrap">
-            <table>
-              <thead>
-                <tr>
+            <div class="gpt-tabs" style="display:flex;gap:10px;margin-bottom:10px;">
+              <button class="btn btn-secondary" id="gptTabSession" onclick="gptSetTab('session')" style="width:auto;padding:5px 15px; background:var(--primary); color:white;">Phiên hiện tại</button>
+              <button class="btn btn-secondary" id="gptTabAll" onclick="gptSetTab('all')" style="width:auto;padding:5px 15px;">Tất cả tài khoản</button>
+            </div>
+            <div class="gpt-table-container" style="max-height: 400px; overflow-y: auto;">
+              <table style="width:100%; border-collapse: collapse;">
+                <thead style="position: sticky; top: 0; background: var(--bg-card); z-index: 1;">
+                  <tr>
                   <th>Email</th>
                   <th>Mật khẩu</th>
                   <th>2FA (TOTP)</th>
@@ -660,6 +665,7 @@
                 </tr>
               </tbody>
             </table>
+            </div>
           </div>
         </div>
       </div>

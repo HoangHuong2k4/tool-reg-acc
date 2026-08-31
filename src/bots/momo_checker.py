@@ -168,6 +168,12 @@ def extract_payment_methods(stripe_info):
     )
 
 def extract_trial(stripe_info):
+    # Detect trial flags directly
+    has_trial_flag = stripe_info.get("has_free_trial") or stripe_info.get("is_free_trial")
+    sub_data = stripe_info.get("subscription_data") or {}
+    if sub_data.get("trial_period_days") or sub_data.get("trial_end"):
+        has_trial_flag = True
+        
     total_summary = stripe_info.get("total_summary") or {}
     amount_due = total_summary.get("due")
     if amount_due is None:
@@ -181,7 +187,9 @@ def extract_trial(stripe_info):
     currency = str(
         stripe_info.get("currency") or total_summary.get("currency") or "vnd"
     ).upper()
-    return amount_due, currency, amount_due == 0 if amount_due is not None else None
+    
+    is_trial = has_trial_flag or (amount_due == 0 if amount_due is not None else None)
+    return amount_due, currency, is_trial
 
 def check_momo_payment(session, access_token: str) -> bool:
     """
