@@ -744,6 +744,13 @@ function gptRefreshAccounts() {
     gptLoadAccounts();
 }
 
+let gptCreationMethod = 'selenium';
+function gptSetCreationMethod(method) {
+    gptCreationMethod = method;
+    document.querySelectorAll('#gpt-creationSelenium, #gpt-creationApi').forEach(el => el.classList.remove('active'));
+    document.getElementById(method === 'api' ? 'gpt-creationApi' : 'gpt-creationSelenium').classList.add('active');
+}
+
 async function gptStartTask(){
   if(gptIsRunning)return;
   const count=parseInt(document.getElementById('gpt-count').value)||1;
@@ -755,7 +762,7 @@ async function gptStartTask(){
   gptTotal = (gptMailType === 'gmail94') ? count * 4 : count;
   gptUpdateStats();
 
-  const r=await fetch('/api/gpt/task/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({count,threads,mail_type:gptMailType,check_momo:checkMomo,mail_api_source:gptApiSource,keep_open:gptKeepOpen,driver_mode:'playwright_ui',browser_type:gptBrowser,headless:gptHeadless,incognito:gptIncognito})});
+  const r=await fetch('/api/gpt/task/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({count,threads,mail_type:gptMailType,creation_method:gptCreationMethod,check_momo:checkMomo,mail_api_source:gptApiSource,keep_open:gptKeepOpen,driver_mode:'playwright_ui',browser_type:gptBrowser,headless:gptHeadless,incognito:gptIncognito})});
   const d=await r.json();
   if(!d.success){showToast('❌',d.error);return;}
   gptIsRunning=true;gptSetUI(true);gptStartSSE();

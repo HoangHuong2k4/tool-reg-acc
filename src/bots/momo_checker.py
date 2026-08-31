@@ -257,9 +257,13 @@ def check_momo_payment(session, access_token: str) -> bool:
             
             ALLOWED = {"apple_pay", "google_pay", "card", "momo"}
             payment_methods = sorted([m for m in payment_methods if m in ALLOWED])
+            
+            amount_due, currency, has_trial = extract_trial(checkout_data)
+            logger.info(f"[MoMoCheck] OpenAI provider detected. Has Trial: {has_trial}, Amount: {amount_due} {currency}")
+            
             if payment_methods:
-                return False, ", ".join(payment_methods), None, None
-            return False, "không", None, None
+                return has_trial, ", ".join(payment_methods), amount_due, currency
+            return has_trial, "không", amount_due, currency
             
         if not publishable_key:
             logger.warning("[MoMoCheck] Checkout thiếu publishable_key cho Stripe provider")
