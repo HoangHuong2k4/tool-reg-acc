@@ -349,10 +349,9 @@ def init_selenium_driver(browser_type, headless, incognito, proxy, thread_id=1, 
     # --- Tính toán vị trí cửa sổ chia màn hình ---
     # ChatGPT UI bị lỗi layout (chuyển sang mobile view hỏng nút bấm) nếu chia 4 (width=480)
     # Nên tối đa chỉ chia 2 cột (width=960) hoặc full màn hình
-    max_cols = 2
-    cols = min(batch_size, max_cols)
+    cols = 2
     SCREEN_W = 1920; SCREEN_H = 1080
-    window_width = SCREEN_W // max(1, cols)
+    window_width = SCREEN_W // 2
     window_height = SCREEN_H
     idx = (thread_id - 1) % max(1, cols)
     pos_x = idx * window_width
@@ -473,6 +472,12 @@ def init_selenium_driver(browser_type, headless, incognito, proxy, thread_id=1, 
             logger.warning(f"Không tự tìm được chromedriver cho UC: {e}. Thử dùng webdriver-manager...")
             from webdriver_manager.chrome import ChromeDriverManager
             driver = uc.Chrome(driver_executable_path=ChromeDriverManager().install(), options=chrome_options)
+    # Force window size and position for Chrome (UC often ignores options on macOS)
+    if browser_type.lower() not in ["firefox", "camoufox"]:
+        try:
+            driver.set_window_rect(x=pos_x, y=pos_y, width=window_width, height=window_height)
+        except:
+            pass
             
     return driver, relay
 
