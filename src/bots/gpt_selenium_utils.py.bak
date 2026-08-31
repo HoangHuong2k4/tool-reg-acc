@@ -30,7 +30,6 @@ import subprocess
 from selenium.webdriver.common.by import By
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
 
 # ─── Screenshot directory ────────────────────────────────────────────────────
 _SCREENSHOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "screenshots"))
@@ -269,8 +268,7 @@ def try_click(driver, element, label=""):
         logger.info(f"Clicked: {label}")
         return True
     except Exception as e:
-        err_str = str(e).split("\n")[0] # Chỉ lấy dòng báo lỗi đầu tiên, bỏ qua stacktrace dài
-        logger.debug(f"Không click được {label}: {err_str}")
+        logger.warning(f"Không click được {label}: {e}")
         return False
 
 
@@ -1176,117 +1174,107 @@ def _click_verify_with_retry(driver, max_attempts=3):
 
 # ─── Main Registration Flow ──────────────────────────────────────────────────
 
-def _step_check_promo(driver, stop_event=None, proxy=None):
+def _step_check_promo(driver, stop_event=None):
     """
-    Sử dụng API fetch từ trình duyệt để check trực tiếp gói Ưu Đãi 0đ và MoMo cực nhanh.
+    Truy cập trang pricing của ChatGPT, kiểm tra có promo (0đ) không thông qua UI.
+    Nếu có, click "Claim free offer", check MoMo ở trang thanh toán.
     Returns: (has_uudai: str, has_momo: str) - "có" hoặc "không"
     """
     has_uudai = "không"
     has_momo = "không"
 
-    logger.info("[Promo] Kiểm tra ưu đãi Plus 1 Month Free và MoMo qua API...")
+    logger.info("[Promo] Kiểm tra ưu đãi Plus 1 Month Free...")
     try:
         time.sleep(1.5) # Chờ 2FA lưu xong
         
-        # 1. Lấy access token bằng JS
-        js_get_token = """
-        var cb = arguments[0];
-        fetch('/api/auth/session')
-            .then(res => res.json())
-            .then(data => cb({token: data.accessToken}))
-            .catch(err => cb({error: err.toString()}));
-        """
-        driver.set_script_timeout(15)
-        res = driver.execute_async_script(js_get_token)
-        if "error" in res or not res.get("token"):
-            logger.warning(f"[Promo] Không lấy được access_token: {res.get('error')}")
-            return has_uudai, has_momo
-            
-        access_token = res["token"]
-        
-        # 2. Tạo Session Mock sử dụng proxy & cookie của driver và dùng curl_cffi để gọi API
-        class SessionMock:
-            def __init__(self, drv, proxy_url=None):
-                self.drv = drv
-                self.proxy_url = proxy_url
-                
-            def post(self, url, json=None, data=None, headers=None, timeout=None):
-                from curl_cffi import requests
-                req_session = requests.Session(impersonate="chrome120")
-                if self.proxy_url:
-                    req_session.proxies = {"http": self.proxy_url, "https": self.proxy_url}
-                
-                for cookie in self.drv.get_cookies():
-                    req_session.cookies.set(cookie['name'], cookie['value'], domain=cookie['domain'])
-                
-                try:
-                    res = req_session.post(url, json=json, data=data, headers=headers, timeout=timeout)
-                    return res
-                except Exception as e:
-                    logger.warning(f"[SessionMock] curl_cffi request failed for {url}: {e}")
-                    raise
+        # Dùng JS để chuyển hướng, đảm bảo React Router nhận diện
+        driver.execute_script("window.location.href = 'https://chatgpt.com/?promo_campaign=plus-1-month-free#pricing';")
+        time.sleep(3)
+        _check_stop(stop_event)
 
-        class MockBrowserSession:
-            def __init__(self, drv, proxy_url=None):
-                self.session = SessionMock(drv, proxy_url)
-                try:
-                    self.device_id = drv.execute_script("return window.localStorage.getItem('oai-device-id')")
-                except:
-                    self.device_id = None
-                if not self.device_id:
-                    import uuid
-                    self.device_id = str(uuid.uuid4())
-                
-                try:
-                    ua = drv.execute_script("return navigator.userAgent")
-                    platform = drv.execute_script("return navigator.platform")
-                except:
-                    ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-                    platform = "Win32"
-                self.browser_profile = {
-                    "user_agent": ua,
-                    "platform": platform,
-                    "sec_ch_ua": '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-                    "mobile": "?0"
-                }
-
-        mock_session = MockBrowserSession(driver, proxy)
+        pricing_selectors = '[data-testid="plus-pricing-modal-column-top-half"], #plus-pricing, [data-testid="select-plan-button-plus-upgrade"]'
         
-        # 3. Gọi momo_checker
         try:
-            from src.bots.momo_checker import check_momo_payment
-        except ImportError:
+            wait_for_element(driver, By.CSS_SELECTOR, pricing_selectors, timeout=15)
+        except Exception:
+            logger.warning("[Promo] Không tìm thấy modal Pricing. Thử tải lại trang...")
+            driver.refresh()
+            time.sleep(3)
             try:
-                from bots.momo_checker import check_momo_payment
-            except ImportError:
-                from momo_checker import check_momo_payment
-            
-        has_trial, payment_methods_str, amount_due, currency = check_momo_payment(mock_session, access_token)
-        
-        # Format Ưu đãi string
-        if has_trial:
-            has_uudai = "Có trial - 0 đ"
-            logger.info("[Promo] Đã thấy ưu đãi Plus 1 Month (Giá: 0đ)!")
+                wait_for_element(driver, By.CSS_SELECTOR, pricing_selectors, timeout=15)
+            except Exception:
+                logger.warning("[Promo] Vẫn không tải được trang Pricing sau khi refresh.")
+                _save_screenshot(driver, "promo_failed")
+                return has_uudai, has_momo
+
+        claim_btn = None
+        try:
+            btns = driver.find_elements(By.XPATH, '//button[contains(., "Claim free offer")] | //button[contains(., "0")]')
+            for b in btns:
+                if b.is_displayed():
+                    claim_btn = b
+                    break
+        except Exception:
+            pass
+
+        if not claim_btn:
+            try:
+                btn = driver.find_element(By.CSS_SELECTOR, '[data-testid="select-plan-button-plus-upgrade"]')
+                if "claim free offer" in btn.text.lower() or "0" in btn.text:
+                    claim_btn = btn
+            except:
+                pass
+
+        if claim_btn:
+            has_uudai = "có"
+            logger.info("[Promo] Đã thấy ưu đãi! Đang click 'Claim free offer'...")
+            _fix_radix_pointer_events(driver)
+            try_click(driver, claim_btn, "Claim Promo")
+
+            time.sleep(4) # Chờ trang Stripe load iframe
+            _check_stop(stop_event)
+            logger.info("[Promo] Kiểm tra phương thức MoMo trên trang checkout...")
+            try:
+                found_momo = False
+                for _ in range(8):
+                    _check_stop(stop_event)
+                    # 1. Thử tìm ngoài iframe
+                    momo_tabs = driver.find_elements(By.CSS_SELECTOR, 'button[data-testid="momo"], #momo-tab, [value="momo"]')
+                    if momo_tabs and any(t.is_displayed() for t in momo_tabs):
+                        found_momo = True
+                        break
+                    
+                    # 2. Thử duyệt qua các iframe (Stripe checkout)
+                    iframes = driver.find_elements(By.TAG_NAME, "iframe")
+                    for iframe in iframes:
+                        try:
+                            driver.switch_to.frame(iframe)
+                            inner_tabs = driver.find_elements(By.CSS_SELECTOR, 'button[data-testid="momo"], #momo-tab, [value="momo"]')
+                            if inner_tabs and any(t.is_displayed() for t in inner_tabs):
+                                found_momo = True
+                            driver.switch_to.default_content()
+                            if found_momo: break
+                        except Exception:
+                            try: driver.switch_to.default_content()
+                            except: pass
+                    
+                    if found_momo: break
+                    time.sleep(1.5)
+
+                if found_momo:
+                    has_momo = "có"
+                    logger.info("[Promo] Phát hiện MoMo trên trang checkout!")
+                else:
+                    logger.info("[Promo] Không có MoMo.")
+            except Exception as e:
+                logger.warning(f"[Promo] Lỗi load Checkout: {e}")
         else:
-            if amount_due is not None:
-                formatted_amount = f"{int(amount_due):,}".replace(",", ".")
-                has_uudai = f"Không trial - {formatted_amount} đ"
-            else:
-                has_uudai = "Không trial"
-            logger.info(f"[Promo] Không có ưu đãi 0đ (Trial: {has_trial}, Amount: {amount_due}).")
-            
-        # Lưu toàn bộ chuỗi payment_methods vào cột momo để hiển thị dạng Badge trên UI
-        if payment_methods_str and payment_methods_str not in ["không", "lỗi"]:
-            has_momo = payment_methods_str  # VD: "apple_pay, card, google_pay, momo"
-            if "momo" in payment_methods_str.lower():
-                logger.info(f"[Promo] Phát hiện MoMo trên trang thanh toán! ({payment_methods_str})")
-            else:
-                logger.info(f"[Promo] Không có MoMo. (Các cổng hiện có: {payment_methods_str})")
-        else:
-            has_momo = payment_methods_str or "không"
-            
+            logger.info("[Promo] Không có ưu đãi 0đ (chỉ hiện Upgrade to Plus).")
+            has_uudai = "không"
+            has_momo = "không"
+
     except Exception as e:
-        logger.warning(f"[Promo] Lỗi check promo API: {e}")
+        logger.warning(f"[Promo] Lỗi check promo: {e}")
 
     return has_uudai, has_momo
 
@@ -1385,16 +1373,16 @@ def run_selenium_registration_standalone(
         # ═══════════════════════════════════════════════════════════════
         # PHẦN 3: KIỂM TRA ƯU ĐÃI (PROMO) & MOMO
         # ═══════════════════════════════════════════════════════════════
-        has_uudai, has_momo_str = _step_check_promo(driver, stop_event, proxy)
+        has_uudai, has_momo_str = _step_check_promo(driver, stop_event)
 
         if save_account_callback:
             # Truyền thêm tham số uudai nếu hàm hỗ trợ
             import inspect
             sig = inspect.signature(save_account_callback)
             if len(sig.parameters) >= 5:
-                save_account_callback(email, password, totp_secret, has_momo_str, has_uudai)
+                save_account_callback(email, password, totp_secret, has_momo_str == "có", has_uudai == "có")
             else:
-                save_account_callback(email, password, totp_secret, has_momo_str)
+                save_account_callback(email, password, totp_secret, has_momo_str == "có")
         else:
             try:
                 with get_db() as conn:

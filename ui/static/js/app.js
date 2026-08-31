@@ -605,6 +605,51 @@ async function gptUploadHotmail(input){
   }catch(e){showToast('❌','Upload thất bại');}
 }
 
+window.gptHideSensitive = false;
+function gptToggleHide() {
+    window.gptHideSensitive = !window.gptHideSensitive;
+    gptLoadAccounts();
+    const btn = document.getElementById('gptToggleHideBtn');
+    if (btn) {
+        btn.innerHTML = window.gptHideSensitive ? '👁️ Mở' : '🙈 Ẩn';
+    }
+}
+
+function playMomoSound() {
+    try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        for (let i = 0; i < 3; i++) {
+            const t = ctx.currentTime + i * 0.4; // 0.4s delay between each "ting"
+            
+            const osc1 = ctx.createOscillator();
+            const gain1 = ctx.createGain();
+            osc1.connect(gain1);
+            gain1.connect(ctx.destination);
+            osc1.type = 'sine';
+            osc1.frequency.setValueAtTime(880, t); 
+            gain1.gain.setValueAtTime(0, t);
+            gain1.gain.linearRampToValueAtTime(0.5, t + 0.05);
+            gain1.gain.exponentialRampToValueAtTime(0.01, t + 0.5);
+            osc1.start(t);
+            osc1.stop(t + 0.5);
+            
+            const osc2 = ctx.createOscillator();
+            const gain2 = ctx.createGain();
+            osc2.connect(gain2);
+            gain2.connect(ctx.destination);
+            osc2.type = 'sine';
+            osc2.frequency.setValueAtTime(1318.51, t + 0.15); 
+            gain2.gain.setValueAtTime(0, t + 0.15);
+            gain2.gain.linearRampToValueAtTime(0.5, t + 0.2);
+            gain2.gain.exponentialRampToValueAtTime(0.01, t + 0.8);
+            osc2.start(t + 0.15);
+            osc2.stop(t + 0.8);
+        }
+    } catch(e) {
+        console.log("Audio not supported");
+    }
+}
+
 async function gptLoadAccounts(){
   try{
     const r=await fetch('/api/gpt/accounts');const d=await r.json();
@@ -615,12 +660,67 @@ async function gptLoadAccounts(){
     }
     tbody.innerHTML=d.accounts.slice().reverse().slice(0,50).map(a=>{
       const twofa = a.twofa || '';
-      const momoHtml = (a.momo === 'có') ? '<span style="color:#d82d8b;font-weight:bold;">Có</span>' : '<span style="color:var(--muted)">Không</span>';
-      const uudaiHtml = (a.uudai === 'có') ? '<span style="color:#0285FF;font-weight:bold;">Có</span>' : '<span style="color:var(--muted)">Không</span>';
-      return `<tr>
-        <td onclick="navigator.clipboard.writeText('${escHtml(a.email)}');showToast('📋','Đã copy Email!');" style="cursor:pointer;" title="Click để copy Email">${escHtml(a.email)}</td>
-        <td onclick="navigator.clipboard.writeText('${escHtml(a.password)}');showToast('📋','Đã copy Mật khẩu!');" style="cursor:pointer;" title="Click để copy Mật khẩu"><code style="color:var(--muted)">${escHtml(a.password)}</code></td>
-        <td onclick="navigator.clipboard.writeText('${escHtml(twofa)}');showToast('📋','Đã copy 2FA!');" style="cursor:pointer;" title="Click để copy 2FA"><code style="color:var(--accent);font-size:10px;">${escHtml(twofa)||'<span style="color:var(--muted)">N/A</span>'}</code></td>
+      
+      // 1. Format Trial (Ưu Đãi)
+      let uudaiHtml = '<span style="color:var(--muted)">Không</span>';
+      if (a.uudai && a.uudai !== 'không') {
+          let text = a.uudai;
+          if (text.toLowerCase() === 'có') text = 'Có trial';
+          
+          const badgeStyle = "display:inline-block; padding:2px 8px; border-radius:12px; font-size:10px; font-weight:500; white-space:nowrap;";
+          if (text.toLowerCase().includes('có trial')) {
+              uudaiHtml = `<span style="${badgeStyle} background: rgba(0, 212, 255, 0.08); border: 1px solid rgba(0, 212, 255, 0.25); color: #00d4ff;">• ${text}</span>`;
+          } else {
+              uudaiHtml = `<span style="${badgeStyle} background: rgba(255, 215, 0, 0.08); border: 1px solid rgba(255, 215, 0, 0.25); color: #ffd700;">• ${text}</span>`;
+          }
+      }
+      
+      // 2. Format Payment Methods (MoMo)
+      const pms = (a.momo && a.momo !== 'không' && a.momo !== 'lỗi') ? a.momo.toLowerCase() : '';
+      const hasMomo = pms.includes('momo') || pms === 'có'; // Fallback cho DB cũ
+      
+      const badgeStyle = "display:inline-block; padding:2px 7px; border-radius:10px; font-size:10px; font-weight:500; margin-right:3px; margin-bottom:2px; white-space:nowrap;";
+      const appleStyle = pms.includes('apple_pay') ? "background:rgba(255,255,255,0.08);color:#e5e7eb;border:1px solid rgba(255,255,255,0.2);" : "";
+      const cardStyle = pms.includes('card') ? "background:rgba(59,130,246,0.1);color:#60a5fa;border:1px solid rgba(59,130,246,0.25);" : "";
+      const gpayStyle = pms.includes('google_pay') ? "background:rgba(16,185,129,0.1);color:#34d399;border:1px solid rgba(16,185,129,0.25);" : "";
+      const momoStyle = hasMomo ? "background:rgba(168,85,247,0.15);color:#d8b4fe;border:1px solid rgba(168,85,247,0.35);" : "";
+      
+      let momoHtml = '';
+      if(pms) {
+          if (pms === 'có') {
+             momoHtml = `<span style="${badgeStyle} ${momoStyle}">MoMo</span>`;
+          } else {
+             if (pms.includes('apple_pay')) momoHtml += `<span style="${badgeStyle} ${appleStyle}">Apple Pay</span>`;
+             if (pms.includes('card')) momoHtml += `<span style="${badgeStyle} ${cardStyle}">Card</span>`;
+             if (pms.includes('google_pay')) momoHtml += `<span style="${badgeStyle} ${gpayStyle}">GPay</span>`;
+             if (pms.includes('link')) momoHtml += `<span style="${badgeStyle} background:rgba(20,184,166,0.1);color:#2dd4bf;border:1px solid rgba(20,184,166,0.25);">Link</span>`;
+             if (hasMomo) momoHtml += `<span style="${badgeStyle} ${momoStyle}">MoMo</span>`;
+          }
+      } else {
+          momoHtml = `<span style="color:var(--muted)">Không</span>`;
+      }
+      
+      // Highlight màu dòng nếu có MoMo
+      const rowStyle = hasMomo ? 'background: rgba(168,85,247,0.06);' : '';
+      
+      // Masking logic
+      let displayEmail = a.email;
+      let displayPass = a.password;
+      let display2FA = twofa;
+      
+      if (window.gptHideSensitive) {
+          if (displayEmail.includes('@')) {
+              const parts = displayEmail.split('@');
+              displayEmail = parts[0].substring(0, 3) + '*****@' + parts[1];
+          }
+          displayPass = '***';
+          if (display2FA) display2FA = '***';
+      }
+      
+      return `<tr style="${rowStyle}">
+        <td onclick="navigator.clipboard.writeText('${escHtml(a.email)}');showToast('📋','Đã copy Email!');" style="cursor:pointer;" title="Click để copy Email">${escHtml(displayEmail)}</td>
+        <td onclick="navigator.clipboard.writeText('${escHtml(a.password)}');showToast('📋','Đã copy Mật khẩu!');" style="cursor:pointer;" title="Click để copy Mật khẩu"><code style="color:var(--muted)">${escHtml(displayPass)}</code></td>
+        <td onclick="navigator.clipboard.writeText('${escHtml(twofa)}');showToast('📋','Đã copy 2FA!');" style="cursor:pointer;" title="Click để copy 2FA"><code style="color:var(--accent);font-size:10px;">${display2FA ? escHtml(display2FA) : '<span style="color:var(--muted)">N/A</span>'}</code></td>
         <td>${momoHtml}</td>
         <td>${uudaiHtml}</td>
         <td><div style="display:flex;align-items:center;gap:6px;"><span class="tag tag-ok" style="margin:0;">✅ OK</span><button class="copy-btn" title="Copy (Tab Separated)" onclick="navigator.clipboard.writeText('${escHtml(a.email)}\\t${escHtml(a.password)}\\t${escHtml(twofa)}');showToast('📋','Đã copy!');"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button></div></td>
@@ -682,7 +782,16 @@ function gptStartSSE(){
   };
 }
 
-function gptAddLog(data){gptLogs.push(data);if(gptLogs.length>2000)gptLogs.shift();if(gptFilter==='ALL'||data.level===gptFilter)gptRenderLog(data);}
+function gptAddLog(data) {
+    gptLogs.push(data);
+    if(gptLogs.length > 2000) gptLogs.shift();
+    if(gptFilter === 'ALL' || data.level === gptFilter) gptRenderLog(data);
+    
+    // Play ting ting sound if MoMo is detected
+    if(data.msg && data.msg.includes('Phát hiện MoMo')) {
+        playMomoSound();
+    }
+}
 function gptRenderLog(data){
   const wrap=document.getElementById('gpt-logWrap');
   if(!wrap) return;
