@@ -690,7 +690,7 @@ async function gptLoadAccounts(){
       if (a.uudai && a.uudai !== 'không') {
           const raw = a.uudai.toLowerCase();
           const badgeStyle = "display:inline-block;padding:2px 8px;border-radius:12px;font-size:10px;font-weight:600;white-space:nowrap;";
-          if (raw.includes('có trial') || raw.includes('0đ') || raw.includes('gói 0')) {
+          if (raw.includes('có trial') || raw.includes('gói 0') || /(?:^|\D)0\s*đ/.test(raw)) {
               uudaiHtml = `<span style="${badgeStyle}background:rgba(0,212,255,0.1);border:1px solid rgba(0,212,255,0.3);color:#00d4ff;">✓ Trial 0đ</span>`;
           } else {
               // Lấy số tiền từ chuỗi "Không trial - 522.500 đ" → "522.500đ"
@@ -1655,7 +1655,7 @@ function gptFilterAccounts() {
             const momoText = (tds[3] ? tds[3].textContent : '').toLowerCase();
             const trialText = (tds[4] ? tds[4].textContent : '').toLowerCase();
             const hasMomo = momoText.includes('momo');
-            const hasTrial = trialText.includes('có trial') || trialText.includes('0 đ') || trialText.includes('0đ') || trialText.includes('gói 0');
+            const hasTrial = trialText.includes('có trial') || trialText.includes('gói 0') || /(?:^|\D)0\s*đ/.test(trialText);
             
             if (badgeFilter === 'momo') badgeMatch = hasMomo;
             else if (badgeFilter === 'trial') badgeMatch = hasTrial;
