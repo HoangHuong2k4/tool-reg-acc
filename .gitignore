@@ -1,1 +1,20 @@
 data/
+venv/
+
+# Python Cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Build / Distribution
+build/
+dist/
+*.egg-info/
+.eggs/
+*.egg
+wheels/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store

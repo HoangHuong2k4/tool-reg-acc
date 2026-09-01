@@ -352,9 +352,23 @@ def init_selenium_driver(browser_type, headless, incognito, proxy, thread_id=1, 
     # ChatGPT UI bị lỗi layout (chuyển sang mobile view hỏng nút bấm) nếu chia 4 (width=480)
     # Nên tối đa chỉ chia 2 cột (width=960) hoặc full màn hình
     cols = 2
-    SCREEN_W = 1920; SCREEN_H = 1080
+    SCREEN_W = 1920
+    SCREEN_H = 1080
+    
+    # Lấy kích thước màn hình thực tế trên Windows
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            user32 = ctypes.windll.user32
+            SCREEN_W = user32.GetSystemMetrics(0)
+            SCREEN_H = user32.GetSystemMetrics(1)
+        except:
+            pass
+
     window_width = SCREEN_W // 2
-    window_height = SCREEN_H
+    # Lấy 90% chiều cao màn hình để không bị lấp bởi thanh Taskbar (tương đương 90vh)
+    window_height = int(SCREEN_H * 0.9)
+    
     idx = (thread_id - 1) % max(1, cols)
     pos_x = idx * window_width
     pos_y = 0
@@ -468,12 +482,35 @@ def init_selenium_driver(browser_type, headless, incognito, proxy, thread_id=1, 
             else:
                 chrome_options.add_argument(f"--proxy-server=http://{parsed.hostname}:{parsed.port}")
                 
+        # Fix cho Windows: Tự động lấy version Chrome hiện tại để truyền vào uc.Chrome
+        # Giúp tránh lỗi "This version of ChromeDriver only supports Chrome version X"
+        # và tránh việc fallback sinh ra exception "WinError 6".
+        version_main = None
+        if sys.platform == "win32":
+            try:
+                import winreg
+                key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Google\Chrome\BLBeacon")
+                version, _ = winreg.QueryValueEx(key, "version")
+                version_main = int(version.split('.')[0])
+            except:
+                pass
+                
         try:
-            driver = uc.Chrome(options=chrome_options)
+            if version_main:
+                driver = uc.Chrome(options=chrome_options, version_main=version_main)
+            else:
+                driver = uc.Chrome(options=chrome_options)
         except Exception as e:
             logger.warning(f"Không tự tìm được chromedriver cho UC: {e}. Thử dùng webdriver-manager...")
             from webdriver_manager.chrome import ChromeDriverManager
-            driver = uc.Chrome(driver_executable_path=ChromeDriverManager().install(), options=chrome_options)
+            # Fix: Copy options để tránh lỗi "you cannot reuse the ChromeOptions object"
+            fallback_options = uc.ChromeOptions()
+            for arg in chrome_options.arguments:
+                fallback_options.add_argument(arg)
+            if chrome_options.binary_location:
+                fallback_options.binary_location = chrome_options.binary_location
+            
+            driver = uc.Chrome(driver_executable_path=ChromeDriverManager().install(), options=fallback_options)
     # Force window size and position for Chrome (UC often ignores options on macOS)
     if browser_type.lower() not in ["firefox", "camoufox"]:
         try:

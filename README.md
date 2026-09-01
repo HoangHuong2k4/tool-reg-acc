@@ -44,20 +44,24 @@ Bạn chỉ cần có `Docker` trên máy.
 
 ### Cách 2: Chạy Trực Tiếp (Local)
 
+**Dành cho Windows:**
+1. Cài đặt **Python 3.11** hoặc **Python 3.12** *(Lưu ý: Khuyến cáo KHÔNG dùng Python 3.13/3.14 vì các bản mới này yêu cầu cài thêm Microsoft C++ Build Tools nặng nề để biên dịch các thư viện như `greenlet`, `anyio`)*. Nhớ tích chọn **"Add python.exe to PATH"** khi cài đặt.
+2. Chạy file khởi động tự động:
+   - Cách dễ nhất: Nhấp đúp chuột vào file `run.bat` trong thư mục dự án.
+   - Nếu dùng Terminal/VS Code: Mở Command Prompt hoặc PowerShell và gõ lệnh `.\run.bat` (hoặc `./run.bat` nếu dùng Git Bash).
+3. File sẽ tự động cài đặt `requirements.txt` và khởi chạy Web Server.
+4. Truy cập: [http://localhost:5050](http://localhost:5050)
+
+**Dành cho Mac/Linux:**
 1. Cài đặt Python 3.10+
-2. Cài đặt thư viện:
+2. Mở Terminal tại thư mục dự án và chạy file khởi động tự động:
    ```bash
-   pip install -r requirements.txt
+   chmod +x run.sh
+   ./run.sh
    ```
-3. Cài đặt Playwright (dành cho bot ChatGPT & Camoufox):
-   ```bash
-   playwright install chromium firefox
-   ```
-4. Chạy Web Server:
-   ```bash
-   python3 src/web/app.py
-   ```
-5. Truy cập: [http://localhost:5050](http://localhost:5050)
+3. Truy cập: [http://localhost:5050](http://localhost:5050)
+
+*(Nếu bạn muốn chạy thủ công không qua file run, hãy dùng: `pip install -r requirements.txt` -> `playwright install chromium firefox` -> `python src/web/app.py`)*
 
 ---
 

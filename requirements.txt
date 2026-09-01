@@ -59,3 +59,4 @@ Pycryptodome>=3.23.0
 selenium
 webdriver-manager
 undetected-chromedriver==3.5.5
+setuptools>=70.0.0

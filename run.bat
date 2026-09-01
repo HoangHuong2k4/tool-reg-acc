@@ -7,19 +7,32 @@ echo =========================================
 echo    Khoi dong Capcut/GPT Reg System (Windows)
 echo =========================================
 
-:: Kiểm tra Python
-python --version >nul 2>&1
-if %errorlevel% neq 0 (
-    echo Loi: Khong tim thay Python. Vui long cai dat Python va them vao PATH.
+:: Ưu tiên tìm Python 3.12, 3.11 hoặc 3.10 (vì các bản này không yêu cầu C++ Build Tools)
+set PYTHON_CMD=python
+py -3.12 --version >nul 2>&1
+if not errorlevel 1 set PYTHON_CMD=py -3.12
+if "%PYTHON_CMD%"=="python" (
+    py -3.11 --version >nul 2>&1
+    if not errorlevel 1 set PYTHON_CMD=py -3.11
+)
+if "%PYTHON_CMD%"=="python" (
+    py -3.10 --version >nul 2>&1
+    if not errorlevel 1 set PYTHON_CMD=py -3.10
+)
+
+:: Kiểm tra xem có lệnh Python nào hoạt động không
+%PYTHON_CMD% --version >nul 2>&1
+if errorlevel 1 (
+    echo Loi: Khong tim thay Python. Vui long cai dat Python 3.12 va them vao PATH.
     pause
     exit /b 1
 )
 
 :: Tạo thư mục venv nếu chưa có
 if not exist "venv\Scripts\activate.bat" (
-    echo [*] Chua co virtual environment. Dang tao moi truong ao (venv)...
-    python -m venv venv
-    if %errorlevel% neq 0 (
+    echo [*] Chua co virtual environment. Dang tao moi truong ao venv bang %PYTHON_CMD%...
+    %PYTHON_CMD% -m venv venv
+    if errorlevel 1 (
         echo Loi: Khong the tao virtual environment.
         pause
         exit /b 1
@@ -35,7 +48,7 @@ call venv\Scripts\activate.bat
 echo [*] Kiem tra va cai dat thu vien tu requirements.txt...
 python -m pip install --upgrade pip >nul 2>&1
 pip install -r requirements.txt
-if %errorlevel% neq 0 (
+if errorlevel 1 (
     echo Loi: Cai dat thu vien that bai.
     pause
     exit /b 1
