@@ -79,6 +79,7 @@ def setup_db_if_not_exists():
             "PROXY_MERCHANT": "a20f20d6-9512-40fd-9a12-eeff809fdaeb",
             "PROXY_ID": "953319",
             "PROXYXOAY_KEY": "",
+            "PROXY_STATIC_LIST": "",
             "CAPCUT_PASSWORD": "capcut123",
             "GPM_API_URL": "http://127.0.0.1:19995",
             "GMAIL94_TOKEN": ""
@@ -96,6 +97,7 @@ def load_settings():
         "PROXY_MERCHANT": "",
         "PROXY_ID": "",
         "PROXYXOAY_KEY": "",
+        "PROXY_STATIC_LIST": "",
         "CAPCUT_PASSWORD": "capcut123",
         "GPM_API_URL": "http://127.0.0.1:19995",
         "GMAIL94_TOKEN": "",
@@ -118,6 +120,52 @@ PROXY_PORT       = int(_init_settings.get("LAST_PROXY_PORT", 3131))
 PROXY_USER       = _init_settings.get("LAST_PROXY_USER", "kierangrayson226")
 PROXY_PASS       = _init_settings.get("LAST_PROXY_PASS", "odq0nda0odmzoa==")
 PROXY_V3_INDEX   = -1
+
+# ─── Static Proxy Pool (dành riêng cho GPT) ──────────────────────────────────
+# List các proxy tĩnh dạng [{'host':..,'port':..,'user':..,'pass':..}, ...]
+STATIC_PROXY_LIST   = []   # type: list
+STATIC_PROXY_INDEX  = 0    # round-robin index
+_static_proxy_lock  = threading.Lock()
+
+def _parse_static_proxy_list(raw_str):
+    """Parse chuỗi proxy tĩnh nhiều dòng (ip:port:user:pass) → list dict."""
+    result = []
+    for line in raw_str.strip().splitlines():
+        line = line.strip()
+        if not line or line.startswith('#'):
+            continue
+        parts = line.split(':')
+        if len(parts) >= 2:
+            entry = {
+                'host': parts[0].strip(),
+                'port': int(parts[1].strip()),
+                'user': parts[2].strip() if len(parts) >= 3 else '',
+                'pass': parts[3].strip() if len(parts) >= 4 else '',
+            }
+            result.append(entry)
+    return result
+
+def reload_static_proxy_list():
+    """Load lại STATIC_PROXY_LIST từ DB settings."""
+    global STATIC_PROXY_LIST, STATIC_PROXY_INDEX
+    cfg = load_settings()
+    raw = cfg.get('PROXY_STATIC_LIST', '')
+    parsed = _parse_static_proxy_list(raw)
+    with _static_proxy_lock:
+        STATIC_PROXY_LIST = parsed
+        STATIC_PROXY_INDEX = 0
+    return parsed
+
+def get_static_proxy_for_worker(worker_idx):
+    """Trả về proxy tĩnh theo worker index (round-robin), hoặc None nếu không có."""
+    with _static_proxy_lock:
+        if not STATIC_PROXY_LIST:
+            return None
+        idx = worker_idx % len(STATIC_PROXY_LIST)
+        return STATIC_PROXY_LIST[idx]
+
+# Load lần đầu khi khởi động
+reload_static_proxy_list()
 
 CAPCUT_HOTMAIL_FILE = os.path.join(os.path.dirname(__file__), "..", "..", "data", "hotmails.txt")
 GPT_HOTMAIL_FILE    = os.path.join(os.path.dirname(__file__), "..", "..", "data", "hotmail-gpt.txt")
@@ -1167,6 +1215,23 @@ def _run_gpt_task(count, threads, mail_type, check_momo=True, browser_type="chro
         bot.log = state_gpt.log
         bot.get_rotated_proxy = patched_get_proxy
 
+        # ── Load static proxy list cho GPT session này ────────────────────────
+        static_list = reload_static_proxy_list()
+        if static_list:
+            state_gpt.log(f"[Proxy] 🔌 Static proxy pool: {len(static_list)} proxy tĩnh + proxy xoay kết hợp", "INFO")
+        else:
+            state_gpt.log("[Proxy] 🔄 Chỉ dùng proxy xoay (chưa có proxy tĩnh)", "INFO")
+
+        # Hàm lấy proxy theo worker index: ưu tiên proxy tĩnh, fallback proxy xoay
+        def make_proxy_getter(worker_idx):
+            def _get_proxy_for_worker():
+                static_prx = get_static_proxy_for_worker(worker_idx)
+                if static_prx:
+                    print(f"[Proxy] Worker-{worker_idx} dùng proxy tĩnh: {static_prx['host']}:{static_prx['port']}")
+                    return static_prx
+                return patched_get_proxy()
+            return _get_proxy_for_worker
+
         # Patch để dừng OTP ngang
         try:
             import src.bots.capcut_hotmail as ch
@@ -1243,9 +1308,11 @@ def _run_gpt_task(count, threads, mail_type, check_momo=True, browser_type="chro
                     futures.append(ex.submit(_worker_g94))
                 concurrent.futures.wait(futures)
         else:
-            # Hotmail: load từ file và dùng HOTMAIL_QUEUE
+            # Hotmail / Domain / Gmail94 Selenium: load từ file và dùng HOTMAIL_QUEUE
             bot.load_hotmails_to_queue(limit=count)
             def worker(i):
+                # Gán proxy riêng cho từng worker (static hoặc xoay)
+                bot.get_rotated_proxy = make_proxy_getter(i)
                 time.sleep((i % threads) * 2.5)
                 while not bot.HOTMAIL_QUEUE.empty() and not state_gpt.task_stop.is_set():
                     res = bot.register_one_account(i, browser_type=state_gpt.browser_type, headless=state_gpt.headless, incognito=state_gpt.incognito, mail_api_source=mail_api_source, keep_open=keep_open)

@@ -568,7 +568,7 @@
 
             <div class="form-group">
               <label id="gpt-countLabel">Số lượng tài khoản cần tạo</label>
-              <input type="number" id="gpt-count" class="input" value="2" min="1" max="1000"
+              <input type="number" id="gpt-count" class="input" value="4" min="1" max="1000"
                 oninput="gptUpdateCountHint()">
               <div id="gpt-countHint" style="font-size:11px;color:var(--muted);margin-top:4px;display:none;">
                 → Sẽ tạo <strong id="gpt-countHintTotal" style="color:var(--accent);">8</strong> tài khoản ChatGPT
@@ -602,7 +602,7 @@
             <div style="display:flex;gap:16px;">
               <div class="form-group" style="flex:1;">
                 <label>Số luồng (Workers)</label>
-                <input type="number" id="gpt-workers" class="input" value="4" min="1" max="10">
+                <input type="number" id="gpt-workers" class="input" value="2" min="1" max="10">
               </div>
               <div class="form-group" style="flex:1;">
                 <label>Check MoMo Stripe</label>
@@ -1168,6 +1168,24 @@
             <textarea id="setting-proxyquick-v3-list" rows="5" class="input"
               style="width:100%;font-family:monospace;padding:8px;background:var(--bg2);color:var(--text);border:1px solid var(--border);border-radius:4px;"
               placeholder="https://proxyquick.click/api/v3/users/rotatev2?..."></textarea>
+          </div>
+        </div>
+
+        <!-- Proxy Tĩnh cho ChatGPT -->
+        <div id="proxy-static-settings">
+          <h3 style="margin-top:16px; margin-bottom:8px; font-size:14px; color:var(--muted);">📌 Proxy Tĩnh cho ChatGPT (Static Pool)
+          </h3>
+          <p style="font-size:11px;color:var(--muted);margin-bottom:8px;">Nhập mỗi proxy <strong>1 dòng</strong>, định dạng:
+            <code style="color:var(--accent);">ip:port:user:pass</code> (ví dụ: <code
+              style="color:var(--accent);">171.246.158.251:56576:ava304:mjgzndk1mda4</code>)
+          </p>
+          <div class="form-group">
+            <textarea id="setting-proxy-static-list" rows="6" class="input"
+              style="width:100%;font-family:monospace;padding:8px;background:var(--bg2);color:var(--text);border:1px solid var(--border);border-radius:4px;"
+              placeholder="171.246.158.251:56576:ava304:mjgzndk1mda4&#10;103.56.83.11:12345:user2:pass2&#10;..."></textarea>
+          </div>
+          <div style="font-size:11px;color:var(--muted);margin-top:-8px;margin-bottom:8px;">
+            💡 GPT Bot sẽ dùng <strong>kết hợp</strong>: proxy tĩnh (theo thứ tự worker) + proxy xoay khi hết. Không ảnh hưởng CapCut/Higgsfield.
           </div>
         </div>
 

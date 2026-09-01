@@ -47,6 +47,8 @@ async function loadSettings() {
     document.getElementById('setting-proxy-type').value = d.PROXY_TYPE || 'proxyquick';
     document.getElementById('setting-proxyxoay-key').value = d.PROXYXOAY_KEY || '';
     document.getElementById('setting-proxyquick-v3-list').value = d.PROXY_V3_LIST || '';
+    const staticListEl = document.getElementById('setting-proxy-static-list');
+    if(staticListEl) staticListEl.value = d.PROXY_STATIC_LIST || '';
     if(document.getElementById('setting-capcut-password')) {
         document.getElementById('setting-capcut-password').value = d.CAPCUT_PASSWORD || 'capcut123';
     }
@@ -81,6 +83,8 @@ async function saveSettings() {
     PROXYXOAY_KEY: document.getElementById('setting-proxyxoay-key').value.trim(),
     PROXY_V3_LIST: document.getElementById('setting-proxyquick-v3-list').value.trim()
   };
+  const staticListEl = document.getElementById('setting-proxy-static-list');
+  if(staticListEl) data.PROXY_STATIC_LIST = staticListEl.value.trim();
   if(document.getElementById('setting-capcut-password')) {
       data.CAPCUT_PASSWORD = document.getElementById('setting-capcut-password').value.trim() || 'capcut123';
   }
