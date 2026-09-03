@@ -787,31 +787,75 @@ def _step_about_you(driver, stop_event=None):
     logger.info("[Step6] Chờ trang about-you...")
     _check_stop(stop_event)
 
-    name_input = wait_for_element(
-        driver, By.CSS_SELECTOR, 'input[name="name"]', timeout=30
-    )
+    max_retries = 2
+    for attempt in range(max_retries):
+        try:
+            name_input = wait_for_element(
+                driver, By.CSS_SELECTOR, 'input[name="name"]', timeout=30
+            )
 
-    full_name, age = _generate_vietnamese_profile()
-    logger.info(f"[Step6] Điền profile: {full_name}, tuổi: {age}")
-    set_react_input(driver, name_input, full_name)
+            full_name, age = _generate_vietnamese_profile()
+            logger.info(f"[Step6] Điền profile: {full_name}, tuổi: {age} (Lần {attempt+1}/{max_retries})")
+            set_react_input(driver, name_input, full_name)
 
-    try:
-        age_input = wait_for_element(
-            driver, By.CSS_SELECTOR, 'input[name="age"]', timeout=5
-        )
-        set_react_input(driver, age_input, str(age))
-    except:
-        logger.info("[Step6] Không tìm thấy input tuổi, bỏ qua")
+            # Thử tìm input tuổi cũ
+            try:
+                age_input = driver.find_element(By.CSS_SELECTOR, 'input[name="age"]')
+                set_react_input(driver, age_input, str(age))
+            except:
+                pass
 
-    _sentinel_delay(2, "Sentinel trước khi submit about-you")
+            # Thử tìm form ngày sinh mới của OpenAI (thường là DD/MM/YYYY hoặc MM/DD/YYYY)
+            try:
+                dob_input = driver.find_element(
+                    By.CSS_SELECTOR, 
+                    'input[name="birthday"], input[name="dateOfBirth"], input[name="dob"], input[name="date-of-birth"]'
+                )
+                import random
+                # Dùng ngày/tháng giống nhau < 12 để an toàn cho cả định dạng Mỹ và Quốc tế
+                safe_m = str(random.randint(1, 9)).zfill(2)
+                safe_y = str(random.randint(1980, 2000))
+                dob_keys = f"{safe_m}{safe_m}{safe_y}" # VD: 05051990
+                
+                logger.info(f"[Step6] Tìm thấy input ngày sinh, điền: {dob_keys}")
+                dob_input.click()
+                for char in dob_keys:
+                    dob_input.send_keys(char)
+                    time.sleep(0.05)
+            except:
+                pass
 
-    about_submit = wait_clickable(
-        driver, By.CSS_SELECTOR,
-        'button[type="submit"][data-dd-action-name="Continue"], button[type="submit"]',
-        timeout=10
-    )
-    try_click(driver, about_submit, "Submit About You")
-    time.sleep(2)
+            # Tăng thời gian chờ Sentinel lên 5s để đảm bảo Arkose token kịp gen xong
+            _sentinel_delay(5, "Sentinel trước khi submit about-you")
+
+            about_submit = wait_clickable(
+                driver, By.CSS_SELECTOR,
+                'button[type="submit"][data-dd-action-name="Continue"], button[type="submit"]',
+                timeout=10
+            )
+            try_click(driver, about_submit, "Submit About You")
+            time.sleep(3)
+
+            # Kiểm tra xem có bị lỗi 500 hay oops không
+            try:
+                body_text = driver.find_element(By.TAG_NAME, "body").text.lower()
+                if "oops, an error occurred" in body_text or "server error 500" in body_text or "500" in body_text:
+                    if attempt < max_retries - 1:
+                        logger.warning(f"[Step6] Phát hiện lỗi ở trang About You. Đang reload lại trang...")
+                        driver.refresh()
+                        time.sleep(4)
+                        continue
+            except:
+                pass
+
+            # Nếu không có lỗi, thoát khỏi vòng lặp
+            break
+
+        except Exception as e:
+            logger.warning(f"[Step6] Lỗi điền form About You: {e}")
+            if attempt < max_retries - 1:
+                driver.refresh()
+                time.sleep(4)
 
 
 def _step_skip_onboarding(driver, stop_event=None):

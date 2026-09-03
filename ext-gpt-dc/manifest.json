@@ -1,0 +1,39 @@
+{
+  "manifest_version": 3,
+  "name": "ChatGPT Auto Tool",
+  "version": "1.0",
+  "description": "Tự động đăng nhập + fill checkout Stripe cho ChatGPT",
+  "permissions": [
+    "storage"
+  ],
+  "host_permissions": [
+    "*://chatgpt.com/*",
+    "*://auth.openai.com/*",
+    "*://js.stripe.com/*",
+    "https://lay2fa.phh.info.vn/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "ChatGPT Auto Tool"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://chatgpt.com/*",
+        "*://auth.openai.com/*"
+      ],
+      "js": ["totp.js", "login.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    },
+    {
+      "matches": [
+        "*://chatgpt.com/checkout/*",
+        "*://js.stripe.com/*"
+      ],
+      "js": ["fill.js"],
+      "run_at": "document_idle",
+      "all_frames": true
+    }
+  ]
+}

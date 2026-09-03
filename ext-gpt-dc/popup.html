@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8" />
+<title>ChatGPT Auto Login</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Inter', -apple-system, sans-serif;
+    background: #0f0f13;
+    color: #e8e8f0;
+    width: 320px;
+    overflow: hidden;
+  }
+  .header {
+    background: linear-gradient(135deg, #1a1a2e 0%, #0f3460 100%);
+    padding: 16px 18px 14px;
+  }
+  .header h1 {
+    font-size: 14px; font-weight: 700; color: #fff;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .header p { font-size: 11px; color: #8899bb; margin-top: 3px; margin-left: 28px; }
+  .status-bar {
+    display: flex; align-items: center; gap: 6px;
+    padding: 7px 18px;
+    background: #13131a;
+    border-bottom: 1px solid #1e1e2e;
+    font-size: 11px; color: #6677aa;
+  }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: #555; flex-shrink:0; }
+  .dot.ok  { background: #4caf50; box-shadow: 0 0 6px #4caf5088; }
+  .dot.warn { background: #f39c12; box-shadow: 0 0 6px #f39c1288; }
+
+  .body { padding: 14px 18px; display: flex; flex-direction: column; gap: 12px; }
+
+  label { font-size: 10.5px; font-weight: 600; color: #7788aa; text-transform: uppercase; letter-spacing: 0.6px; display:block; margin-bottom:5px; }
+
+  textarea {
+    background: #1a1a2a; border: 1.5px solid #252535; border-radius: 10px;
+    padding: 10px 12px; font-size: 12px; color: #e0e0f0;
+    font-family: monospace; outline: none; resize: none; height: 70px;
+    width: 100%; line-height: 1.5; transition: border-color 0.2s;
+  }
+  textarea::placeholder { color: #44446a; }
+  textarea:focus { border-color: #4a90e2; box-shadow: 0 0 0 3px rgba(74,144,226,0.12); }
+
+  /* TOTP box */
+  .totp-box {
+    background: #0d1a0d; border: 1px solid #1a3a1a; border-radius: 10px;
+    padding: 10px 13px; display: flex; align-items: center; justify-content: space-between;
+  }
+  .totp-box .lbl { font-size: 10px; color: #4caf50; font-weight: 600; }
+  .totp-box .code { font-size: 24px; font-weight: 700; color: #4caf50; letter-spacing: 5px; font-family: monospace; }
+  .copy-btn {
+    font-size: 10px; padding: 4px 8px; background: #1a2a1a;
+    border: 1px solid #2a4a2a; color: #4caf50; border-radius: 6px;
+    cursor: pointer; font-weight: 600; white-space: nowrap;
+  }
+  .copy-btn:hover { background: #2a3a2a; }
+  .timer-bar { height: 3px; background: #1a3a1a; border-radius: 0 0 10px 10px; overflow: hidden; margin-top: 6px; }
+  .timer-fill { height: 100%; background: linear-gradient(90deg, #4caf50, #8bc34a); transition: width 1s linear; }
+
+  .actions { display: flex; gap: 8px; padding: 0 18px 14px; }
+  .btn {
+    flex: 1; padding: 10px; border: none; border-radius: 10px;
+    font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; transition: all 0.2s;
+  }
+  .btn-primary { background: linear-gradient(135deg, #4a90e2, #7b5ea7); color: #fff; }
+  .btn-primary:hover { opacity: 0.88; transform: translateY(-1px); }
+  .btn-secondary { background: #1a1a2a; border: 1.5px solid #252535; color: #8899bb; }
+  .btn-secondary:hover { background: #1e1e30; color: #e0e0f0; }
+
+  .toast {
+    position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%) translateY(50px);
+    background: #1a2a3a; border: 1px solid #2a4a6a; color: #7ab8e8;
+    font-size: 12px; padding: 7px 16px; border-radius: 20px; white-space: nowrap;
+    transition: transform 0.3s; z-index: 100;
+  }
+  .toast.show { transform: translateX(-50%) translateY(0); }
+  .toast.ok   { background: #1a2a1a; border-color: #2a6a2a; color: #7ae87a; }
+  .toast.err  { background: #2a1a1a; border-color: #6a2a2a; color: #e87a7a; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>🔐 ChatGPT Auto Login</h1>
+  <p>Tự động đăng nhập với email, pass & 2FA</p>
+</div>
+
+<div class="status-bar">
+  <div class="dot" id="dot"></div>
+  <span id="statusTxt">Chưa có tài khoản nào được lưu</span>
+</div>
+
+<div class="body">
+  <div>
+    <label>⚡ Paste thông tin tài khoản</label>
+    <textarea id="ta" placeholder="email&#9;password&#9;secret_2fa&#10;&#10;Ví dụ: abc@gmail.com&#9;pass123&#9;ABCDE12345..."></textarea>
+  </div>
+
+  <div id="totpWrap" style="display:none;">
+    <div class="totp-box">
+      <div>
+        <div class="lbl">MÃ TOTP HIỆN TẠI</div>
+        <div class="code" id="totpCode">------</div>
+      </div>
+      <button class="copy-btn" id="copyBtn">📋 Copy</button>
+    </div>
+    <div class="timer-bar"><div class="timer-fill" id="timerFill" style="width:100%"></div></div>
+  </div>
+</div>
+
+<div class="actions">
+  <button class="btn btn-secondary" id="clearBtn">🗑 Xóa</button>
+  <button class="btn btn-primary" id="saveBtn">💾 Lưu</button>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="totp.js"></script>
+<script src="popup.js"></script>
+</body>
+</html>
