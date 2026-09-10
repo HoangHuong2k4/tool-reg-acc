@@ -654,6 +654,28 @@ function playMomoSound() {
     }
 }
 
+function playApplePaySound() {
+    try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        // 3 nốt nhạc như âm chuộng iPhone
+        const notes = [1174.66, 1318.51, 1567.98]; // D6, E6, G6
+        notes.forEach((freq, i) => {
+            const t = ctx.currentTime + i * 0.18;
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(freq, t);
+            gain.gain.setValueAtTime(0, t);
+            gain.gain.linearRampToValueAtTime(0.4, t + 0.05);
+            gain.gain.exponentialRampToValueAtTime(0.01, t + 0.5);
+            osc.start(t);
+            osc.stop(t + 0.5);
+        });
+    } catch(e) { console.log('Audio not supported'); }
+}
+
 let gptCurrentTab = 'session';
 function gptSetTab(tab) {
     gptCurrentTab = tab;
@@ -704,19 +726,29 @@ async function gptLoadAccounts(){
           }
       }
       
-      // 2. Format Payment Methods (MoMo) - chỉ hiện Có/Không
+      // 2. Format Payment Methods - badge riêng cho từng loại
       const pms = (a.momo && a.momo !== 'không' && a.momo !== 'lỗi') ? a.momo.toLowerCase() : '';
-      const hasMomo = pms.includes('momo') || pms === 'có'; // Fallback cho DB cũ
+      const hasMomo = pms.includes('momo') || pms === 'có';
+      const hasApplePayOnly = pms.includes('apple_pay_only');
+      const hasGooglePay = pms.includes('google_pay_present') || (pms.includes('google_pay') && !pms.includes('apple_pay_only'));
 
       let momoHtml = '';
-      if (hasMomo) {
+      if (hasApplePayOnly) {
+          momoHtml = `<span style="display:inline-flex;align-items:center;gap:3px;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;background:rgba(16,185,129,0.18);color:#10b981;border:1px solid rgba(16,185,129,0.4);">🍎 Apple Pay Only</span>`;
+          if (hasMomo) {
+              momoHtml += ` <span style="display:inline-block;padding:2px 6px;border-radius:10px;font-size:10px;font-weight:600;background:rgba(168,85,247,0.18);color:#d8b4fe;border:1px solid rgba(168,85,247,0.4);">MoMo</span>`;
+          }
+      } else if (hasGooglePay && !hasMomo) {
+          momoHtml = `<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;background:rgba(59,130,246,0.12);color:#60a5fa;border:1px solid rgba(59,130,246,0.3);">🤖 Google Pay</span>`;
+      } else if (hasMomo) {
           momoHtml = `<span style="display:inline-block;padding:2px 10px;border-radius:10px;font-size:10px;font-weight:600;background:rgba(168,85,247,0.18);color:#d8b4fe;border:1px solid rgba(168,85,247,0.4);">✓ Có MoMo</span>`;
       } else {
           momoHtml = `<span style="color:var(--muted);font-size:11px;">Không</span>`;
       }
       
-      // Highlight màu dòng nếu có MoMo
-      const rowStyle = hasMomo ? 'background: rgba(168,85,247,0.06);' : '';
+      // Highlight dòng theo trạng thái
+      const rowStyle = hasApplePayOnly ? 'background: rgba(16,185,129,0.07);' : (hasMomo ? 'background: rgba(168,85,247,0.06);' : '');
+
       
       // Masking logic
       let displayEmail = a.email;
@@ -797,6 +829,7 @@ function gptToggleHide() {
   gptLoadAccounts();
 }
 
+
 async function gptClearAccounts(){
   showConfirmModal('Xóa tài khoản GPT', 'Bạn có chắc chắn muốn xóa toàn bộ danh sách tài khoản GPT đã tạo?', async () => {
     try{await fetch('/api/gpt/accounts/clear',{method:'POST'});showToast('🗑️','Đã xóa danh sách!');gptLoadAccounts();}catch(e){}
@@ -815,17 +848,19 @@ function gptSetCreationMethod(method) {
 }
 
 async function gptStartTask(){
+
   if(gptIsRunning)return;
   const count=parseInt(document.getElementById('gpt-count').value)||1;
   const threads=parseInt(document.getElementById('gpt-workers').value)||1;
   const checkMomo=document.getElementById('gpt-checkMomo').checked;
+  const checkApplePay=document.getElementById('gpt-checkApplePay') ? document.getElementById('gpt-checkApplePay').checked : false;
 
   // Gmail94: mỗi lần mua 1 Gmail sẽ tạo 4 biến thể GPT
   gptOk=0;gptFail=0;
   gptTotal = (gptMailType === 'gmail94') ? count * 4 : count;
   gptUpdateStats();
 
-  const r=await fetch('/api/gpt/task/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({count,threads,mail_type:gptMailType,creation_method:gptCreationMethod,check_momo:checkMomo,mail_api_source:gptApiSource,keep_open:gptKeepOpen,driver_mode:'playwright_ui',browser_type:gptBrowser,headless:gptHeadless,incognito:gptIncognito})});
+  const r=await fetch('/api/gpt/task/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({count,threads,mail_type:gptMailType,creation_method:gptCreationMethod,check_momo:checkMomo,check_apple_pay_ui:checkApplePay,mail_api_source:gptApiSource,keep_open:gptKeepOpen,driver_mode:'playwright_ui',browser_type:gptBrowser,headless:gptHeadless,incognito:gptIncognito})});
   const d=await r.json();
   if(!d.success){showToast('❌',d.error);return;}
   gptIsRunning=true;gptSetUI(true);gptStartSSE();
@@ -1660,11 +1695,16 @@ function gptFilterAccounts() {
             const trialText = (tds[4] ? tds[4].textContent : '').toLowerCase();
             const hasMomo = momoText.includes('momo');
             const hasTrial = trialText.includes('có trial') || trialText.includes('gói 0') || /(?:^|\D)0\s*đ/.test(trialText);
+            const hasApplePayOnly = momoText.includes('apple pay only');
+            const hasGooglePay = momoText.includes('google pay');
             
             if (badgeFilter === 'momo') badgeMatch = hasMomo;
             else if (badgeFilter === 'trial') badgeMatch = hasTrial;
             else if (badgeFilter === 'momo_trial') badgeMatch = hasMomo && hasTrial;
             else if (badgeFilter === 'trial_no_momo') badgeMatch = hasTrial && !hasMomo;
+            else if (badgeFilter === 'apple_pay_only') badgeMatch = hasApplePayOnly;
+            else if (badgeFilter === 'google_pay_present') badgeMatch = hasGooglePay;
+            else if (badgeFilter === 'trial_apple_pay_only') badgeMatch = hasTrial && hasApplePayOnly;
         }
         
         // Text filter

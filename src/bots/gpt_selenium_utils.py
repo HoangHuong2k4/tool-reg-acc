@@ -275,9 +275,9 @@ def try_click(driver, element, label=""):
 
 
 def _sentinel_delay(seconds=3, label="Sentinel"):
-    """Chờ Sentinel/Turnstile captcha khởi tạo xong (đã được bóp thời gian để chạy siêu tốc)."""
-    # Ép thời gian chờ xuống tối đa 1.2s để chuyển bước cực nhanh
-    actual_wait = min(seconds, 1.2)
+    """Chờ Sentinel/Turnstile captcha khởi tạo xong."""
+    # Cap ở 2.5s để cân bằng giữa tốc độ và độ ổn định
+    actual_wait = min(seconds, 2.5)
     logger.info(f"[Delay] Chờ {actual_wait}s cho {label} load... (gốc: {seconds}s)")
     time.sleep(actual_wait)
 
@@ -482,35 +482,185 @@ def init_selenium_driver(browser_type, headless, incognito, proxy, thread_id=1, 
             else:
                 chrome_options.add_argument(f"--proxy-server=http://{parsed.hostname}:{parsed.port}")
                 
-        # Fix cho Windows: Tự động lấy version Chrome hiện tại để truyền vào uc.Chrome
-        # Giúp tránh lỗi "This version of ChromeDriver only supports Chrome version X"
-        # và tránh việc fallback sinh ra exception "WinError 6".
-        version_main = None
+        # Tự động lấy FULL version Chrome để download đúng ChromeDriver
+        # Tránh lỗi "ChromeDriver only supports Chrome version X"
+        chrome_full_version = None  # e.g. "152.0.7977.77"
+        version_main = None         # e.g. 152
+
         if sys.platform == "win32":
             try:
                 import winreg
                 key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Google\Chrome\BLBeacon")
-                version, _ = winreg.QueryValueEx(key, "version")
-                version_main = int(version.split('.')[0])
+                chrome_full_version, _ = winreg.QueryValueEx(key, "version")
+                version_main = int(chrome_full_version.split('.')[0])
             except:
                 pass
-                
+        elif sys.platform == "darwin":
+            _chrome_paths_mac = [
+                "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+                os.path.expanduser("~/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
+            ]
+            for _cp in _chrome_paths_mac:
+                if os.path.exists(_cp):
+                    try:
+                        _ver_out = subprocess.check_output([_cp, "--version"], stderr=subprocess.DEVNULL).decode().strip()
+                        # Output: "Google Chrome 152.0.7977.77"
+                        _ver_parts = _ver_out.split()
+                        if _ver_parts:
+                            chrome_full_version = _ver_parts[-1]
+                            version_main = int(chrome_full_version.split('.')[0])
+                        break
+                    except:
+                        pass
+        else:
+            for _cmd in ["google-chrome", "google-chrome-stable", "chromium-browser", "chromium"]:
+                try:
+                    _ver_out = subprocess.check_output([_cmd, "--version"], stderr=subprocess.DEVNULL).decode().strip()
+                    _ver_parts = _ver_out.split()
+                    if _ver_parts:
+                        chrome_full_version = _ver_parts[-1]
+                        version_main = int(chrome_full_version.split('.')[0])
+                    break
+                except:
+                    pass
+
+        if version_main:
+            logger.info(f"[ChromeVersion] Phát hiện Chrome version: {version_main} ({chrome_full_version})")
+
+        # --- Fix UC 3.5.5 hardcode mac-x64 trên Apple Silicon ---
+        def _ensure_uc_driver_arm64():
+            """
+            UC 3.5.5 hardcode 'chromedriver-mac-x64' không chạy được trên arm64.
+            Giải pháp: đặt arm64 binary vào đúng vị trí UC expect + ad-hoc codesign.
+            """
+            import platform as _platform
+            import urllib.request
+            import zipfile as _zipfile
+
+            if sys.platform != "darwin" or _platform.machine() != "arm64":
+                return  # Chỉ cần fix trên Apple Silicon
+
+            _uc_dir = os.path.expanduser(
+                "~/Library/Application Support/undetected_chromedriver"
+            )
+            _uc_bin = os.path.join(_uc_dir, "undetected_chromedriver")
+            _arm64_subdir = os.path.join(_uc_dir, "undetected", "chromedriver-mac-arm64")
+            _arm64_bin = os.path.join(_arm64_subdir, "chromedriver")
+
+            # Kiểm tra binary hiện tại có phải arm64 không
+            def _is_valid_arm64(path):
+                if not os.path.exists(path) or os.path.getsize(path) < 1_000_000:
+                    return False
+                try:
+                    out = subprocess.check_output(["file", path], stderr=subprocess.DEVNULL).decode()
+                    return "arm64" in out
+                except:
+                    return False
+
+            if _is_valid_arm64(_uc_bin):
+                # Binary OK, chỉ cần codesign lại phòng UC vừa patch
+                try:
+                    subprocess.run(["codesign", "--force", "--deep", "-s", "-", _uc_bin],
+                                   capture_output=True, check=False)
+                except:
+                    pass
+                return
+
+            # Tải arm64 chromedriver từ CfT
+            _full_ver = chrome_full_version or f"{version_main}.0.0.0"
+            _cache_arm64 = os.path.expanduser(
+                f"~/.cache/chromedriver_cft/chromedriver-{_full_ver}"
+            )
+
+            if not _is_valid_arm64(_cache_arm64):
+                _url = (
+                    f"https://storage.googleapis.com/chrome-for-testing-public"
+                    f"/{_full_ver}/mac-arm64/chromedriver-mac-arm64.zip"
+                )
+                logger.info(f"[UC-ARM64] Tải chromedriver arm64 {_full_ver}...")
+                _zip = _cache_arm64 + ".zip"
+                try:
+                    urllib.request.urlretrieve(_url, _zip)
+                    with _zipfile.ZipFile(_zip, 'r') as zf:
+                        for _name in zf.namelist():
+                            if _name.rstrip('/').split('/')[-1] == "chromedriver" and not _name.endswith('/'):
+                                os.makedirs(os.path.dirname(_cache_arm64), exist_ok=True)
+                                with zf.open(_name) as src, open(_cache_arm64, 'wb') as dst:
+                                    dst.write(src.read())
+                                break
+                    os.chmod(_cache_arm64, 0o755)
+                except Exception as _dl_err:
+                    logger.warning(f"[UC-ARM64] Không tải được: {_dl_err}")
+                    return
+                finally:
+                    if os.path.exists(_zip):
+                        try: os.remove(_zip)
+                        except: pass
+
+            if not _is_valid_arm64(_cache_arm64):
+                return
+
+            # Đặt vào UC cache
+            try:
+                os.makedirs(_arm64_subdir, exist_ok=True)
+                import shutil
+                shutil.copy2(_cache_arm64, _arm64_bin)
+                shutil.copy2(_cache_arm64, _uc_bin)
+                os.chmod(_arm64_bin, 0o755)
+                os.chmod(_uc_bin, 0o755)
+                # Ad-hoc codesign để macOS chấp nhận binary không signed
+                for _p in [_arm64_bin, _uc_bin]:
+                    subprocess.run(["codesign", "--force", "--deep", "-s", "-", _p],
+                                   capture_output=True, check=False)
+                    subprocess.run(["xattr", "-cr", _p],
+                                   capture_output=True, check=False)
+                logger.info(f"[UC-ARM64] Đã cài arm64 chromedriver vào UC cache: {_uc_bin}")
+            except Exception as _cp_err:
+                logger.warning(f"[UC-ARM64] Lỗi cài vào UC cache: {_cp_err}")
+
+        _ensure_uc_driver_arm64()
+
+        # --- Khởi tạo UC Chrome với version_main ---
+        def _make_fallback_options():
+            """Copy chrome_options sang object mới (UC không cho reuse)."""
+            _opts = uc.ChromeOptions()
+            for _arg in chrome_options.arguments:
+                _opts.add_argument(_arg)
+            if chrome_options.binary_location:
+                _opts.binary_location = chrome_options.binary_location
+            return _opts
+
         try:
             if version_main:
                 driver = uc.Chrome(options=chrome_options, version_main=version_main)
             else:
                 driver = uc.Chrome(options=chrome_options)
+            # Sau khi UC patch binary, codesign lại để tránh SIGKILL lần sau
+            if sys.platform == "darwin":
+                _uc_bin_path = os.path.expanduser(
+                    "~/Library/Application Support/undetected_chromedriver/undetected_chromedriver"
+                )
+                if os.path.exists(_uc_bin_path):
+                    subprocess.run(["codesign", "--force", "--deep", "-s", "-", _uc_bin_path],
+                                   capture_output=True, check=False)
         except Exception as e:
-            logger.warning(f"Không tự tìm được chromedriver cho UC: {e}. Thử dùng webdriver-manager...")
-            from webdriver_manager.chrome import ChromeDriverManager
-            # Fix: Copy options để tránh lỗi "you cannot reuse the ChromeOptions object"
-            fallback_options = uc.ChromeOptions()
-            for arg in chrome_options.arguments:
-                fallback_options.add_argument(arg)
-            if chrome_options.binary_location:
-                fallback_options.binary_location = chrome_options.binary_location
-            
-            driver = uc.Chrome(driver_executable_path=ChromeDriverManager().install(), options=fallback_options)
+            logger.warning(f"[UC] Lần 1 thất bại: {e}. Thử lại sau khi codesign...")
+            # Thử codesign lại UC binary rồi chạy lại
+            _uc_bin_path = os.path.expanduser(
+                "~/Library/Application Support/undetected_chromedriver/undetected_chromedriver"
+            )
+            if os.path.exists(_uc_bin_path):
+                subprocess.run(["codesign", "--force", "--deep", "-s", "-", _uc_bin_path],
+                               capture_output=True, check=False)
+            try:
+                if version_main:
+                    driver = uc.Chrome(options=_make_fallback_options(), version_main=version_main)
+                else:
+                    driver = uc.Chrome(options=_make_fallback_options())
+            except Exception as e2:
+                logger.warning(f"Không khởi động được chromedriver: {e2}. Thử webdriver-manager...")
+                from webdriver_manager.chrome import ChromeDriverManager
+                driver = uc.Chrome(driver_executable_path=ChromeDriverManager().install(), options=_make_fallback_options())
     # Force window size and position for Chrome (UC often ignores options on macOS)
     if browser_type.lower() not in ["firefox", "camoufox"]:
         try:
@@ -958,7 +1108,7 @@ def _step_setup_2fa(driver, stop_event=None):
     # === Navigate to Settings ===
     logger.info("[Step8] Đang truy cập Settings...")
     driver.get("https://chatgpt.com/#settings")
-    time.sleep(1)
+    time.sleep(3)  # Tăng lên 3s để SPA render xong trước khi tìm nút
     
     # === Xử lý Modal "You're all set" nếu nó hiện trễ ở màn hình Settings ===
     try:
@@ -979,7 +1129,7 @@ def _step_setup_2fa(driver, stop_event=None):
         sec_tab = wait_clickable(
             driver, By.CSS_SELECTOR,
             'button[data-testid="security-tab"]',
-            timeout=20
+            timeout=30  # Tăng timeout để chờ Settings modal mở
         )
         try_click(driver, sec_tab, "Security Tab")
     except:
@@ -994,7 +1144,7 @@ def _step_setup_2fa(driver, stop_event=None):
         except:
             raise RuntimeError("Không tìm thấy tab Security")
 
-    time.sleep(2)
+    time.sleep(3)  # Chờ tab Security render xong
     
     # Kểm tra lại modal "You're all set" vì nó có thể hiện sau khi click tab Security
     try:
@@ -1022,7 +1172,7 @@ def _step_setup_2fa(driver, stop_event=None):
         )
         _fix_radix_pointer_events(driver)
         _dispatch_real_click(driver, mfa_toggle)
-        time.sleep(1)
+        time.sleep(2)  # Chờ toggle animation và dialog xuất hiện
 
         # Kiểm tra toggle đã bật chưa
         toggle_state = mfa_toggle.get_attribute("data-state") or mfa_toggle.get_attribute("aria-checked")
@@ -1030,7 +1180,7 @@ def _step_setup_2fa(driver, stop_event=None):
             logger.warning("[Step10] Toggle chưa bật, thử click lại...")
             _fix_radix_pointer_events(driver)
             try_click(driver, mfa_toggle, "MFA Toggle retry")
-            time.sleep(1)
+            time.sleep(2)
     except:
         # Fallback: tìm toggle bằng role switch
         logger.info("[Step10] Fallback: tìm MFA toggle bằng role switch...")
@@ -1052,7 +1202,7 @@ def _step_setup_2fa(driver, stop_event=None):
             try_click(driver, enable_btn, "Enable 2FA button")
             time.sleep(1)
 
-    time.sleep(2)
+    time.sleep(3)  # Chờ MFA dialog load hoàn toàn
     
     # === Xử lý UI trung gian "Tiếp tục / Continue" nếu có ===
     logger.info("[Step10.5] Kiểm tra UI trung gian 'Continue'...")
@@ -1091,7 +1241,7 @@ def _step_setup_2fa(driver, stop_event=None):
         except:
             logger.warning("[Step11] Không tìm thấy nút Trouble scanning, có thể đã hiện secret")
 
-    time.sleep(2)
+    time.sleep(3)  # Chờ secret key text hiện ra
 
     # === Extract TOTP Secret ===
     logger.info("[Step12] Đang trích xuất Secret key...")
@@ -1113,12 +1263,12 @@ def _step_setup_2fa(driver, stop_event=None):
         timeout=10
     )
     set_react_input(driver, totp_input, code)
-    time.sleep(0.4)
+    time.sleep(1)  # Chờ React cập nhật giá trị input
 
     # === Click Verify với retry ===
     _click_verify_with_retry(driver)
 
-    time.sleep(1)
+    time.sleep(2)  # Chờ server xác nhận 2FA
     return totp_secret
 
 
@@ -1255,6 +1405,184 @@ def _click_verify_with_retry(driver, max_attempts=3):
     return False
 
 
+# ─── Apple Pay UI Check ─────────────────────────────────────────────────────
+
+# Flag được app.py override trước khi chạy
+CHECK_APPLE_PAY_UI = False
+
+def _step_check_apple_pay_ui(driver, stop_event=None):
+    """
+    Check Apple Pay bằng giao diện (Selenium DOM):
+    - Navigate đến trang checkout ChatGPT (subscription/upgrade)
+    - Chờ Stripe iframe/checkout load
+    - Kiểm tra xem có 'Pay with Google' / Google Pay button không
+    - Nếu chỉ có Apple Pay (không có Google Pay) → trả về 'apple_pay_only'
+    - Nếu có Google Pay → trả về 'google_pay_present'
+    Returns: str — 'apple_pay_only' | 'google_pay_present' | 'unknown'
+    """
+    result = 'unknown'
+    try:
+        logger.info("[ApplePayUI] Bắt đầu check Apple Pay qua giao diện...")
+
+        # Lưu lại URL hiện tại để restore sau
+        original_url = driver.current_url
+
+        # Navigate đến trang ChatGPT với promo để trigger checkout
+        checkout_url = "https://chatgpt.com/?promo_campaign=plus-1-month-free#pricing"
+        driver.get(checkout_url)
+        time.sleep(3)
+
+        # Tìm nút lấy ưu đãi (Free offer) để mở checkout
+        upgrade_clicked = False
+        upgrade_selectors = [
+            # Data test id chính xác (từ HTML mới cung cấp)
+            '[data-testid="select-plan-button-plus-upgrade"]',
+            # CSS selectors (như nút Free offer bạn cung cấp)
+            'button.button-glimmer-cta',
+            'button:has(svg use[href*="gift"])',
+            'a[href*="/upgrade"]',
+            'button[data-testid*="upgrade"]',
+            # Text-based XPath
+            '//button[contains(translate(text(),"ABCDEFGHIJKLMNOPQRSTUVWXYZ","abcdefghijklmnopqrstuvwxyz"),"claim free offer")]',
+            '//button[contains(translate(text(),"ABCDEFGHIJKLMNOPQRSTUVWXYZ","abcdefghijklmnopqrstuvwxyz"),"free offer")]',
+            '//button[contains(translate(text(),"ABCDEFGHIJKLMNOPQRSTUVWXYZ","abcdefghijklmnopqrstuvwxyz"),"upgrade")]',
+            '//button[contains(translate(text(),"ABCDEFGHIJKLMNOPQRSTUVWXYZ","abcdefghijklmnopqrstuvwxyz"),"get plus")]',
+        ]
+
+        for sel in upgrade_selectors:
+            try:
+                if sel.startswith('//'):
+                    els = driver.find_elements(By.XPATH, sel)
+                else:
+                    els = driver.find_elements(By.CSS_SELECTOR, sel)
+                for el in els:
+                    if el.is_displayed():
+                        driver.execute_script("arguments[0].scrollIntoView({block:'center'});", el)
+                        time.sleep(0.3)
+                        el.click()
+                        upgrade_clicked = True
+                        logger.info(f"[ApplePayUI] Đã click nút upgrade (selector: {sel[:60]})")
+                        break
+                if upgrade_clicked:
+                    break
+            except Exception:
+                continue
+
+        if not upgrade_clicked:
+            logger.warning("[ApplePayUI] Không tìm thấy nút Upgrade, thử navigate thẳng đến /upgrade")
+            try:
+                driver.get("https://chatgpt.com/upgrade")
+                time.sleep(3)
+                # Thử click nút subscribe/get Plus
+                btns = driver.find_elements(By.TAG_NAME, 'button')
+                for btn in btns:
+                    try:
+                        txt = btn.text.strip().lower()
+                        if any(k in txt for k in ['get plus', 'subscribe', 'upgrade', 'start']):
+                            if btn.is_displayed():
+                                btn.click()
+                                upgrade_clicked = True
+                                break
+                    except Exception:
+                        continue
+            except Exception as e:
+                logger.warning(f"[ApplePayUI] Lỗi navigate /upgrade: {e}")
+
+        # Chờ trang checkout/Stripe load
+        time.sleep(5)
+
+        # Kiểm tra DOM cho Google Pay
+        found_google_pay = False
+
+        # 1. Check bằng CSS selectors cho button thực tế trên main DOM
+        google_pay_selectors = [
+            '[data-testid="google-pay-button"]',
+            '.gpay-button',
+            'button[aria-label*="Google Pay"]'
+        ]
+        for sel in google_pay_selectors:
+            try:
+                els = driver.find_elements(By.CSS_SELECTOR, sel)
+                for el in els:
+                    if el.is_displayed():
+                        found_google_pay = True
+                        logger.info(f"[ApplePayUI] Phát hiện Google Pay hiển thị (CSS: {sel})")
+                        break
+                if found_google_pay:
+                    break
+            except Exception:
+                continue
+
+        # 2. Quét iframe DOM để tìm nút Google Pay thực sự được render
+        if not found_google_pay:
+            try:
+                # Đợi thêm chút để chắc chắn iframe load
+                time.sleep(5)  # Tăng lên 5 giây cho chắc
+                iframes = driver.find_elements(By.TAG_NAME, 'iframe')
+                iframe_idx = 0
+                for iframe in iframes:
+                    src_attr = (iframe.get_attribute('src') or '').lower()
+                    if 'stripe' in src_attr:
+                        driver.switch_to.frame(iframe)
+                        try:
+                            # Ghi log toàn bộ HTML của iframe ra file để debug
+                            iframe_html = driver.page_source
+                            with open(f"stripe_iframe_dump_{iframe_idx}.html", "w", encoding="utf-8") as f:
+                                f.write(iframe_html)
+                            iframe_idx += 1
+                            
+                            # Sử dụng JS để tìm kiếm triệt để các thuộc tính hoặc text GPay/Google Pay
+                            js_script = """
+                            let found = false;
+                            let txt = (document.body.innerText || '').toLowerCase();
+                            if (txt.includes('gpay') || txt.includes('google pay') || txt.includes('googlepay')) {
+                                return true;
+                            }
+                            document.querySelectorAll('*').forEach(el => {
+                                let lbl = (el.getAttribute('aria-label') || '').toLowerCase();
+                                let alt = (el.getAttribute('alt') || '').toLowerCase();
+                                let tit = (el.getAttribute('title') || '').toLowerCase();
+                                let testid = (el.getAttribute('data-testid') || '').toLowerCase();
+                                if (lbl.includes('gpay') || lbl.includes('google pay') || lbl.includes('googlepay')) found = true;
+                                if (alt.includes('gpay') || alt.includes('google pay') || alt.includes('googlepay')) found = true;
+                                if (tit.includes('gpay') || tit.includes('google pay') || tit.includes('googlepay')) found = true;
+                                if (testid.includes('gpay') || testid.includes('google pay') || testid.includes('googlepay')) found = true;
+                            });
+                            return found;
+                            """
+                            gp_check = driver.execute_script(js_script)
+                            
+                            if gp_check:
+                                found_google_pay = True
+                                logger.info("[ApplePayUI] Phát hiện Google Pay qua JS nâng cao (innerText/aria-label/alt) trong iframe")
+                                break
+                            else:
+                                # Kiểm tra page_source thô như là biện pháp dự phòng cuối cùng
+                                src_lower = iframe_html.lower()
+                                if 'aria-label="google pay"' in src_lower or 'aria-label="buy with gpay"' in src_lower or 'alt="google pay"' in src_lower or 'pay.google.com' in src_lower or 'google-pay' in src_lower:
+                                    found_google_pay = True
+                                    logger.info("[ApplePayUI] Phát hiện Google Pay qua inner iframe (pay.google.com) trong page_source thô")
+                                    break
+                        finally:
+                            driver.switch_to.default_content()
+            except Exception as e:
+                try: driver.switch_to.default_content()
+                except: pass
+
+        if found_google_pay:
+            result = 'google_pay_present'
+            logger.info("[ApplePayUI] ❌ Có Google Pay - không phải chỉ Apple Pay")
+        else:
+            result = 'apple_pay_only'
+            logger.info("[ApplePayUI] ✅ Chỉ có Apple Pay (không tìm thấy Google Pay)")
+
+    except Exception as e:
+        logger.warning(f"[ApplePayUI] Lỗi check Apple Pay UI: {e}")
+        result = 'unknown'
+
+    return result
+
+
 # ─── Main Registration Flow ──────────────────────────────────────────────────
 
 def _step_check_promo(driver, stop_event=None, proxy=None):
@@ -1376,7 +1704,7 @@ def _step_check_promo(driver, stop_event=None, proxy=None):
                 logger.info(f"[Promo] Không có MoMo. (Các cổng hiện có: {payment_methods_str})")
         else:
             has_momo = payment_methods_str or "không"
-            
+
     except Exception as e:
         logger.warning(f"[Promo] Lỗi check promo API: {e}")
 
@@ -1478,6 +1806,29 @@ def run_selenium_registration_standalone(
         # PHẦN 3: KIỂM TRA ƯU ĐÃI (PROMO) & MOMO
         # ═══════════════════════════════════════════════════════════════
         has_uudai, has_momo_str = _step_check_promo(driver, stop_event, proxy)
+
+        # ═══════════════════════════════════════════════════════════════
+        # PHẦN 4: CHECK APPLE PAY UI
+        # ═══════════════════════════════════════════════════════════════
+        import sys as _sys
+        _this_mod = _sys.modules.get(__name__) or _sys.modules.get('src.bots.gpt_selenium_utils')
+        do_apple_check = getattr(_this_mod, 'CHECK_APPLE_PAY_UI', False) if _this_mod else CHECK_APPLE_PAY_UI
+
+        if do_apple_check:
+            logger.info("[ApplePayUI] Check Apple Pay UI được bật, bắt đầu kiểm tra giao diện...")
+            apple_result = _step_check_apple_pay_ui(driver, stop_event)
+            if apple_result == 'apple_pay_only':
+                if has_momo_str and has_momo_str not in ['không', 'lỗi', '']:
+                    has_momo_str = has_momo_str + ', apple_pay_only'
+                else:
+                    has_momo_str = 'apple_pay_only'
+                logger.info("[ApplePayUI] ✅ Ghi nhận cuối cùng: Chỉ có Apple Pay")
+            elif apple_result == 'google_pay_present':
+                if has_momo_str and has_momo_str not in ['không', 'lỗi', '']:
+                    has_momo_str = has_momo_str + ', google_pay_present'
+                else:
+                    has_momo_str = 'google_pay_present'
+                logger.info("[ApplePayUI] ❌ Ghi nhận cuối cùng: Có Google Pay")
 
         if save_account_callback:
             # Truyền thêm tham số uudai nếu hàm hỗ trợ

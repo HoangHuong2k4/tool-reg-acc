@@ -1120,6 +1120,7 @@ def gpt_task_start():
     mail_type = data.get("mail_type", "outlook")
     creation_method = data.get("creation_method", "selenium")
     check_momo = data.get("check_momo", True)
+    check_apple_pay_ui = data.get("check_apple_pay_ui", False)
     mail_api_source = data.get("mail_api_source", "dongvanfb")
     
     driver_mode = data.get("driver_mode", "playwright_ui")
@@ -1157,7 +1158,7 @@ def gpt_task_start():
     state_gpt.is_running = True
     state_gpt.task_thread = threading.Thread(
         target=_run_gpt_task, 
-        args=(count, threads, mail_type, check_momo, browser_type, headless, incognito, mail_api_source, keep_open, creation_method), 
+        args=(count, threads, mail_type, check_momo, browser_type, headless, incognito, mail_api_source, keep_open, creation_method, check_apple_pay_ui), 
         daemon=True
     )
     state_gpt.task_thread.start()
@@ -1192,8 +1193,9 @@ def gpt_task_stream():
                 yield f"data: {json.dumps({'type':'ping'})}\n\n"
     return Response(stream_with_context(generate()), mimetype="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
-def _run_gpt_task(count, threads, mail_type, check_momo=True, browser_type="chrome", headless=False, incognito=False, mail_api_source="dongvanfb", keep_open=False, creation_method="selenium"):
+def _run_gpt_task(count, threads, mail_type, check_momo=True, browser_type="chrome", headless=False, incognito=False, mail_api_source="dongvanfb", keep_open=False, creation_method="selenium", check_apple_pay_ui=False):
     state_gpt.check_momo = check_momo
+    state_gpt.check_apple_pay_ui = check_apple_pay_ui
     state_gpt.browser_type = browser_type
     state_gpt.headless = headless
     state_gpt.incognito = incognito
@@ -1243,6 +1245,12 @@ def _run_gpt_task(count, threads, mail_type, check_momo=True, browser_type="chro
         # Đẩy config MoMo và Password xuống bot
         cfg = load_settings()
         bot.CHECK_MOMO = state_gpt.check_momo
+        # Set Apple Pay UI check flag
+        try:
+            import src.bots.gpt_selenium_utils as _sel_utils
+            _sel_utils.CHECK_APPLE_PAY_UI = getattr(state_gpt, 'check_apple_pay_ui', False)
+        except Exception:
+            pass
         bot.GPT_PASSWORD = cfg.get("GMAIL94_PASSWORD", "chatgpt123@@").strip()
         if not bot.GPT_PASSWORD:
             bot.GPT_PASSWORD = "chatgpt123@@"
