@@ -896,6 +896,25 @@ function gptAddLog(data) {
     if(data.msg && data.msg.includes('Phát hiện MoMo')) {
         playMomoSound();
     }
+
+    // Badge "Đang chờ mail..." khi Gmail94 hết stock
+    const badge = document.getElementById('gpt-waitingMailBadge');
+    if (badge && data.msg) {
+      if (data.msg.includes('Chua co Gmail')) {
+        // Trích số lần retry từ log: "...lan X, thu lai..."
+        const m = data.msg.match(/lan (\d+)/);
+        const attempt = m ? parseInt(m[1]) : '?';
+        document.getElementById('gpt-waitingMailInfo').textContent =
+          `Hết stock, đang chờ... (lần thử ${attempt}) — tự retry mỗi 15s`;
+        badge.style.display = 'flex';
+      } else if (
+        data.msg.includes('Gmail94 mua thanh cong') ||
+        data.msg.includes('Dung do stop event') ||
+        data.level === 'OK'
+      ) {
+        badge.style.display = 'none';
+      }
+    }
 }
 function gptRenderLog(data){
   const wrap=document.getElementById('gpt-logWrap');
@@ -914,7 +933,13 @@ function gptSetUI(running){
   document.getElementById('gpt-startBtn').style.display=running?'none':'inline-block'; document.getElementById('gpt-stopBtn').style.display=running?'inline-block':'none';
   const dot=document.getElementById('gpt-statusDot'), txt=document.getElementById('gpt-statusText');
   if(running){dot.className='dot running';txt.textContent='Đang chạy...';}else{dot.className='dot';txt.textContent='Idle';}
+  // Ẩn badge khi dừng/kết thúc
+  if (!running) {
+    const badge = document.getElementById('gpt-waitingMailBadge');
+    if (badge) badge.style.display = 'none';
+  }
 }
+
 
 // ==== GPM MODE ====
 let gpmIsRunning = false, gpmEvt = null;

@@ -309,13 +309,35 @@ def register_one_purchase(thread_id, browser_type="chrome", headless=False, inco
         if on_result: on_result(False)
         return (0, 1)
 
-    # Bước 1: Mua Gmail
+    # Bước 1: Mua Gmail — retry cho đến khi có mail hoặc stop
     log("[Thread-{}] [Gmail94] Dang mua Gmail...".format(thread_id), "INFO")
-    purchase = gmail94_buy(token)
+    purchase = None
+    _buy_attempt = 0
+    _BUY_RETRY_DELAY = 15  # giây chờ giữa các lần retry
+
+    while not GLOBAL_STOP_EVENT.is_set():
+        _buy_attempt += 1
+        purchase = gmail94_buy(token)
+        if purchase:
+            break  # Mua thành công
+
+        # Kiểm tra xem có phải "No email available" hay lỗi khác
+        # Dù lý do gì, cũng retry sau DELAY giây
+        log(
+            "[Thread-{}] [Gmail94] Chua co Gmail (lan {}), thu lai sau {}s...".format(
+                thread_id, _buy_attempt, _BUY_RETRY_DELAY
+            ),
+            "WARN",
+        )
+        # Chờ có thể bị ngắt sớm nếu stop_event được set
+        GLOBAL_STOP_EVENT.wait(timeout=_BUY_RETRY_DELAY)
+
     if not purchase:
-        log("[Thread-{}] Khong mua duoc Gmail.".format(thread_id), "ERR")
+        # Chỉ vào đây nếu stop_event được set trước khi mua được
+        log("[Thread-{}] [Gmail94] Dung do stop event, khong mua duoc Gmail.".format(thread_id), "ERR")
         if on_result: on_result(False)
         return (0, 1)
+
 
     base_email = purchase["email"]
     order_id   = purchase["order_id"]

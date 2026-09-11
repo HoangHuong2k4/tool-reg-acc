@@ -627,6 +627,24 @@
               <button class="btn btn-secondary" style="border-color:var(--red);color:var(--red);"
                 onclick="gptCloseBrowsers()" title="Đóng tất cả trình duyệt GPT">💥</button>
             </div>
+
+            <!-- Badge hiển thị khi Gmail94 đang chờ mail -->
+            <div id="gpt-waitingMailBadge" style="display:none; margin-top:8px;
+              background: rgba(255,193,7,0.15); border: 1px solid rgba(255,193,7,0.4);
+              border-radius: 8px; padding: 8px 12px;
+              display: none; align-items: center; gap: 8px;">
+              <span style="font-size:18px; animation: spin 1.2s linear infinite; display:inline-block;">🔄</span>
+              <div>
+                <div style="font-size:12px; font-weight:600; color: #f5a623;">Đang chờ mail từ Gmail94...</div>
+                <div style="font-size:10px; color: var(--muted);" id="gpt-waitingMailInfo">
+                  Hết stock, tool tự động retry mỗi 15s cho đến khi có mail
+                </div>
+              </div>
+            </div>
+            <style>
+              @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+            </style>
+
           </div>
         </div>
       </div>

@@ -1400,8 +1400,12 @@ def api_send_code(encrypted_email, encrypted_password, proxy_dict=None):
         return False
 
 def api_verify_login(encrypted_email, encrypted_password, encrypted_code, proxy_dict=None):
-    """Gọi API xác minh OTP + đăng ký. Return (uid, ms_token, cookies_str) nếu OK."""
+    """Gọi API xác minh OTP + đăng ký. Return (uid, ms_token, cookies_str) nếu OK.
+    Tự động retry tối đa 3 lần nếu nhận error_code 999 (rate limit).
+    """
     import random
+    import datetime
+
     url = "https://www.capcut.com/passport/web/email/register_verify_login/"
     params = {
         "aid": "348188",
@@ -1410,7 +1414,6 @@ def api_verify_login(encrypted_email, encrypted_password, encrypted_code, proxy_
         "verifyFp": "verify_m7euzwhw_PNtb4tlY_I0az_4me0_9Hrt_sEBZgW5GGPdn",
         "check_region": "1"
     }
-    import datetime
     bday = datetime.date(random.randint(1995, 2004), random.randint(1, 12), random.randint(1, 28)).isoformat()
     data = {
         "mix_mode": "1",
@@ -1428,33 +1431,71 @@ def api_verify_login(encrypted_email, encrypted_password, encrypted_code, proxy_
         "Content-Type": "application/x-www-form-urlencoded",
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
     }
-    proxies = {"http": f"http://{proxy_dict['user']}:{proxy_dict['pass']}@{proxy_dict['host']}:{proxy_dict['port']}",
-               "https": f"http://{proxy_dict['user']}:{proxy_dict['pass']}@{proxy_dict['host']}:{proxy_dict['port']}"} if proxy_dict and proxy_dict.get("user") else \
-               ({"http": f"http://{proxy_dict['host']}:{proxy_dict['port']}", "https": f"http://{proxy_dict['host']}:{proxy_dict['port']}"} if proxy_dict else None)
-    try:
-        resp = requests.post(url, params=params, data=data, headers=headers, proxies=proxies, timeout=20)
-        result = resp.json()
-        if result.get("message") != "success":
+
+    def _make_proxies(pd):
+        if not pd:
+            return None
+        if pd.get("user"):
+            return {"http": f"http://{pd['user']}:{pd['pass']}@{pd['host']}:{pd['port']}",
+                    "https": f"http://{pd['user']}:{pd['pass']}@{pd['host']}:{pd['port']}"}
+        return {"http": f"http://{pd['host']}:{pd['port']}",
+                "https": f"http://{pd['host']}:{pd['port']}"}
+
+    # Retry tối đa 3 lần khi gặp error_code 999 (rate limit)
+    _retry_delays = [5, 15, 30]  # giây chờ giữa mỗi lần retry
+    _current_proxy = proxy_dict
+
+    for attempt in range(4):  # 1 lần đầu + 3 lần retry
+        try:
+            proxies = _make_proxies(_current_proxy)
+            resp = requests.post(url, params=params, data=data, headers=headers,
+                                 proxies=proxies, timeout=20)
+            result = resp.json()
+
+            if result.get("message") == "success":
+                uid = str(result.get("data", {}).get("user_id", ""))
+                raw_cookies = resp.headers.get("Set-Cookie", "")
+                ms_token = ""
+                for part in raw_cookies.split(","):
+                    if "msToken=" in part:
+                        ms_token = part.split("msToken=")[1].split(";")[0].strip()
+                        break
+                cookies_list = []
+                cookie_names = []
+                for c in resp.cookies:
+                    cookies_list.append({"name": c.name, "value": c.value, "domain": ".capcut.com"})
+                    cookie_names.append(c.name)
+                log(f"Received API cookies: {', '.join(cookie_names)}", "INFO")
+                return uid, ms_token, cookies_list
+
+            # Kiểm tra error_code 999 (rate limit) → retry
+            err_code = result.get("data", {}).get("error_code", 0)
+            if err_code == 999 and attempt < 3:
+                delay = _retry_delays[attempt]
+                log(f"verify_login bị rate-limit (999) — thử lại lần {attempt+1}/3 sau {delay}s...", "WARN")
+                time.sleep(delay)
+                # Xoay proxy mới để tránh bị chặn tiếp
+                try:
+                    new_proxy = get_rotated_proxy()
+                    if new_proxy:
+                        _current_proxy = new_proxy
+                        log(f"Đã xoay proxy mới: {new_proxy['host']}:{new_proxy['port']}", "INFO")
+                except Exception:
+                    pass
+                continue
+
+            # Lỗi khác — không retry
             log(f"verify_login thất bại: {result}", "ERR")
             return None, None, []
-        uid = str(result.get("data", {}).get("user_id", ""))
-        raw_cookies = resp.headers.get("Set-Cookie", "")
-        ms_token = ""
-        for part in raw_cookies.split(","):
-            if "msToken=" in part:
-                ms_token = part.split("msToken=")[1].split(";")[0].strip()
-                break
-        # Thu thập tất cả set-cookie thành dict
-        cookies_list = []
-        cookie_names = []
-        for c in resp.cookies:
-            cookies_list.append({"name": c.name, "value": c.value, "domain": ".capcut.com"})
-            cookie_names.append(c.name)
-        log(f"Received API cookies: {', '.join(cookie_names)}", "INFO")
-        return uid, ms_token, cookies_list
-    except Exception as e:
-        log(f"api_verify_login lỗi: {e}", "ERR")
-        return None, None, []
+
+        except Exception as e:
+            log(f"api_verify_login lỗi: {e}", "ERR")
+            return None, None, []
+
+    log("verify_login thất bại sau 3 lần retry (rate-limit liên tục)", "ERR")
+    return None, None, []
+
+
 
 def api_get_nickname(cookies_list, proxy_dict=None):
     """Gọi API lấy nickname thực của tài khoản sau khi đăng ký."""
@@ -1509,21 +1550,16 @@ def api_get_nickname(cookies_list, proxy_dict=None):
         
     return None
 
-def join_team_camoufox(join_link, cookies_list, proxy_dict=None):
+def join_team_camoufox(join_link, cookies_list):
+    """Mở Camoufox (không proxy) để join team — dùng cookies có sẵn, không cần proxy."""
     from camoufox.sync_api import Camoufox
     import json
     
-    proxy = None
-    if proxy_dict:
-        proxy = {"server": f"http://{proxy_dict['host']}:{proxy_dict['port']}"}
-        if proxy_dict.get('user'):
-            proxy["username"] = proxy_dict["user"]
-            proxy["password"] = proxy_dict["pass"]
-            
     uidname = ""
     log("Khởi động Camoufox (chạy ẩn ngầm chống phát hiện)...", "INFO")
     try:
-        with Camoufox(headless=True, proxy=proxy) as browser:
+        # Không truyền proxy — join team dùng session cookies, không cần proxy
+        with Camoufox(headless=True) as browser:
             page = browser.new_page()
             page.goto("https://www.capcut.com", timeout=60000, wait_until="domcontentloaded")
             
@@ -1641,10 +1677,10 @@ def register_one_account_api(index, join_link, total, proxy_dict=None):
             uid = nickname
             log(f"Nickname: {C.BOLD}{uid}{C.RST}", "OK")
 
-        # Bước 5: Join team bằng Camoufox
+        # Bước 5: Join team bằng Camoufox (không proxy — dùng cookies)
         if join_link and join_link.strip():
             log(f"[{index}/{total}] Mở Camoufox để join team...", "INFO")
-            new_uidname = join_team_camoufox(join_link, cookies_list, proxy_dict)
+            new_uidname = join_team_camoufox(join_link, cookies_list)
             if not new_uidname:
                 log("Không thể join team hoặc không lấy được thông tin từ DOM!", "ERR")
                 return False
