@@ -175,72 +175,221 @@
     }
 
     // =============================================
-    //  FLOATING PANEL — Góc trên bên TRÁI
+    //  FLOATING PANEL — Draggable, góc trên giữa
     // =============================================
     function injectFloatingPanel() {
         if (document.getElementById('__alp__')) return;
 
+        // ── CSS inject ──
+        const style = document.createElement('style');
+        style.textContent = `
+            #__alp__ {
+                position: fixed;
+                top: 14px;
+                left: 50%;
+                transform: translateX(-50%);
+                z-index: 2147483647;
+                background: linear-gradient(135deg,#1a1a2e,#16213e);
+                border: 1px solid #2a3a5a;
+                border-radius: 14px;
+                padding: 10px 13px 12px;
+                width: 300px;
+                box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+                font-family: -apple-system,BlinkMacSystemFont,Inter,sans-serif;
+                transition: box-shadow 0.2s;
+                user-select: none;
+            }
+            #__alp__.dragging { box-shadow: 0 16px 48px rgba(0,0,0,0.8); }
+            #__alp_mini__ {
+                position: fixed;
+                top: 10px;
+                left: 50%;
+                transform: translateX(-50%);
+                z-index: 2147483647;
+                background: linear-gradient(135deg,#1a1a2e,#0f3460);
+                border: 1px solid #2a3a6a;
+                border-radius: 20px;
+                padding: 5px 10px;
+                cursor: pointer;
+                display: none;
+                align-items: center;
+                gap: 5px;
+                box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+                transition: transform 0.15s, box-shadow 0.15s;
+            }
+            #__alp_mini__:hover {
+                transform: translateX(-50%) scale(1.06);
+                box-shadow: 0 6px 22px rgba(74,144,226,0.35);
+            }
+            #__alp_drag__ {
+                cursor: grab;
+                display: flex;
+                align-items: center;
+                gap: 7px;
+                flex: 1;
+                padding: 2px 0;
+            }
+            #__alp_drag__:active { cursor: grabbing; }
+            #__alp_x__ {
+                background: none;
+                border: none;
+                color: #6677aa;
+                cursor: pointer;
+                font-size: 18px;
+                line-height: 1;
+                padding: 0 2px;
+                transition: color 0.15s;
+            }
+            #__alp_x__:hover { color: #e0e8ff; }
+            #__alp_home__ {
+                width: 100%;
+                padding: 8px;
+                background: #1a2a3a;
+                border: 1px solid #2a4a6a;
+                color: #7ab8e8;
+                border-radius: 8px;
+                font-size: 12px;
+                font-weight: 600;
+                cursor: pointer;
+                font-family: inherit;
+                transition: background 0.15s, color 0.15s;
+                margin-bottom: 8px;
+            }
+            #__alp_home__:hover { background: #1e3a50; color: #a8d8ff; }
+            #__alp_btn__ {
+                width: 100%;
+                padding: 9px;
+                background: linear-gradient(135deg,#4a90e2,#7b5ea7);
+                color: #fff;
+                border: none;
+                border-radius: 10px;
+                font-size: 13px;
+                font-weight: 700;
+                cursor: pointer;
+                letter-spacing: 0.3px;
+                transition: opacity 0.15s, transform 0.15s;
+                font-family: inherit;
+            }
+            #__alp_btn__:hover:not(:disabled) { opacity: 0.88; transform: translateY(-1px); }
+            #__alp_btn__:disabled { opacity: 0.5; cursor: not-allowed; }
+            #__alp_ta__ {
+                width: 100%;
+                height: 55px;
+                background: #0b0b18;
+                border: 1.5px solid #252540;
+                border-radius: 10px;
+                padding: 8px 10px;
+                font-size: 11.5px;
+                color: #c8d8f0;
+                font-family: monospace;
+                outline: none;
+                resize: none;
+                line-height: 1.5;
+                box-sizing: border-box;
+                transition: border-color 0.2s;
+            }
+            #__alp_ta__:focus { border-color: #4a90e2; }
+        `;
+        document.head.appendChild(style);
+
+        // ── Mini badge (khi collapsed) ──
+        const mini = document.createElement('div');
+        mini.id = '__alp_mini__';
+        mini.innerHTML = `<span style="font-size:14px;">🔐</span><span style="font-size:10px;font-weight:700;color:#7ab8e8;">ALT</span>`;
+        document.body.appendChild(mini);
+
+        // ── Panel chính ──
         const div = document.createElement('div');
         div.id = '__alp__';
-        div.style.cssText = [
-            'position:fixed',
-            'top:14px',
-            'left:14px',
-            'z-index:2147483647',
-            'background:linear-gradient(135deg,#1a1a2e,#16213e)',
-            'border:1px solid #2a3a5a',
-            'border-radius:14px',
-            'padding:12px 14px 12px',
-            'width:290px',
-            'box-shadow:0 8px 32px rgba(0,0,0,0.55)',
-            'font-family:-apple-system,BlinkMacSystemFont,Inter,sans-serif',
-        ].join(';');
-
         div.innerHTML = `
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
-                <div style="display:flex;align-items:center;gap:7px;">
+                <div id="__alp_drag__">
                     <span style="font-size:15px;">🔐</span>
                     <span style="font-size:13px;font-weight:700;color:#e0e8ff;">Auto Login</span>
+                    <span style="font-size:9px;color:#445577;margin-left:2px;">⠿ drag</span>
                 </div>
-                <button id="__alp_x__" style="background:none;border:none;color:#6677aa;cursor:pointer;font-size:16px;line-height:1;padding:0 4px;">−</button>
+                <button id="__alp_x__" title="Thu nhỏ">−</button>
             </div>
             <div id="__alp_b__">
                 <textarea id="__alp_ta__"
-                    placeholder="Paste: email&#9;pass&#9;secret2fa"
-                    spellcheck="false"
-                    style="width:100%;height:58px;background:#0b0b18;border:1.5px solid #252540;border-radius:10px;padding:9px 11px;font-size:11.5px;color:#c8d8f0;font-family:monospace;outline:none;resize:none;line-height:1.5;box-sizing:border-box;"></textarea>
+                    placeholder="email&#9;pass&#9;secret2fa"
+                    spellcheck="false"></textarea>
                 <div id="__alp_s__" style="font-size:11px;color:#4477aa;margin:6px 2px 8px;min-height:16px;line-height:1.5;"></div>
-                <button id="__alp_btn__" style="width:100%;padding:9px;background:linear-gradient(135deg,#4a90e2,#7b5ea7);color:#fff;border:none;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;letter-spacing:0.3px;">▶ Bắt đầu đăng nhập</button>
+                <button id="__alp_home__">🏠 Về trang chủ ChatGPT</button>
+                <button id="__alp_btn__">▶ Bắt đầu đăng nhập</button>
             </div>
         `;
         document.body.appendChild(div);
 
-        const ta    = document.getElementById('__alp_ta__');
-        const btn   = document.getElementById('__alp_btn__');
-        const stat  = document.getElementById('__alp_s__');
-        const tog   = document.getElementById('__alp_x__');
-        const body  = document.getElementById('__alp_b__');
+        const ta   = document.getElementById('__alp_ta__');
+        const btn  = document.getElementById('__alp_btn__');
+        const stat = document.getElementById('__alp_s__');
+        const tog  = document.getElementById('__alp_x__');
+        const body = document.getElementById('__alp_b__');
+        const drag = document.getElementById('__alp_drag__');
+        const homeBtn = document.getElementById('__alp_home__');
         let collapsed = false;
 
+        // ── Nút thu nhỏ / mở lại ──
         tog.onclick = () => {
-            collapsed = !collapsed;
-            body.style.display = collapsed ? 'none' : 'block';
-            tog.textContent = collapsed ? '+' : '−';
+            collapsed = true;
+            div.style.display = 'none';
+            mini.style.display = 'flex';
+        };
+        mini.onclick = () => {
+            collapsed = false;
+            div.style.display = '';
+            mini.style.display = 'none';
         };
 
-        ta.onfocus = () => { ta.style.borderColor = '#4a90e2'; };
-        ta.onblur  = () => { ta.style.borderColor = '#252540'; };
-        btn.onmouseenter = () => { btn.style.opacity = '0.88'; };
-        btn.onmouseleave = () => { btn.style.opacity = '1'; };
+        // ── Draggable ──
+        (function makeDraggable(panel) {
+            let isDragging = false, startX, startY, origLeft, origTop;
 
-        // Hiển thị account đã lưu
+            drag.addEventListener('mousedown', (e) => {
+                if (e.button !== 0) return;
+                isDragging = true;
+                // Chuyển từ transform sang left/top tuyệt đối
+                const rect = panel.getBoundingClientRect();
+                panel.style.left = rect.left + 'px';
+                panel.style.top  = rect.top  + 'px';
+                panel.style.transform = 'none';
+                startX   = e.clientX;
+                startY   = e.clientY;
+                origLeft = rect.left;
+                origTop  = rect.top;
+                panel.classList.add('dragging');
+                e.preventDefault();
+            });
+
+            document.addEventListener('mousemove', (e) => {
+                if (!isDragging) return;
+                panel.style.left = (origLeft + e.clientX - startX) + 'px';
+                panel.style.top  = (origTop  + e.clientY - startY) + 'px';
+            });
+
+            document.addEventListener('mouseup', () => {
+                if (!isDragging) return;
+                isDragging = false;
+                panel.classList.remove('dragging');
+            });
+        })(div);
+
+        // ── Hiển thị account đã lưu ──
         const acc = stored.chatgpt_account;
         if (acc && acc.email) {
             stat.innerHTML = '<span style="color:#4caf50;">✓ ' + acc.email + '</span>';
+            ta.value = [acc.email, acc.password, acc.totp_secret].filter(Boolean).join('\t');
         } else {
             stat.innerHTML = '<span style="color:#f39c12;">⚠ Chưa có tài khoản</span>';
         }
 
+        // ── Nút về trang chủ GPT ──
+        homeBtn.onclick = () => {
+            window.location.href = 'https://chatgpt.com/';
+        };
+
+        // ── Nút Bắt đầu ──
         btn.onclick = async () => {
             const raw = ta.value.trim();
             let account = null;
@@ -265,6 +414,14 @@
                     stat.innerHTML = '<span style="color:#e74c3c;">✗ Chưa có TK. Paste vào ô trên!</span>';
                     return;
                 }
+            }
+
+            // Nếu chưa ở trang chủ chatgpt.com thì chuyển về đó trước
+            if (window.location.hostname !== 'chatgpt.com' || window.location.pathname !== '/') {
+                stat.innerHTML = '<span style="color:#4a90e2;">🔄 Đang về trang chủ ChatGPT...</span>';
+                await chrome.storage.local.set({ chatgpt_account: account, alp_autostart: true });
+                window.location.href = 'https://chatgpt.com/';
+                return;
             }
 
             btn.textContent = '⏳ Đang chạy...';
@@ -412,7 +569,23 @@
     if (hostname === 'chatgpt.com') {
         if (document.body) injectFloatingPanel();
         else document.addEventListener('DOMContentLoaded', injectFloatingPanel);
-        
+
+        // Auto-start nếu được navigate về đây từ nút Bắt đầu
+        chrome.storage.local.get(['alp_autostart', 'chatgpt_account'], async (res) => {
+            if (!res.alp_autostart) return;
+            await chrome.storage.local.remove('alp_autostart');
+            const acc = res.chatgpt_account;
+            if (!acc || !acc.email) return;
+            // Đợi panel render xong rồi mới chạy
+            await new Promise(r => setTimeout(r, 800));
+            const stat = document.getElementById('__alp_s__');
+            const btn  = document.getElementById('__alp_btn__');
+            if (stat) stat.innerHTML = '<span style="color:#4a90e2;">🔄 Tự động bắt đầu đăng nhập...</span>';
+            if (btn)  { btn.textContent = '⏳ Đang chạy...'; btn.disabled = true; }
+            await startLoginFlow(acc);
+            if (btn)  { btn.textContent = '▶ Bắt đầu đăng nhập'; btn.disabled = false; }
+        });
+
         // Tự động kiểm tra đăng nhập & click nút Upgrade Plus
         setInterval(() => {
             // Kiểm tra xem đã đăng nhập chưa (dựa vào nút profile)
