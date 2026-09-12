@@ -241,37 +241,47 @@
                 transition: color 0.15s;
             }
             #__alp_x__:hover { color: #e0e8ff; }
-            #__alp_home__ {
-                width: 100%;
-                padding: 8px;
+            .alp-icon-btn {
+                flex: 1;
+                padding: 7px 6px;
+                border: 1px solid #252545;
+                border-radius: 8px;
+                font-size: 16px;
+                cursor: pointer;
+                font-family: inherit;
+                transition: background 0.15s, transform 0.12s, box-shadow 0.15s;
+                position: relative;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                line-height: 1;
+            }
+            .alp-icon-btn:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.4); }
+            .alp-icon-btn:active { transform: translateY(0); }
+            .alp-icon-btn[title]:hover::after {
+                content: attr(title);
+                position: absolute;
+                top: calc(100% + 5px);
+                left: 50%;
+                transform: translateX(-50%);
                 background: #1a2a3a;
                 border: 1px solid #2a4a6a;
-                color: #7ab8e8;
-                border-radius: 8px;
-                font-size: 12px;
-                font-weight: 600;
-                cursor: pointer;
-                font-family: inherit;
-                transition: background 0.15s, color 0.15s;
-                margin-bottom: 8px;
+                color: #a8d8ff;
+                font-size: 10px;
+                white-space: nowrap;
+                padding: 3px 8px;
+                border-radius: 6px;
+                pointer-events: none;
+                z-index: 9999;
             }
-            #__alp_home__:hover { background: #1e3a50; color: #a8d8ff; }
-            #__alp_btn__ {
-                width: 100%;
-                padding: 9px;
-                background: linear-gradient(135deg,#4a90e2,#7b5ea7);
-                color: #fff;
-                border: none;
-                border-radius: 10px;
-                font-size: 13px;
-                font-weight: 700;
-                cursor: pointer;
-                letter-spacing: 0.3px;
-                transition: opacity 0.15s, transform 0.15s;
-                font-family: inherit;
-            }
-            #__alp_btn__:hover:not(:disabled) { opacity: 0.88; transform: translateY(-1px); }
-            #__alp_btn__:disabled { opacity: 0.5; cursor: not-allowed; }
+            #__alp_home__ { background: #1a2535; color: #7ab8e8; }
+            #__alp_home__:hover { background: #1e3048; border-color: #3a6a9a; }
+            #__alp_btn__ { background: linear-gradient(135deg,#2a5aa2,#5a3e87); color: #fff; border-color: #3a5a92; }
+            #__alp_btn__:hover:not(:disabled) { background: linear-gradient(135deg,#3a6ab2,#6a4e97); }
+            #__alp_btn__:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
+            #__alp_promo__ { background: #1a2a1a; color: #6dbd5e; border-color: #2a4a2a; }
+            #__alp_promo__:hover { background: #1e3a1e; border-color: #3a6a3a; }
+            #__alp_action_row__ { display: flex; gap: 6px; margin-top: 2px; }
             #__alp_ta__ {
                 width: 100%;
                 height: 55px;
@@ -314,20 +324,24 @@
                 <textarea id="__alp_ta__"
                     placeholder="email&#9;pass&#9;secret2fa"
                     spellcheck="false"></textarea>
-                <div id="__alp_s__" style="font-size:11px;color:#4477aa;margin:6px 2px 8px;min-height:16px;line-height:1.5;"></div>
-                <button id="__alp_home__">🏠 Về trang chủ ChatGPT</button>
-                <button id="__alp_btn__">▶ Bắt đầu đăng nhập</button>
+                <div id="__alp_s__" style="font-size:11px;color:#4477aa;margin:5px 2px 6px;min-height:16px;line-height:1.5;"></div>
+                <div id="__alp_action_row__">
+                    <button id="__alp_home__" class="alp-icon-btn" title="Về trang chủ ChatGPT">🏠</button>
+                    <button id="__alp_btn__"  class="alp-icon-btn" title="Bắt đầu đăng nhập">▶️</button>
+                    <button id="__alp_promo__" class="alp-icon-btn" title="Trang ưu đãi Plus miễn phí">🎁</button>
+                </div>
             </div>
         `;
         document.body.appendChild(div);
 
-        const ta   = document.getElementById('__alp_ta__');
-        const btn  = document.getElementById('__alp_btn__');
-        const stat = document.getElementById('__alp_s__');
-        const tog  = document.getElementById('__alp_x__');
-        const body = document.getElementById('__alp_b__');
-        const drag = document.getElementById('__alp_drag__');
-        const homeBtn = document.getElementById('__alp_home__');
+        const ta      = document.getElementById('__alp_ta__');
+        const btn     = document.getElementById('__alp_btn__');
+        const stat    = document.getElementById('__alp_s__');
+        const tog     = document.getElementById('__alp_x__');
+        const body    = document.getElementById('__alp_b__');
+        const drag    = document.getElementById('__alp_drag__');
+        const homeBtn  = document.getElementById('__alp_home__');
+        const promoBtn = document.getElementById('__alp_promo__');
         let collapsed = false;
 
         // ── Nút thu nhỏ / mở lại ──
@@ -389,6 +403,11 @@
             window.location.href = 'https://chatgpt.com/';
         };
 
+        // ── Nút ưu đãi Plus ──
+        promoBtn.onclick = () => {
+            window.location.href = 'https://chatgpt.com/?promo_campaign=plus-1-month-free#pricing';
+        };
+
         // ── Nút Bắt đầu ──
         btn.onclick = async () => {
             const raw = ta.value.trim();
@@ -424,13 +443,13 @@
                 return;
             }
 
-            btn.textContent = '⏳ Đang chạy...';
+            btn.innerHTML = '⏳';
             btn.disabled = true;
             stat.innerHTML = '<span style="color:#4a90e2;">🔄 Đang đăng nhập: ' + account.email + '</span>';
 
             await startLoginFlow(account);
 
-            btn.textContent = '▶ Bắt đầu đăng nhập';
+            btn.innerHTML = '▶️';
             btn.disabled = false;
         };
     }
@@ -581,9 +600,9 @@
             const stat = document.getElementById('__alp_s__');
             const btn  = document.getElementById('__alp_btn__');
             if (stat) stat.innerHTML = '<span style="color:#4a90e2;">🔄 Tự động bắt đầu đăng nhập...</span>';
-            if (btn)  { btn.textContent = '⏳ Đang chạy...'; btn.disabled = true; }
+            if (btn)  { btn.innerHTML = '⏳'; btn.disabled = true; }
             await startLoginFlow(acc);
-            if (btn)  { btn.textContent = '▶ Bắt đầu đăng nhập'; btn.disabled = false; }
+            if (btn)  { btn.innerHTML = '▶️'; btn.disabled = false; }
         });
 
         // Tự động kiểm tra đăng nhập & click nút Upgrade Plus
