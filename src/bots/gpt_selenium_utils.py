@@ -205,14 +205,14 @@ def get_db():
 def wait_for_element(driver, by, value, timeout=20):
     from selenium.webdriver.support.ui import WebDriverWait
     from selenium.webdriver.support import expected_conditions as EC
-    wait = WebDriverWait(driver, timeout)
+    wait = WebDriverWait(driver, timeout, ignored_exceptions=(Exception,))
     return wait.until(EC.visibility_of_element_located((by, value)))
 
 
 def wait_clickable(driver, by, value, timeout=20):
     from selenium.webdriver.support.ui import WebDriverWait
     from selenium.webdriver.support import expected_conditions as EC
-    wait = WebDriverWait(driver, timeout)
+    wait = WebDriverWait(driver, timeout, ignored_exceptions=(Exception,))
     return wait.until(EC.element_to_be_clickable((by, value)))
 
 
@@ -365,13 +365,18 @@ def init_selenium_driver(browser_type, headless, incognito, proxy, thread_id=1, 
         except:
             pass
 
-    window_width = SCREEN_W // 2
-    # Lấy 90% chiều cao màn hình để không bị lấp bởi thanh Taskbar (tương đương 90vh)
-    window_height = int(SCREEN_H * 0.9)
-    
-    idx = (thread_id - 1) % max(1, cols)
-    pos_x = idx * window_width
-    pos_y = 0
+    if headless:
+        window_width = SCREEN_W
+        window_height = SCREEN_H
+        pos_x = 0
+        pos_y = 0
+    else:
+        window_width = SCREEN_W // 2
+        # Lấy 90% chiều cao màn hình để không bị lấp bởi thanh Taskbar (tương đương 90vh)
+        window_height = int(SCREEN_H * 0.9)
+        idx = (thread_id - 1) % max(1, cols)
+        pos_x = idx * window_width
+        pos_y = 0
 
     if browser_type.lower() in ["firefox", "camoufox"]:
         from selenium.webdriver.firefox.options import Options as FirefoxOptions
@@ -423,7 +428,7 @@ def init_selenium_driver(browser_type, headless, incognito, proxy, thread_id=1, 
         if proxy:
             parsed = urllib.parse.urlparse(proxy)
             if parsed.username and parsed.password:
-                import os, tempfile, shutil, uuid
+                import tempfile, shutil, uuid
                 ext_dir = os.path.join(tempfile.gettempdir(), f"proxy_ext_{uuid.uuid4().hex}")
                 os.makedirs(ext_dir, exist_ok=True)
                 
@@ -632,9 +637,9 @@ def init_selenium_driver(browser_type, headless, incognito, proxy, thread_id=1, 
 
         try:
             if version_main:
-                driver = uc.Chrome(options=chrome_options, version_main=version_main)
+                driver = uc.Chrome(options=chrome_options, headless=headless, version_main=version_main)
             else:
-                driver = uc.Chrome(options=chrome_options)
+                driver = uc.Chrome(options=chrome_options, headless=headless)
             # Sau khi UC patch binary, codesign lại để tránh SIGKILL lần sau
             if sys.platform == "darwin":
                 _uc_bin_path = os.path.expanduser(
@@ -654,15 +659,21 @@ def init_selenium_driver(browser_type, headless, incognito, proxy, thread_id=1, 
                                capture_output=True, check=False)
             try:
                 if version_main:
-                    driver = uc.Chrome(options=_make_fallback_options(), version_main=version_main)
+                    driver = uc.Chrome(options=_make_fallback_options(), headless=headless, version_main=version_main)
                 else:
-                    driver = uc.Chrome(options=_make_fallback_options())
+                    driver = uc.Chrome(options=_make_fallback_options(), headless=headless)
             except Exception as e2:
                 logger.warning(f"Không khởi động được chromedriver: {e2}. Thử webdriver-manager...")
                 from webdriver_manager.chrome import ChromeDriverManager
-                driver = uc.Chrome(driver_executable_path=ChromeDriverManager().install(), options=_make_fallback_options())
-    # Force window size and position for Chrome (UC often ignores options on macOS)
-    if browser_type.lower() not in ["firefox", "camoufox"]:
+                driver = uc.Chrome(driver_executable_path=ChromeDriverManager().install(), options=_make_fallback_options(), headless=headless)
+    # Force window size and position
+    if headless:
+        try:
+            driver.maximize_window()
+            driver.set_window_size(1920, 1080)
+        except:
+            pass
+    elif browser_type.lower() not in ["firefox", "camoufox"]:
         try:
             driver.set_window_rect(x=pos_x, y=pos_y, width=window_width, height=window_height)
         except:
@@ -1194,13 +1205,16 @@ def _step_setup_2fa(driver, stop_event=None):
         else:
             # Tìm button Enable/Bật trong row có text authenticator/2fa
             logger.info("[Step10] Fallback: tìm nút Enable 2FA...")
-            enable_btn = driver.find_element(
-                By.XPATH,
-                '//button[contains(text(), "Enable")] | //button[contains(text(), "Bật")] | //button[contains(text(), "Set up")] | //button[contains(., "Multi-factor authentication")]//following-sibling::button'
-            )
-            _fix_radix_pointer_events(driver)
-            try_click(driver, enable_btn, "Enable 2FA button")
-            time.sleep(1)
+            try:
+                enable_btn = driver.find_element(
+                    By.XPATH,
+                    '//button[contains(text(), "Enable")] | //button[contains(text(), "Bật")] | //button[contains(text(), "Set up")] | //button[contains(., "Multi-factor authentication")]//following-sibling::button'
+                )
+                _fix_radix_pointer_events(driver)
+                try_click(driver, enable_btn, "Enable 2FA button")
+                time.sleep(1)
+            except Exception as e:
+                logger.warning(f"[Step10] Lỗi khi tìm nút Enable 2FA: {e}")
 
     time.sleep(3)  # Chờ MFA dialog load hoàn toàn
     

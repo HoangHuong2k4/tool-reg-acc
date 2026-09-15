@@ -245,7 +245,7 @@ def custom_wait_for_otp(email_addr, after_ts, **kwargs):
 
     log("[OTP-Hook] Poll OTP Gmail94 cho {} (order {}, da dung: {})...".format(
         email_addr, order_id, len(seen)), "INFO")
-    return gmail94_read_otp(GMAIL94_TOKEN, order_id, timeout=180, interval=5, seen_otps=seen)
+    return gmail94_read_otp(GMAIL94_TOKEN, order_id, timeout=60, interval=5, seen_otps=seen)
 
 
 def _setup_gpt_engine():
@@ -376,8 +376,8 @@ def register_one_purchase(thread_id, browser_type="chrome", headless=False, inco
         threads.append(t)
         t.start()
         
-        # Chờ tối đa 3 phút cho OTP. Nếu có OTP (hoặc lỗi), nó sẽ set()
-        otp_event.wait(timeout=180)
+        # Chờ tối đa 60 giây cho OTP. Nếu có OTP (hoặc lỗi), nó sẽ set()
+        otp_event.wait(timeout=60)
 
     for i, variant_email in enumerate(variants):
         if GLOBAL_STOP_EVENT.is_set():
