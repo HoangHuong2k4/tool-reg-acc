@@ -1545,14 +1545,28 @@ def _step_check_apple_pay_ui(driver, stop_event=None):
                                 f.write(iframe_html)
                             iframe_idx += 1
                             
-                            # Sử dụng JS để tìm kiếm triệt để các thuộc tính hoặc text GPay/Google Pay
+                            # Sử dụng JS để tìm kiếm triệt để các thuộc tính hoặc text GPay/Google Pay (chỉ phần tử hiển thị)
                             js_script = """
                             let found = false;
+                            
+                            // Hàm kiểm tra element có thực sự hiển thị không
+                            function isVisible(el) {
+                                if (!el) return false;
+                                const style = window.getComputedStyle(el);
+                                if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+                                const rect = el.getBoundingClientRect();
+                                if (rect.width === 0 || rect.height === 0) return false;
+                                return true;
+                            }
+
                             let txt = (document.body.innerText || '').toLowerCase();
                             if (txt.includes('gpay') || txt.includes('google pay') || txt.includes('googlepay')) {
                                 return true;
                             }
+                            
                             document.querySelectorAll('*').forEach(el => {
+                                if (!isVisible(el)) return;
+                                
                                 let lbl = (el.getAttribute('aria-label') || '').toLowerCase();
                                 let alt = (el.getAttribute('alt') || '').toLowerCase();
                                 let tit = (el.getAttribute('title') || '').toLowerCase();
@@ -1568,15 +1582,8 @@ def _step_check_apple_pay_ui(driver, stop_event=None):
                             
                             if gp_check:
                                 found_google_pay = True
-                                logger.info("[ApplePayUI] Phát hiện Google Pay qua JS nâng cao (innerText/aria-label/alt) trong iframe")
+                                logger.info("[ApplePayUI] Phát hiện Google Pay qua JS (innerText/aria-label/alt) đang hiển thị trong iframe")
                                 break
-                            else:
-                                # Kiểm tra page_source thô như là biện pháp dự phòng cuối cùng
-                                src_lower = iframe_html.lower()
-                                if 'aria-label="google pay"' in src_lower or 'aria-label="buy with gpay"' in src_lower or 'alt="google pay"' in src_lower or 'pay.google.com' in src_lower or 'google-pay' in src_lower:
-                                    found_google_pay = True
-                                    logger.info("[ApplePayUI] Phát hiện Google Pay qua inner iframe (pay.google.com) trong page_source thô")
-                                    break
                         finally:
                             driver.switch_to.default_content()
             except Exception as e:
