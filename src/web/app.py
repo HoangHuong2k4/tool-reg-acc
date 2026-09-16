@@ -1859,6 +1859,14 @@ def grok_hotmail_count():
             count = sum(1 for l in f if l.strip() and not l.strip().startswith("#") and ("|" in l or "----" in l or "\t" in l))
     return jsonify({"count": count})
 
+@app.route("/api/grok/billing/count")
+def grok_billing_count():
+    count = 0
+    if os.path.exists("data/grok_billing.txt"):
+        with open("data/grok_billing.txt", "r", encoding="utf-8") as f:
+            count = sum(1 for l in f if l.strip() and not l.strip().startswith("#") and ("|" in l or "\t" in l))
+    return jsonify({"count": count})
+
 @app.route("/api/grok/hotmail/upload", methods=["POST"])
 def grok_hotmail_upload():
     f = request.files.get("file")
@@ -1868,6 +1876,16 @@ def grok_hotmail_upload():
         fp.write("\n".join(lines) + "\n")
     valid_count = sum(1 for l in lines if not l.startswith("#") and ("|" in l or "----" in l or "\t" in l))
     return jsonify({"count": valid_count})
+
+@app.route("/api/grok/billing/upload", methods=["POST"])
+def grok_billing_upload():
+    try:
+        data = request.json.get("data", "")
+        with open("data/grok_billing.txt", "w", encoding="utf-8") as f:
+            f.write(data)
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
 
 @app.route("/api/grok/accounts")
 def grok_accounts():
@@ -1932,6 +1950,7 @@ def grok_task_start():
     mail_api_source = data.get("mail_api_source", "mixmmo")
     open_payment = bool(data.get("open_payment", False))
     language = data.get("language", "en-US")
+    cards = data.get("cards", [])
 
     state_grok.task_stop.clear()
     while not state_grok.log_queue.empty():
@@ -1950,7 +1969,7 @@ def grok_task_start():
     state_grok.is_running = True
     state_grok.task_thread = threading.Thread(
         target=_run_grok_task,
-        args=(count, threads, browser_type, headless, mail_type, mail_api_source, open_payment, language),
+        args=(count, threads, browser_type, headless, mail_type, mail_api_source, open_payment, language, cards),
         daemon=True
     )
     state_grok.task_thread.start()
@@ -1984,14 +2003,20 @@ def grok_task_stream():
     return Response(stream_with_context(generate()), mimetype="text/event-stream",
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
-def _run_grok_task(count, threads, browser_type, headless, mail_type, mail_api_source, open_payment, language):
+def _run_grok_task(count, threads, browser_type, headless, mail_type, mail_api_source, open_payment, language, cards=None):
     import importlib
     try:
         root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
         if root_dir not in sys.path:
             sys.path.insert(0, root_dir)
 
-        mod_name = "src.bots.grok_hotmail" if mail_type == "hotmail" else "src.bots.grok_domain"
+        if mail_type == "hotmail":
+            mod_name = "src.bots.grok_hotmail"
+        elif mail_type == "domain":
+            mod_name = "src.bots.grok_domain"
+        else:
+            mod_name = "src.bots.grok_billing"
+            
         state_grok.module = importlib.import_module(mod_name)
         bot = state_grok.module
         bot.log = state_grok.log
@@ -2027,6 +2052,35 @@ def _run_grok_task(count, threads, browser_type, headless, mail_type, mail_api_s
                         i, keep_open=False, batch_size=threads,
                         headless=headless, browser_type=browser_type,
                         mail_api_source=mail_api_source, open_payment=open_payment, language=language
+                    )
+                    state_grok.log_queue.put(json.dumps({"type": "result", "success": bool(res)}))
+                    if res: done["ok"] += 1
+                    else: done["fail"] += 1
+
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as ex:
+                futures = [ex.submit(worker, idx + 1) for idx in range(threads)]
+                concurrent.futures.wait(futures)
+                
+        elif mail_type == "billing":
+            # Đưa thẻ vào queue
+            while not bot.CARDS_QUEUE.empty():
+                try: bot.CARDS_QUEUE.get_nowait()
+                except: break
+            for card in cards:
+                if card: bot.CARDS_QUEUE.put(card)
+                
+            loaded = bot.load_accounts_to_queue(limit=999999)  # Chạy hết file
+            if loaded == 0:
+                state_grok.log("Không có account nào trong file data/grok_billing.txt!", "ERR")
+                state_grok.log_queue.put(json.dumps({"type": "done", "ok": 0, "fail": 0}))
+                return
+
+            def worker(i):
+                time.sleep((i % threads) * 2.5)
+                while not bot.ACCOUNTS_QUEUE.empty() and not state_grok.task_stop.is_set():
+                    res = bot.process_account_single(
+                        i, batch_size=threads, headless=headless
                     )
                     state_grok.log_queue.put(json.dumps({"type": "result", "success": bool(res)}))
                     if res: done["ok"] += 1

@@ -292,6 +292,7 @@ window.onload=()=>{
   gptLoadAccounts();
   gptLoadHotmailCount();
   grkLoadHotmailCount();
+  grkLoadBillingCount();
   grkLoadAccounts();
   loadProxyStatus();
   setInterval(loadProxyStatus,10000);
@@ -1853,12 +1854,26 @@ let grkTotal = 0, grkOk = 0, grkFail = 0;
 
 function grkSetMailType(t) {
   grkMailType = t;
-  ['grk-mailHotmail','grk-mailDomain'].forEach(id => document.getElementById(id).classList.remove('active'));
-  document.getElementById(t === 'hotmail' ? 'grk-mailHotmail' : 'grk-mailDomain').classList.add('active');
+  ['grk-mailHotmail','grk-mailDomain','grk-mailBilling'].forEach(id => {
+      let el = document.getElementById(id);
+      if(el) el.classList.remove('active');
+  });
+  
+  const map = {hotmail: 'grk-mailHotmail', domain: 'grk-mailDomain', billing: 'grk-mailBilling'};
+  let activeEl = document.getElementById(map[t]);
+  if(activeEl) activeEl.classList.add('active');
+
   const hGroup = document.getElementById('grk-hotmailGroup');
+  const dGroup = document.getElementById('grk-domainGroup');
   const apiGroup = document.getElementById('grk-apiSourceGroup');
+  const bGroup = document.getElementById('grk-billingGroup');
+  const paymentGroup = document.getElementById('grk-openPaymentGroup');
+  
   if (hGroup) hGroup.style.display = t === 'hotmail' ? '' : 'none';
+  if (dGroup) dGroup.style.display = t === 'domain' ? '' : 'none';
   if (apiGroup) apiGroup.style.display = t === 'hotmail' ? '' : 'none';
+  if (bGroup) bGroup.style.display = t === 'billing' ? '' : 'none';
+  if (paymentGroup) paymentGroup.style.display = t === 'billing' ? 'none' : '';
 }
 
 function grkSetApiSource(s) {
@@ -1903,9 +1918,21 @@ async function grkLoadHotmailCount() {
     const badge = document.getElementById('grk-hotmailCountBadge');
     const label = document.getElementById('grk-hotmailCountLabel');
     const stat  = document.getElementById('grk-statHotmail');
-    if(badge) badge.textContent = c;
+    if(badge) badge.style.display = '';
     if(label) label.textContent = c;
     if(stat)  stat.textContent = c;
+  } catch(e) {}
+}
+
+async function grkLoadBillingCount() {
+  try {
+    const r = await fetch('/api/grok/billing/count');
+    const d = await r.json();
+    const c = d.count || 0;
+    const badge = document.getElementById('grk-billingCountBadge');
+    const label = document.getElementById('grk-billingCountLabel');
+    if(badge) badge.style.display = '';
+    if(label) label.textContent = c;
   } catch(e) {}
 }
 
@@ -1962,7 +1989,14 @@ function grkSetStatus(running) {
 
 async function grkStartTask() {
   if (grkIsRunning) return;
-  const count = parseInt(document.getElementById('grk-count').value) || 3;
+  let count = parseInt(document.getElementById('grk-count').value) || 3;
+  if (grkMailType === 'billing') {
+    try {
+      const r = await fetch('/api/grok/billing/count');
+      const d = await r.json();
+      count = d.count || count;
+    } catch(e) {}
+  }
   const threads = parseInt(document.getElementById('grk-threads').value) || 3;
   grkTotal = count; grkOk = 0; grkFail = 0;
   const pct = document.getElementById('grk-statPct');
@@ -1970,13 +2004,20 @@ async function grkStartTask() {
   if(pct) pct.textContent = '0%';
   if(bar) bar.style.width = '0%';
   document.getElementById('grk-statOk').textContent = '0';
+  document.getElementById('grk-statOk').textContent = '0';
   document.getElementById('grk-statFail').textContent = '0';
+  
+  let cards = [];
+  if (grkMailType === 'billing') {
+    const cardsText = document.getElementById('grk-cardsInput').value || '';
+    cards = cardsText.split('\n').map(c => c.trim()).filter(c => c);
+  }
 
   try {
     const r = await fetch('/api/grok/task/start', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ count, threads, mail_type: grkMailType, mail_api_source: grkApiSource, browser_type: grkBrowserType, headless: grkHeadless, open_payment: grkOpenPayment, language: grkLanguage })
+      body: JSON.stringify({ count, threads, mail_type: grkMailType, mail_api_source: grkApiSource, browser_type: grkBrowserType, headless: grkHeadless, open_payment: grkOpenPayment, language: grkLanguage, cards })
     });
     const d = await r.json();
     if (!d.success) { showToast('❌', d.error || 'Lỗi khởi động'); return; }
@@ -2007,6 +2048,7 @@ function grkStartStream() {
         grkSetStatus(false);
         grkLoadAccounts();
         grkLoadHotmailCount();
+        grkLoadBillingCount();
         if (grkEvt) { grkEvt.close(); grkEvt = null; }
         showToast('✅', `Grok xong: ${grkOk} thành công / ${grkFail} thất bại`);
       } else if (d.type === 'account') {
