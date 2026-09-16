@@ -333,7 +333,27 @@ def worker_loop(driver, email, password, open_payment=False, language="en-US"):
                     log(f"[{email}] Mở link thanh toán...", "INFO")
                     try:
                         driver.get("https://grok.com")
-                        time.sleep(3)
+                        log(f"[{email}] Chờ 5 giây cho trang chủ tải...", "INFO")
+                        time.sleep(5)
+                        
+                        log(f"[{email}] Tìm nút đen xác nhận điều khoản...", "INFO")
+                        try:
+                            # Nút confirm thường là button có class/text cụ thể
+                            confirm_btn = _find(driver, By.XPATH, "//button[contains(., 'Confirm') or contains(., 'Agree') or contains(., '확인')]")
+                            if not confirm_btn:
+                                confirm_btn = _find(driver, By.CSS_SELECTOR, "button[data-slot='button']")
+                            
+                            if confirm_btn:
+                                try_click(driver, confirm_btn)
+                                log(f"[{email}] Đã bấm xác nhận điều khoản!", "OK")
+                            else:
+                                log(f"[{email}] Không tìm thấy nút xác nhận, bỏ qua...", "WARN")
+                        except Exception as e:
+                            log(f"[{email}] Lỗi khi bấm xác nhận: {e}", "ERR")
+                            
+                        log(f"[{email}] Chờ 4 giây hoàn tất xác nhận...", "INFO")
+                        time.sleep(4)
+                        
                         payment_url = "https://www.google.com/url?q=https://click.email.grok.com/f/a/D44YCrJINRlgI2nErQ2N4w~~/AAQRxRA~/o0ricJbDY0rYPxCddFIDNRk2rG8EhS26KMn4apYEY-nr5FVszrYVqzImlPsu8vfrgKF0FDNuaRbdv6FpHk28pqS1U_QbRThaJXq2gQ5kS6Kq7PHN-qbhqmI_S0v4c8kwZLpv5MxoCt4-NHuKiAbRNfuKPaKKadwrK5qyXW_4DV1SmDj5rbIN58HAqOsDJvZ-txKf9S5c34i5kRa3cvXLZorKvePXynuJgcjyNYlFAV4brCqx9YfZ3Z_BUQyMWuXKZ5JA_JUVoqaxMmhKIEYLegWBe__10w_McQJSnoGwLvmHAOlVMZ0F5HNP-vOv97LJ6Dx_K4DkAG4PTT5S3sa2ruUinHy0N6kNLDFqGishvN7zb_NyaCc6vZZNHXbB1oiafAQlED9USuI_1dpIfm8IUNnCJ-3TVkFOtU5o3b4bBKk~&source=gmail&ust=1788539378411000&usg=AOvVaw1j8Snr-3bNvMemb1zmc57D"
                         driver.switch_to.new_window('tab')
                         driver.get(payment_url)
@@ -343,7 +363,8 @@ def worker_loop(driver, email, password, open_payment=False, language="en-US"):
                             current_url = driver.current_url
                             
                             if "/tos-gate" in current_url:
-                                log(f"[{email}] Đang xác nhận TOS...", "INFO")
+                                log(f"[{email}] Đang xác nhận TOS, chờ 5s...", "INFO")
+                                time.sleep(5)
                                 tos_btn = _find(driver, By.CSS_SELECTOR, "button[data-slot='button']")
                                 if tos_btn:
                                     try_click(driver, tos_btn)
