@@ -59,6 +59,13 @@
       Dreamina
     </button>
 
+    <button class="nav-btn" onclick="switchTab('grok')">
+      <svg width="14" height="14" viewBox="0 0 100 100" style="vertical-align:middle;margin-right:4px;">
+        <rect width="100" height="100" rx="24" fill="#000" />
+        <path d="M30 50 L70 50 M50 30 L50 70" stroke="#fff" stroke-width="12" stroke-linecap="round"/>
+      </svg>
+      Grok
+    </button>
     <button class="nav-btn" onclick="switchTab('settings')">⚙️ Cài Đặt</button>
   </div>
 
@@ -1118,6 +1125,172 @@
     </div>
   </div>
 
+  <!-- ======================= GROK TAB ======================= -->
+  <div class="wrap" id="tab-grok">
+    <div class="header">
+      <div class="logo">
+        <div class="logo-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="44" height="44">
+            <rect width="100" height="100" rx="24" fill="#000" />
+            <path d="M30 50 L70 50 M50 30 L50 70" stroke="#fff" stroke-width="12" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <div>
+          <h1>Grok Auto Register</h1><span>Tự động tạo tài khoản Grok (x.ai)</span>
+        </div>
+      </div>
+      <div class="status-pill">
+        <div class="dot" id="grk-statusDot"></div><span id="grk-statusText">Idle</span>
+      </div>
+    </div>
+    <div class="stats stats-4">
+      <div class="stat-card">
+        <div class="stat-label">Hotmail còn lại</div>
+        <div class="stat-value accent" id="grk-statHotmail">–</div>
+        <div class="stat-sub">trong hotmails_grok.txt</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Thành công</div>
+        <div class="stat-value green" id="grk-statOk">0</div>
+        <div class="stat-sub">Tài khoản</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Thất bại</div>
+        <div class="stat-value red" id="grk-statFail">0</div>
+        <div class="stat-sub">Tài khoản</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Tỷ lệ thành công</div>
+        <div class="stat-value purple" id="grk-statPct">0%</div>
+        <div class="stat-sub">Success rate</div>
+      </div>
+    </div>
+    <div class="progress-bar">
+      <div class="progress-fill" id="grk-progressBar" style="width: 0%"></div>
+    </div>
+    <div class="main-grid">
+      <div style="display:flex;flex-direction:column;gap:16px;">
+        <div class="panel">
+          <div class="panel-header"><span>⚙️</span>
+            <h2>Cấu hình Grok</h2>
+          </div>
+          <div class="panel-body">
+            <div class="form-group">
+              <label>Loại Mail</label>
+              <div class="radio-group">
+                <div class="radio-btn active" id="grk-mailHotmail" onclick="grkSetMailType('hotmail')">📧 Hotmail</div>
+                <div class="radio-btn" id="grk-mailDomain" onclick="grkSetMailType('domain')">🌐 Mail Domain</div>
+              </div>
+            </div>
+            <div class="form-group" id="grk-apiSourceGroup">
+              <label>Nguồn đọc Mail (Hotmail)</label>
+              <div class="radio-group">
+                <div class="radio-btn active" id="grk-sourceDongvanfb" onclick="grkSetApiSource('dongvanfb')">DongVanFB</div>
+                <div class="radio-btn" id="grk-sourceMixmmo" onclick="grkSetApiSource('mixmmo')">MixMMO</div>
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Trình duyệt</label>
+              <div class="radio-group">
+                <div class="nav-btn active" id="grk-browserUc" onclick="grkSetBrowser('uc')">🛡️ Undetected Chrome</div>
+                <div class="nav-btn" id="grk-browserChrome" onclick="grkSetBrowser('chrome')">🌐 Chrome</div>
+                <div class="nav-btn" id="grk-browserFirefox" onclick="grkSetBrowser('firefox')">🦊 Firefox</div>
+              </div>
+              <div style="font-size:10px;color:var(--muted);margin-top:4px;">💡 Undetected Chrome giúp bypass block của x.ai</div>
+            </div>
+            
+            <div class="form-group">
+              <label>Ngôn ngữ trình duyệt</label>
+              <div class="radio-group">
+                <div class="radio-btn" id="grk-langUs" onclick="grkSetLanguage('en-US')">🇺🇸 English (US)</div>
+                <div class="radio-btn active" id="grk-langKo" onclick="grkSetLanguage('ko-KR')">🇰🇷 Korean (Hàn)</div>
+              </div>
+            </div>
+            
+            <div class="form-group">
+              <div class="toggle-btn active" id="grk-openPaymentToggle" onclick="grkToggleOpenPayment()">
+                <div class="toggle-switch"></div>
+                <span>Mở link thanh toán sau khi ĐK (giữ Tab)</span>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <div class="toggle-btn" id="grk-headlessToggle" onclick="grkToggleHeadless()">
+                <div class="toggle-switch"></div>
+                <span>Chạy ẩn (Headless)</span>
+              </div>
+            </div>
+            <div class="row2">
+              <div class="form-group" style="margin-bottom:0"><label>Số tài khoản</label><input type="number" id="grk-count" value="4" min="1" max="999"></div>
+              <div class="form-group" style="margin-bottom:0"><label>Tab đồng thời</label><input type="number" id="grk-threads" value="4" min="1" max="8"></div>
+            </div>
+            <hr class="divider">
+            <div class="form-group" id="grk-hotmailGroup">
+              <label style="display:flex;justify-content:space-between;align-items:center;">
+                Danh sách Hotmail (Grok)
+                <span class="badge" id="grk-hotmailCountBadge" style="display:none">
+                  <span id="grk-hotmailCountLabel">0</span> email
+                </span>
+              </label>
+              <div style="font-size:11px;color:var(--muted);padding:8px 0;">
+                Bot sẽ tự động đọc danh sách từ file: <code style="color:var(--accent)">data/hotmails_grok.txt</code>
+              </div>
+            </div>
+            <div class="btn-row">
+              <button class="btn btn-start" id="grk-startBtn" onclick="grkStartTask()">▶ BẮT ĐẦU</button>
+              <button class="btn btn-stop" id="grk-stopBtn" onclick="grkStopTask()" style="display:none">⏹ DỪNG</button>
+              <button class="btn btn-secondary" style="border-color:var(--red);color:var(--red);" onclick="grkCloseBrowsers()">💥</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:16px;">
+        <div class="panel" style="flex:1;">
+          <div class="panel-header">
+            <span>📋</span><h2>Nhật ký (Grok)</h2>
+            <div class="log-controls">
+              <button class="log-filter-btn active" onclick="grkSetFilter('ALL',this)">All</button>
+              <button class="log-filter-btn" onclick="grkSetFilter('OK',this)">✅ OK</button>
+              <button class="log-filter-btn" onclick="grkSetFilter('ERR',this)">❌ Lỗi</button>
+              <button class="btn-secondary btn" style="width:auto;padding:4px 10px;font-size:11px;" onclick="grkClearLog()">Xóa</button>
+            </div>
+          </div>
+          <div class="log-wrap" id="grk-logWrap">
+            <div class="log-entry log-info"><span class="log-time">--:--:--</span><span class="log-icon">📌</span><span class="log-msg">Sẵn sàng.</span></div>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-header">
+            <span>👤</span>
+            <div class="mode-selector" style="display:flex; gap: 8px; font-size: 11px;">
+              <div class="nav-btn active" id="grk-tabAccountsSession" onclick="grkSetAccountsTab('session')">Phiên vừa tạo</div>
+              <div class="nav-btn" id="grk-tabAccountsAll" onclick="grkSetAccountsTab('all')">Tất cả</div>
+            </div>
+            <div style="margin-left:auto;display:flex;gap:8px;">
+              <button class="btn-secondary btn" style="width:auto;padding:6px 12px;font-size:11px;" onclick="grkCopyAccounts()">📋 Copy</button>
+              <button class="btn-secondary btn" style="width:auto;padding:6px 12px;font-size:11px;" onclick="grkClearAccounts()">🗑️ Xóa</button>
+              <button class="btn-secondary btn" style="width:auto;padding:6px 12px;font-size:11px;" onclick="grkLoadAccounts()">🔄 Refresh</button>
+            </div>
+          </div>
+          <div class="accounts-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Email</th>
+                  <th>Mật khẩu</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="grk-accountsBody">
+                <tr><td colspan="3" style="text-align:center;color:var(--muted);padding:20px;">Chưa có tài khoản nào</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- ======================= SETTINGS TAB ======================= -->
   <div class="wrap" id="tab-settings">
     <div class="header">
@@ -1152,8 +1325,16 @@
         </div>
 
         <div class="form-group">
-          <label>GPM-Login API URL mặc định</label>
+          <label class="label">GPM API URL</label>
           <input type="text" id="setting-gpm-api-url" placeholder="http://127.0.0.1:19995">
+
+          <div style="border-top: 1px solid var(--border); margin: 15px 0;"></div>
+          
+          <label class="label">Telegram Bot Token (Thông báo NicePay)</label>
+          <input type="text" id="setting-telegram-bot-token" placeholder="8855096263:AAHuhzdQVm_ST0oT-hpCJcHWyuYsTOfsWcw">
+          
+          <label class="label">Telegram Chat ID</label>
+          <input type="text" id="setting-telegram-chat-id" placeholder="7353915691">
           <div style="font-size:12px;color:var(--muted);margin-top:4px;">Đường dẫn API của GPM-Login trên máy (mặc định:
             http://127.0.0.1:19995).</div>
         </div>

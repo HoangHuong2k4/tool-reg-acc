@@ -170,6 +170,7 @@ reload_static_proxy_list()
 
 CAPCUT_HOTMAIL_FILE = os.path.join(os.path.dirname(__file__), "..", "..", "data", "hotmails.txt")
 GPT_HOTMAIL_FILE    = os.path.join(os.path.dirname(__file__), "..", "..", "data", "hotmail-gpt.txt")
+GROK_HOTMAIL_FILE   = os.path.join(os.path.dirname(__file__), "..", "..", "data", "hotmails_grok.txt")
 
 # ─── Flask App ────────────────────────────────────────────────────────────────
 app = Flask(__name__, template_folder="../../ui/templates", static_folder="../../ui/static")
@@ -197,6 +198,7 @@ state_higgsfield = BotState("Higgsfield")
 state_gpt = BotState("GPT")
 state_gpm = BotState("GPM")
 state_dreamina = BotState("Dreamina")
+state_grok = BotState("Grok")
 
 def patched_get_proxy():
     print(f"[Proxy] Dùng proxy: {PROXY_HOST}:{PROXY_PORT}")
@@ -1209,6 +1211,8 @@ def _run_gpt_task(count, threads, mail_type, check_momo=True, browser_type="chro
         else:
             if mail_type == "gmail94":
                 state_gpt.module = importlib.import_module("src.bots.gpt_gmail94")
+            elif mail_type.startswith("otpgmail_"):
+                state_gpt.module = importlib.import_module("src.bots.gpt_otpgmail")
             elif mail_type == "domain":
                 state_gpt.module = importlib.import_module("src.bots.gpt_domain")
             else:
@@ -1265,6 +1269,18 @@ def _run_gpt_task(count, threads, mail_type, check_momo=True, browser_type="chro
             bot.GMAIL94_TOKEN = token
             bot.GMAIL94_PASSWORD = cfg.get("GMAIL94_PASSWORD", "")
             state_gpt.log(f"[Gmail94] Đang dùng token: {token[:8]}...", "INFO")
+            
+        # Nếu dùng OTPGmail: inject token từ Settings DB
+        if mail_type.startswith("otpgmail_"):
+            token = cfg.get("OTPGMAIL_TOKEN", "").strip()
+            if not token:
+                state_gpt.log("OTPGmail Token chưa được cấu hình! Vào Settings để nhập.", "ERR")
+                state_gpt.log_queue.put(json.dumps({"type": "done", "ok": 0, "fail": 0}))
+                return
+            bot.OTPGMAIL_TOKEN = token
+            bot.OTPGMAIL_DOMAIN = "icloud.com" if mail_type == "otpgmail_icloud" else "gmail.com"
+            bot.OTPGMAIL_PASSWORD = cfg.get("OTPGMAIL_PASSWORD", "")
+            state_gpt.log(f"[OTPGmail] Đang dùng token: {token[:8]}... (Loại: {bot.OTPGMAIL_DOMAIN})", "INFO")
 
         # Patch save_account to use DB
         def gpt_save_db(email, password, totp_secret, has_momo=False, has_uudai=False):
@@ -1283,9 +1299,9 @@ def _run_gpt_task(count, threads, mail_type, check_momo=True, browser_type="chro
 
         done = {"ok": 0, "fail": 0}
 
-        if mail_type == "gmail94":
-            # Gmail94: count = số Gmail cần mua (mỗi Gmail = 4 biến thể GPT)
-            # Chia đều số lần mua Gmail cho các thread
+        if mail_type == "gmail94" or mail_type.startswith("otpgmail_"):
+            # Gmail94/OTPGmail: count = số lượng order cần mua
+            # Chia đều số lần mua cho các thread
             per_thread = max(1, (count + threads - 1) // threads)
             import concurrent.futures
             with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as ex:
@@ -1296,7 +1312,7 @@ def _run_gpt_task(count, threads, mail_type, check_momo=True, browser_type="chro
                     if this_count <= 0:
                         break
                     remaining_count -= this_count
-                    def _worker_g94(i=idx+1, c=this_count):
+                    def _worker_api(i=idx+1, c=this_count):
                         time.sleep((i % threads) * 3.0)
                         local = 0
                         while local < c and not state_gpt.task_stop.is_set():
@@ -1314,7 +1330,7 @@ def _run_gpt_task(count, threads, mail_type, check_momo=True, browser_type="chro
                             done["ok"]   += ok_n
                             done["fail"] += fail_n
                             local += 1
-                    futures.append(ex.submit(_worker_g94))
+                    futures.append(ex.submit(_worker_api))
                 concurrent.futures.wait(futures)
         else:
             # Hotmail / Domain / Gmail94 Selenium: load từ file và dùng HOTMAIL_QUEUE
@@ -1368,6 +1384,33 @@ def gmail94_token_set():
                          ("GMAIL94_TOKEN", token))
             conn.commit()
         return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+# ─── OTPGmail Token API ───────────────────────────────────────────────────────
+@app.route("/api/gpt/otpgmail/token", methods=["GET"])
+def otpgmail_token_get():
+    cfg = load_settings()
+    token = cfg.get("OTPGMAIL_TOKEN", "")
+    # Mask token khi tra ve
+    masked = token[:8] + "..." + token[-4:] if len(token) > 12 else ("***" if token else "")
+    return jsonify({"has_token": bool(token), "masked": masked})
+
+
+@app.route("/api/gpt/otpgmail/token", methods=["POST"])
+def otpgmail_token_set():
+    data = request.json or {}
+    token = data.get("token", "").strip()
+    if not token:
+        return jsonify({"success": False, "error": "Token khong duoc de trong!"})
+    try:
+        with get_db() as conn:
+            conn.execute("INSERT OR REPLACE INTO settings (`key`, `value`) VALUES (?, ?)",
+                         ("OTPGMAIL_TOKEN", token))
+            conn.commit()
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
 
@@ -1806,6 +1849,226 @@ def _run_dreamina_task(count, threads, browser_type, headless, mail_api_source):
     finally:
         state_dreamina.is_running = False
 
+# ─── GROK API ────────────────────────────────────────────────────────────────
+
+@app.route("/api/grok/hotmail/count")
+def grok_hotmail_count():
+    count = 0
+    if os.path.exists(GROK_HOTMAIL_FILE):
+        with open(GROK_HOTMAIL_FILE, "r", encoding="utf-8") as f:
+            count = sum(1 for l in f if l.strip() and not l.strip().startswith("#") and ("|" in l or "----" in l or "\t" in l))
+    return jsonify({"count": count})
+
+@app.route("/api/grok/hotmail/upload", methods=["POST"])
+def grok_hotmail_upload():
+    f = request.files.get("file")
+    if not f: return jsonify({"error": "No file"}), 400
+    lines = [l.strip() for l in f.read().decode("utf-8").splitlines() if l.strip()]
+    with open(GROK_HOTMAIL_FILE, "w", encoding="utf-8") as fp:
+        fp.write("\n".join(lines) + "\n")
+    valid_count = sum(1 for l in lines if not l.startswith("#") and ("|" in l or "----" in l or "\t" in l))
+    return jsonify({"count": valid_count})
+
+@app.route("/api/grok/accounts")
+def grok_accounts():
+    accounts = []
+    session_only = request.args.get('session', 'false').lower() == 'true'
+    try:
+        with get_db() as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            if session_only:
+                cursor.execute("SELECT id, email, password FROM accounts WHERE app='grok' AND id > ? ORDER BY id DESC", (state_grok.last_start_id,))
+            else:
+                cursor.execute("SELECT id, email, password FROM accounts WHERE app='grok' ORDER BY id DESC")
+            accounts = [dict(row) for row in cursor.fetchall()]
+    except Exception:
+        pass
+    return jsonify({"accounts": accounts})
+
+@app.route("/api/grok/accounts/raw")
+def grok_accounts_raw():
+    text = ""
+    session_only = request.args.get('session', 'false').lower() == 'true'
+    try:
+        with get_db() as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            if session_only:
+                cursor.execute("SELECT email, password FROM accounts WHERE app='grok' AND id > ? ORDER BY id DESC", (state_grok.last_start_id,))
+            else:
+                cursor.execute("SELECT email, password FROM accounts WHERE app='grok' ORDER BY id DESC")
+            for row in cursor.fetchall():
+                text += f"{row['email']}\t{row['password']}\n"
+    except Exception:
+        pass
+    return text, 200, {"Content-Type": "text/plain; charset=utf-8"}
+
+@app.route("/api/grok/accounts/clear", methods=["POST"])
+def grok_accounts_clear():
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM accounts WHERE app='grok'")
+            conn.commit()
+    except Exception:
+        pass
+    return jsonify({"success": True})
+
+@app.route("/api/grok/status")
+def grok_status():
+    return jsonify({"is_running": state_grok.is_running})
+
+@app.route("/api/grok/task/start", methods=["POST"])
+def grok_task_start():
+    if state_grok.is_running:
+        return jsonify({"success": False, "error": "Đang chạy rồi!"})
+    data = request.json or {}
+    count = int(data.get("count", 1))
+    threads = int(data.get("threads", 1))
+    headless = bool(data.get("headless", False))
+    browser_type = data.get("browser_type", "chrome")
+    mail_type = data.get("mail_type", "hotmail")
+    mail_api_source = data.get("mail_api_source", "mixmmo")
+    open_payment = bool(data.get("open_payment", False))
+    language = data.get("language", "en-US")
+
+    state_grok.task_stop.clear()
+    while not state_grok.log_queue.empty():
+        try: state_grok.log_queue.get_nowait()
+        except: break
+
+    try:
+        with get_db() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT MAX(id) FROM accounts WHERE app='grok'")
+            row = cur.fetchone()
+            state_grok.last_start_id = row[0] if row and row[0] else 0
+    except:
+        state_grok.last_start_id = 0
+
+    state_grok.is_running = True
+    state_grok.task_thread = threading.Thread(
+        target=_run_grok_task,
+        args=(count, threads, browser_type, headless, mail_type, mail_api_source, open_payment, language),
+        daemon=True
+    )
+    state_grok.task_thread.start()
+    return jsonify({"success": True})
+
+@app.route("/api/grok/task/stop", methods=["POST"])
+def grok_task_stop():
+    state_grok.task_stop.set()
+    grok_close_browsers()
+    return jsonify({"success": True})
+
+@app.route("/api/grok/task/close_browsers", methods=["POST"])
+def grok_close_browsers():
+    if state_grok.module and hasattr(state_grok.module, "ACTIVE_DRIVERS"):
+        for d in state_grok.module.ACTIVE_DRIVERS:
+            try: d.quit()
+            except: pass
+        state_grok.module.ACTIVE_DRIVERS.clear()
+    return jsonify({"success": True})
+
+@app.route("/api/grok/task/stream")
+def grok_task_stream():
+    def generate():
+        yield f"data: {json.dumps({'type':'log','level':'INFO','time':datetime.now().strftime('%H:%M:%S'),'msg':'Kết nối log stream Grok...'})}\n\n"
+        while True:
+            try:
+                msg = state_grok.log_queue.get(timeout=25)
+                yield f"data: {msg}\n\n"
+            except queue.Empty:
+                yield f"data: {json.dumps({'type':'ping'})}\n\n"
+    return Response(stream_with_context(generate()), mimetype="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+def _run_grok_task(count, threads, browser_type, headless, mail_type, mail_api_source, open_payment, language):
+    import importlib
+    try:
+        root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+        if root_dir not in sys.path:
+            sys.path.insert(0, root_dir)
+
+        mod_name = "src.bots.grok_hotmail" if mail_type == "hotmail" else "src.bots.grok_domain"
+        state_grok.module = importlib.import_module(mod_name)
+        bot = state_grok.module
+        bot.log = state_grok.log
+        bot.GLOBAL_STOP_EVENT = state_grok.task_stop
+
+        # Patch save_account to use DB
+        def grok_save_db(email, password):
+            try:
+                with get_db() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("INSERT INTO accounts (app, uid, email, password) VALUES (?, '', ?, ?)",
+                                   ("grok", email, password))
+                    conn.commit()
+                state_grok.log_queue.put(json.dumps({"type": "account", "email": email, "password": password}))
+            except Exception as e:
+                state_grok.log(f"Lỗi lưu DB: {e}", "ERR")
+
+        bot.save_account = grok_save_db
+
+        done = {"ok": 0, "fail": 0}
+
+        if mail_type == "hotmail":
+            loaded = bot.load_hotmails_to_queue(limit=count)
+            if loaded == 0:
+                state_grok.log("Không có hotmail nào trong file data/hotmails_grok.txt!", "ERR")
+                state_grok.log_queue.put(json.dumps({"type": "done", "ok": 0, "fail": 0}))
+                return
+
+            def worker(i):
+                time.sleep((i % threads) * 2.5)
+                while not bot.HOTMAIL_QUEUE.empty() and not state_grok.task_stop.is_set():
+                    res = bot.register_one_account(
+                        i, keep_open=False, batch_size=threads,
+                        headless=headless, browser_type=browser_type,
+                        mail_api_source=mail_api_source, open_payment=open_payment, language=language
+                    )
+                    state_grok.log_queue.put(json.dumps({"type": "result", "success": bool(res)}))
+                    if res: done["ok"] += 1
+                    else: done["fail"] += 1
+
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as ex:
+                futures = [ex.submit(worker, idx + 1) for idx in range(threads)]
+                concurrent.futures.wait(futures)
+        else:
+            # Domain mail: tạo mới từng tài khoản
+            def worker(i):
+                time.sleep((i % threads) * 2.5)
+                if state_grok.task_stop.is_set(): return
+                res = bot.register_one_account(
+                    i, count=count, keep_open=False, batch_size=threads,
+                    headless=headless, browser_type=browser_type, open_payment=open_payment, language=language
+                )
+                state_grok.log_queue.put(json.dumps({"type": "result", "success": bool(res)}))
+                if res: done["ok"] += 1
+                else: done["fail"] += 1
+
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as ex:
+                futures = [ex.submit(worker, idx + 1) for idx in range(count)]
+                for future in concurrent.futures.as_completed(futures):
+                    try: future.result()
+                    except Exception as e: state_grok.log(f"Worker error: {e}", "ERR")
+                    if state_grok.task_stop.is_set(): break
+
+        if state_grok.task_stop.is_set():
+            state_grok.log_queue.put(json.dumps({"type": "stopped"}))
+        else:
+            state_grok.log(f"✅ Xong! {done['ok']} thành công / {done['fail']} thất bại", "OK")
+            state_grok.log_queue.put(json.dumps({"type": "done", "ok": done["ok"], "fail": done["fail"]}))
+    except Exception as e:
+        state_grok.log(f"Lỗi task Grok: {type(e).__name__}: {e}", "ERR")
+        state_grok.log_queue.put(json.dumps({"type": "done", "ok": 0, "fail": 0}))
+    finally:
+        state_grok.is_running = False
+
+
 def _auto_proxy_rotator():
     import time
     import requests
@@ -1829,4 +2092,23 @@ if __name__ == "__main__":
 ⏹  Ctrl+C để dừng server
 """)
     sys.path.insert(0, os.path.dirname(__file__))
+
+    try:
+        with get_db() as conn:
+            cur = conn.cursor()
+            states_map = {
+                'capcut': state_capcut,
+                'higgsfield': state_higgsfield,
+                'gpt': state_gpt,
+                'gpm': state_gpm,
+                'dreamina': state_dreamina,
+                'grok': state_grok
+            }
+            for app_name, b_state in states_map.items():
+                cur.execute("SELECT MAX(id) FROM accounts WHERE app=?", (app_name,))
+                row = cur.fetchone()
+                b_state.last_start_id = row[0] if row and row[0] else 0
+    except Exception as e:
+        print("Lỗi khởi tạo last_start_id:", e)
+
     app.run(host="0.0.0.0", port=5050, debug=False, threaded=True)

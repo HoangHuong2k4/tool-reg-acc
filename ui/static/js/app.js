@@ -55,6 +55,10 @@ async function loadSettings() {
     if(document.getElementById('setting-gpm-api-url')) {
         document.getElementById('setting-gpm-api-url').value = d.GPM_API_URL || 'http://127.0.0.1:19995';
     }
+    const teleBotInput = document.getElementById('setting-telegram-bot-token');
+    if(teleBotInput) teleBotInput.value = d.TELEGRAM_BOT_TOKEN || '';
+    const teleChatInput = document.getElementById('setting-telegram-chat-id');
+    if(teleChatInput) teleChatInput.value = d.TELEGRAM_CHAT_ID || '';
     // Gmail94 token
     const gmail94Input = document.getElementById('setting-gmail94-token');
     const gmail94Status = document.getElementById('settings-gmail94-status');
@@ -69,6 +73,21 @@ async function loadSettings() {
     const gmail94PassInput = document.getElementById('setting-gmail94-password');
     if(gmail94PassInput) {
       gmail94PassInput.value = d.GMAIL94_PASSWORD || '';
+    }
+    // OTPGmail token
+    const otpgmailInput = document.getElementById('setting-otpgmail-token');
+    const otpgmailStatus = document.getElementById('settings-otpgmail-status');
+    if(otpgmailInput) {
+      const tok = d.OTPGMAIL_TOKEN || '';
+      otpgmailInput.value = tok;
+      if(otpgmailStatus) {
+        otpgmailStatus.textContent = tok ? '(✅ Đã có token)' : '(⚠️ Chưa có token)';
+        otpgmailStatus.style.color = tok ? '#10b981' : 'var(--muted)';
+      }
+    }
+    const otpgmailPassInput = document.getElementById('setting-otpgmail-password');
+    if(otpgmailPassInput) {
+      otpgmailPassInput.value = d.OTPGMAIL_PASSWORD || '';
     }
     if(typeof toggleProxySettings === 'function') toggleProxySettings();
   } catch(e) {}
@@ -91,6 +110,12 @@ async function saveSettings() {
   if(document.getElementById('setting-gpm-api-url')) {
       data.GPM_API_URL = document.getElementById('setting-gpm-api-url').value.trim() || 'http://127.0.0.1:19995';
   }
+  if(document.getElementById('setting-telegram-bot-token')) {
+      data.TELEGRAM_BOT_TOKEN = document.getElementById('setting-telegram-bot-token').value.trim();
+  }
+  if(document.getElementById('setting-telegram-chat-id')) {
+      data.TELEGRAM_CHAT_ID = document.getElementById('setting-telegram-chat-id').value.trim();
+  }
   // Gmail94 token & password
   const gmail94Input = document.getElementById('setting-gmail94-token');
   if(gmail94Input) {
@@ -99,6 +124,15 @@ async function saveSettings() {
   const gmail94PassInput = document.getElementById('setting-gmail94-password');
   if(gmail94PassInput) {
     data.GMAIL94_PASSWORD = gmail94PassInput.value.trim();
+  }
+  // OTPGmail token & password
+  const otpgmailInput = document.getElementById('setting-otpgmail-token');
+  if(otpgmailInput) {
+    data.OTPGMAIL_TOKEN = otpgmailInput.value.trim();
+  }
+  const otpgmailPassInput = document.getElementById('setting-otpgmail-password');
+  if(otpgmailPassInput) {
+    data.OTPGMAIL_PASSWORD = otpgmailPassInput.value.trim();
   }
   try {
     const r = await fetch('/api/settings', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data)});
@@ -113,6 +147,12 @@ async function saveSettings() {
 
 function toggleGmail94TokenVisibility() {
   const inp = document.getElementById('setting-gmail94-token');
+  if(!inp) return;
+  inp.type = inp.type === 'password' ? 'text' : 'password';
+}
+
+function toggleOtpgmailTokenVisibility() {
+  const inp = document.getElementById('setting-otpgmail-token');
   if(!inp) return;
   inp.type = inp.type === 'password' ? 'text' : 'password';
 }
@@ -236,13 +276,13 @@ async function checkRunningStatus() {
 
 window.addEventListener('hashchange', () => {
   let hash = window.location.hash.substring(1);
-  if (!['capcut', 'higgsfield', 'gpt', 'settings'].includes(hash)) hash = 'capcut';
+  if (!['capcut', 'higgsfield', 'gpt', 'gpm', 'dreamina', 'grok', 'settings'].includes(hash)) hash = 'capcut';
   switchTab(hash, false);
 });
 
 window.onload=()=>{
   let hash = window.location.hash.substring(1);
-  if (!['capcut', 'higgsfield', 'gpt', 'settings'].includes(hash)) hash = 'capcut';
+  if (!['capcut', 'higgsfield', 'gpt', 'gpm', 'dreamina', 'grok', 'settings'].includes(hash)) hash = 'capcut';
   switchTab(hash, false);
 
   ccLoadHotmailCount();
@@ -251,6 +291,8 @@ window.onload=()=>{
   hfLoadAccounts();
   gptLoadAccounts();
   gptLoadHotmailCount();
+  grkLoadHotmailCount();
+  grkLoadAccounts();
   loadProxyStatus();
   setInterval(loadProxyStatus,10000);
   
@@ -560,31 +602,46 @@ function gptSetMailType(m){
   gptMailType = m;
   document.getElementById('gpt-mailHotmail').classList.toggle('active', m === 'outlook');
   document.getElementById('gpt-mailGmail94').classList.toggle('active', m === 'gmail94');
+  const d_otpgmail_g = document.getElementById('gpt-mailOtpgmailGmail');
+  if(d_otpgmail_g) d_otpgmail_g.classList.toggle('active', m === 'otpgmail_gmail');
+  const d_otpgmail_i = document.getElementById('gpt-mailOtpgmailIcloud');
+  if(d_otpgmail_i) d_otpgmail_i.classList.toggle('active', m === 'otpgmail_icloud');
   const d_btn = document.getElementById('gpt-mailDomain');
   if(d_btn) d_btn.classList.toggle('active', m === 'domain');
+  
+  const lbl = document.getElementById('gpt-countLabel');
+  const hint = document.getElementById('gpt-countHint');
+  
+  if(m === 'gmail94' || m === 'otpgmail_gmail' || m === 'otpgmail_icloud'){
+    if(lbl) {
+      lbl.innerHTML = `Số Gmail cần mua: <span id="gpt-count-val">1</span> <span style="font-size:11px; font-weight:normal; color:var(--muted);">(Mỗi 1 Gmail sẽ tạo thành 4 mail, chạy bằng ${gptBrowser})</span>`;
+      if(m === 'otpgmail_gmail' || m === 'otpgmail_icloud') {
+        lbl.innerHTML = `Số lượng cần mua: <span id="gpt-count-val">1</span> <span style="font-size:11px; font-weight:normal; color:var(--muted);">(Mỗi 1 order = 1 ChatGPT, chạy bằng ${gptBrowser})</span>`;
+      }
+    }
+    if(hint) hint.style.display = 'block';
+    gptUpdateCountHint();
+    if (gptCreationMethod === 'api') {
+      gptSetCreationMethod('selenium');
+    }
+  } else {
+    if(lbl) lbl.textContent = 'Số lượng tài khoản cần tạo';
+    if(hint) hint.style.display = 'none';
+  }
   
   // Hien/an hotmail file group
   const hotmailGroup = document.getElementById('gpt-hotmailGroup');
   if(hotmailGroup) hotmailGroup.style.display = (m === 'outlook') ? 'block' : 'none';
   const apiGroup = document.getElementById('gpt-apiSourceGroup');
   if(apiGroup) apiGroup.style.display = (m === 'outlook') ? 'block' : 'none';
-  // Cap nhat label va hint cho count input
-  const lbl = document.getElementById('gpt-countLabel');
-  const hint = document.getElementById('gpt-countHint');
-  if(m === 'gmail94'){
-    if(lbl) lbl.textContent = 'Số Gmail cần mua (mỗi Gmail = 4 GPT)';
-    if(hint) hint.style.display = 'block';
-    gptUpdateCountHint();
-  } else {
-    if(lbl) lbl.textContent = 'Số lượng tài khoản cần tạo';
-    if(hint) hint.style.display = 'none';
-  }
 }
 
 function gptUpdateCountHint(){
-  if(gptMailType !== 'gmail94') return;
+  if(gptMailType !== 'gmail94' && gptMailType !== 'otpgmail_gmail' && gptMailType !== 'otpgmail_icloud') return;
   const count = parseInt(document.getElementById('gpt-count').value) || 0;
-  const total = count * 4;
+  const valEl = document.getElementById('gpt-count-val');
+  if(valEl) valEl.textContent = isNaN(count) ? 1 : count;
+  const total = (gptMailType === 'gmail94') ? count * 4 : count;
   const el = document.getElementById('gpt-countHintTotal');
   if(el) el.textContent = total;
 }
@@ -856,8 +913,15 @@ async function gptStartTask(){
   const checkApplePay=document.getElementById('gpt-checkApplePay') ? document.getElementById('gpt-checkApplePay').checked : false;
 
   // Gmail94: mỗi lần mua 1 Gmail sẽ tạo 4 biến thể GPT
+  // OTPGmail: 1 mail = 1 biến thể
   gptOk=0;gptFail=0;
-  gptTotal = (gptMailType === 'gmail94') ? count * 4 : count;
+  if (gptMailType === 'gmail94') {
+    gptTotal = count * 4;
+  } else if (gptMailType === 'otpgmail_gmail' || gptMailType === 'otpgmail_icloud') {
+    gptTotal = count;
+  } else {
+    gptTotal = count;
+  }
   gptUpdateStats();
 
   const r=await fetch('/api/gpt/task/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({count,threads,mail_type:gptMailType,creation_method:gptCreationMethod,check_momo:checkMomo,check_apple_pay_ui:checkApplePay,mail_api_source:gptApiSource,keep_open:gptKeepOpen,driver_mode:'playwright_ui',browser_type:gptBrowser,headless:gptHeadless,incognito:gptIncognito})});
@@ -892,6 +956,15 @@ function gptAddLog(data) {
     if(gptLogs.length > 2000) gptLogs.shift();
     if(gptFilter === 'ALL' || data.level === gptFilter) gptRenderLog(data);
     
+    if(data.type === 'waiting_gmail94') {
+      const w = document.getElementById('gpt-gmail94-waiting');
+      if(w) w.style.display = data.status ? 'flex' : 'none';
+    }
+    if(data.type === 'waiting_otpgmail') {
+      const w = document.getElementById('gpt-otpgmail-waiting');
+      if(w) w.style.display = data.status ? 'flex' : 'none';
+    }
+
     // Play ting ting sound if MoMo is detected
     if(data.msg && data.msg.includes('Phát hiện MoMo')) {
         playMomoSound();
@@ -1406,6 +1479,7 @@ async function deleteSavedMailList(listId) {
   }
 }
 
+
 document.addEventListener('DOMContentLoaded', () => {
   initAutoSaveMailInput('gpm-manualPids', 'gpm_manual_pids_autosave');
 });
@@ -1764,3 +1838,237 @@ function gptFilterAccounts() {
     }
 }
 
+// ===================== GROK =====================
+let grkIsRunning = false;
+let grkEvt = null;
+let grkMailType = 'hotmail';
+let grkApiSource = 'mixmmo';
+let grkBrowserType = 'uc';
+let grkLanguage = 'ko-KR';
+let grkHeadless = false;
+let grkOpenPayment = true;
+let grkSessionMode = 'session';
+let grkFilter = 'ALL';
+let grkTotal = 0, grkOk = 0, grkFail = 0;
+
+function grkSetMailType(t) {
+  grkMailType = t;
+  ['grk-mailHotmail','grk-mailDomain'].forEach(id => document.getElementById(id).classList.remove('active'));
+  document.getElementById(t === 'hotmail' ? 'grk-mailHotmail' : 'grk-mailDomain').classList.add('active');
+  const hGroup = document.getElementById('grk-hotmailGroup');
+  const apiGroup = document.getElementById('grk-apiSourceGroup');
+  if (hGroup) hGroup.style.display = t === 'hotmail' ? '' : 'none';
+  if (apiGroup) apiGroup.style.display = t === 'hotmail' ? '' : 'none';
+}
+
+function grkSetApiSource(s) {
+  grkApiSource = s;
+  ['grk-sourceDongvanfb','grk-sourceMixmmo'].forEach(id => document.getElementById(id).classList.remove('active'));
+  document.getElementById(s === 'dongvanfb' ? 'grk-sourceDongvanfb' : 'grk-sourceMixmmo').classList.add('active');
+}
+
+function grkSetBrowser(b) {
+  grkBrowserType = b;
+  ['grk-browserUc','grk-browserChrome','grk-browserFirefox'].forEach(id => { const el = document.getElementById(id); if(el) el.classList.remove('active'); });
+  const map = {uc: 'grk-browserUc', chrome: 'grk-browserChrome', firefox: 'grk-browserFirefox'};
+  const el = document.getElementById(map[b]);
+  if (el) el.classList.add('active');
+}
+
+function grkSetLanguage(lang) {
+  grkLanguage = lang;
+  const us = document.getElementById('grk-langUs');
+  const ko = document.getElementById('grk-langKo');
+  if(us) us.classList.toggle('active', lang === 'en-US');
+  if(ko) ko.classList.toggle('active', lang === 'ko-KR');
+}
+
+function grkToggleHeadless() {
+  grkHeadless = !grkHeadless;
+  const tog = document.getElementById('grk-headlessToggle');
+  if(tog) tog.classList.toggle('active', grkHeadless);
+}
+
+function grkToggleOpenPayment() {
+  grkOpenPayment = !grkOpenPayment;
+  const tog = document.getElementById('grk-openPaymentToggle');
+  if(tog) tog.classList.toggle('active', grkOpenPayment);
+}
+
+async function grkLoadHotmailCount() {
+  try {
+    const r = await fetch('/api/grok/hotmail/count');
+    const d = await r.json();
+    const c = d.count || 0;
+    const badge = document.getElementById('grk-hotmailCountBadge');
+    const label = document.getElementById('grk-hotmailCountLabel');
+    const stat  = document.getElementById('grk-statHotmail');
+    if(badge) badge.textContent = c;
+    if(label) label.textContent = c;
+    if(stat)  stat.textContent = c;
+  } catch(e) {}
+}
+
+async function grkUploadHotmail(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const fd = new FormData();
+  fd.append('file', file);
+  try {
+    const r = await fetch('/api/grok/hotmail/upload', { method: 'POST', body: fd });
+    const d = await r.json();
+    showToast('✅', `Đã upload ${d.count} hotmail Grok!`);
+    grkLoadHotmailCount();
+    input.value = '';
+  } catch(e) { showToast('❌', 'Lỗi upload!'); }
+}
+
+function grkAppendLog(entry) {
+  const wrap = document.getElementById('grk-logWrap');
+  if (!wrap) return;
+  const icons = {OK:'✅',WARN:'⚠️',ERR:'❌',INFO:'📌'};
+  const classes = {OK:'log-ok',WARN:'log-warn',ERR:'log-err',INFO:'log-info'};
+  const lvl = entry.level || 'INFO';
+  if (grkFilter !== 'ALL' && lvl !== grkFilter) return;
+  const div = document.createElement('div');
+  div.className = `log-entry ${classes[lvl]||'log-info'}`;
+  div.innerHTML = `<span class="log-time">${entry.time||''}</span><span class="log-icon">${icons[lvl]||'📌'}</span><span class="log-msg">${escHtml(entry.msg||'')}</span>`;
+  wrap.appendChild(div);
+  wrap.scrollTop = wrap.scrollHeight;
+}
+
+function grkSetFilter(f, btn) {
+  grkFilter = f;
+  document.querySelectorAll('#tab-grok .log-filter-btn').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+}
+
+function grkClearLog() {
+  const wrap = document.getElementById('grk-logWrap');
+  if (wrap) wrap.innerHTML = '';
+}
+
+function grkSetStatus(running) {
+  grkIsRunning = running;
+  const dot = document.getElementById('grk-statusDot');
+  const txt = document.getElementById('grk-statusText');
+  const startBtn = document.getElementById('grk-startBtn');
+  const stopBtn = document.getElementById('grk-stopBtn');
+  if(dot) dot.classList.toggle('active', running);
+  if(txt) txt.textContent = running ? 'Đang chạy...' : 'Idle';
+  if(startBtn) startBtn.style.display = running ? 'none' : '';
+  if(stopBtn) stopBtn.style.display = running ? '' : 'none';
+}
+
+async function grkStartTask() {
+  if (grkIsRunning) return;
+  const count = parseInt(document.getElementById('grk-count').value) || 3;
+  const threads = parseInt(document.getElementById('grk-threads').value) || 3;
+  grkTotal = count; grkOk = 0; grkFail = 0;
+  const pct = document.getElementById('grk-statPct');
+  const bar = document.getElementById('grk-progressBar');
+  if(pct) pct.textContent = '0%';
+  if(bar) bar.style.width = '0%';
+  document.getElementById('grk-statOk').textContent = '0';
+  document.getElementById('grk-statFail').textContent = '0';
+
+  try {
+    const r = await fetch('/api/grok/task/start', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ count, threads, mail_type: grkMailType, mail_api_source: grkApiSource, browser_type: grkBrowserType, headless: grkHeadless, open_payment: grkOpenPayment, language: grkLanguage })
+    });
+    const d = await r.json();
+    if (!d.success) { showToast('❌', d.error || 'Lỗi khởi động'); return; }
+    grkSetStatus(true);
+    grkStartStream();
+  } catch(e) { showToast('❌', 'Lỗi kết nối'); }
+}
+
+function grkStartStream() {
+  if (grkEvt) { grkEvt.close(); grkEvt = null; }
+  grkEvt = new EventSource('/api/grok/task/stream');
+  grkEvt.onmessage = e => {
+    try {
+      const d = JSON.parse(e.data);
+      if (d.type === 'ping') return;
+      if (d.type === 'log') {
+        grkAppendLog(d);
+      } else if (d.type === 'result') {
+        if (d.success) { grkOk++; document.getElementById('grk-statOk').textContent = grkOk; }
+        else { grkFail++; document.getElementById('grk-statFail').textContent = grkFail; }
+        const done = grkOk + grkFail;
+        const pct = grkTotal > 0 ? Math.round(done / grkTotal * 100) : 0;
+        const pctEl = document.getElementById('grk-statPct');
+        const barEl = document.getElementById('grk-progressBar');
+        if(pctEl) pctEl.textContent = pct + '%';
+        if(barEl) barEl.style.width = pct + '%';
+      } else if (d.type === 'done' || d.type === 'stopped') {
+        grkSetStatus(false);
+        grkLoadAccounts();
+        grkLoadHotmailCount();
+        if (grkEvt) { grkEvt.close(); grkEvt = null; }
+        showToast('✅', `Grok xong: ${grkOk} thành công / ${grkFail} thất bại`);
+      } else if (d.type === 'account') {
+        grkLoadAccounts();
+      }
+    } catch(ex) {}
+  };
+  grkEvt.onerror = () => { if(grkIsRunning) setTimeout(grkStartStream, 3000); };
+}
+
+async function grkStopTask() {
+  await fetch('/api/grok/task/stop', { method: 'POST' });
+  grkSetStatus(false);
+  if (grkEvt) { grkEvt.close(); grkEvt = null; }
+  showToast('⏹', 'Đã dừng Grok!');
+}
+
+async function grkCloseBrowsers() {
+  await fetch('/api/grok/task/close_browsers', { method: 'POST' });
+  showToast('💥', 'Đã đóng trình duyệt Grok!');
+}
+
+function grkSetAccountsTab(mode) {
+  grkSessionMode = mode;
+  const s = document.getElementById('grk-tabAccountsSession');
+  const a = document.getElementById('grk-tabAccountsAll');
+  if(s) s.classList.toggle('active', mode === 'session');
+  if(a) a.classList.toggle('active', mode === 'all');
+  grkLoadAccounts();
+}
+
+async function grkLoadAccounts() {
+  try {
+    const r = await fetch(`/api/grok/accounts?session=${grkSessionMode === 'session'}`);
+    const d = await r.json();
+    const tbody = document.getElementById('grk-accountsBody');
+    if (!tbody) return;
+    if (!d.accounts || !d.accounts.length) {
+      tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:var(--muted);padding:20px;">Chưa có tài khoản nào</td></tr>';
+      return;
+    }
+    tbody.innerHTML = d.accounts.map(acc => `
+      <tr>
+        <td><span class="mono">${escHtml(acc.email||'')}</span></td>
+        <td><span class="mono">${escHtml(acc.password||'')}</span></td>
+        <td><span class="badge badge-ok">✅</span></td>
+      </tr>`).join('');
+  } catch(e) {}
+}
+
+async function grkCopyAccounts() {
+  try {
+    const r = await fetch(`/api/grok/accounts/raw?session=${grkSessionMode === 'session'}`);
+    const t = await r.text();
+    await navigator.clipboard.writeText(t);
+    showToast('📋', 'Đã copy tài khoản Grok!');
+  } catch(e) { showToast('❌', 'Lỗi copy!'); }
+}
+
+async function grkClearAccounts() {
+  if (!confirm('Xóa tất cả tài khoản Grok?')) return;
+  await fetch('/api/grok/accounts/clear', { method: 'POST' });
+  grkLoadAccounts();
+  showToast('🗑️', 'Đã xóa tài khoản Grok!');
+}
