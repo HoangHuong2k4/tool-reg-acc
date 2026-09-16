@@ -189,7 +189,17 @@ def setup_driver(index=1, keep_open=False, batch_size=3, headless=False, browser
         if keep_open:
             options.add_experimental_option("detach", True)
         with DRIVER_LOCK:
-            driver = uc.Chrome(options=options, use_subprocess=True)
+            try:
+                driver = uc.Chrome(options=options, use_subprocess=True)
+            except Exception as e:
+                import re
+                match = re.search(r'Current browser version is (\d+)', str(e))
+                if match:
+                    v_main = int(match.group(1))
+                    log(f"[Worker {index}] Lỗi version chrome, thử lại với version_main={v_main}", "WARN")
+                    driver = uc.Chrome(options=options, use_subprocess=True, version_main=v_main)
+                else:
+                    raise e
             try:
                 driver.set_window_rect(x=x, y=0, width=window_width, height=1000)
             except:
