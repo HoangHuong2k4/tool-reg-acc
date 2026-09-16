@@ -2072,7 +2072,7 @@ def _run_grok_task(count, threads, browser_type, headless, mail_type, mail_api_s
                 
             loaded = bot.load_accounts_to_queue(limit=999999)  # Chạy hết file
             if loaded == 0:
-                state_grok.log("Không có account nào trong file data/grok_billing.txt!", "ERR")
+                state_grok.log("Không có account nào trong file data/hotmails_grok.txt!", "ERR")
                 state_grok.log_queue.put(json.dumps({"type": "done", "ok": 0, "fail": 0}))
                 return
 

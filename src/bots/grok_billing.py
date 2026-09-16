@@ -42,7 +42,7 @@ def send_telegram_message(text):
 
 def load_accounts_to_queue(limit=10):
     count = 0
-    with open("data/grok_billing.txt", "r", encoding="utf-8") as f:
+    with open("data/hotmails_grok.txt", "r", encoding="utf-8") as f:
         for line in f:
             if GLOBAL_STOP_EVENT and GLOBAL_STOP_EVENT.is_set():
                 break
@@ -185,9 +185,20 @@ def worker_loop(driver, email, password, index, card_data=None):
         if result and 'url' in result:
             billing_url = result['url']
             log(f"[{email}] Đã lấy được link Billing!", "OK")
-            
             with open("data/grok_billing_result.txt", "a") as f:
                 f.write(f"{email} | {password} | {billing_url}\n")
+                
+            # Xóa account khỏi hotmails_grok.txt
+            with DRIVER_LOCK:
+                try:
+                    with open("data/hotmails_grok.txt", "r") as f:
+                        lines = f.readlines()
+                    with open("data/hotmails_grok.txt", "w") as f:
+                        for line in lines:
+                            if email not in line:
+                                f.write(line)
+                except Exception as ex:
+                    log(f"[{email}] Lỗi xóa acc khỏi file: {ex}", "ERR")
                 
             send_telegram_message(f"💳 Lấy link Billing thành công!\nEmail: {email}\nLink: {billing_url}")
             
@@ -305,8 +316,8 @@ def run(count=1, threads=1, browser_type="uc", headless=False, mail_type="billin
     
     log("Kết nối log stream Grok (Billing Mode)...", "INFO")
     
-    if not os.path.exists("data/grok_billing.txt"):
-        with open("data/grok_billing.txt", "w") as f: f.write("")
+    if not os.path.exists("data/hotmails_grok.txt"):
+        with open("data/hotmails_grok.txt", "w") as f: f.write("")
         
     n = load_accounts_to_queue(count)
     log(f"Đã nạp {n} tài khoản vào hàng đợi.", "OK")
