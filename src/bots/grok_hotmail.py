@@ -428,7 +428,8 @@ def worker_loop(driver, email, password, acc_info, mail_api_source="mixmmo", ope
                                     if "nicepay.co.kr" in driver.current_url:
                                         log(f"[{email}] Đã chuyển qua cổng NicePay thành công!", "OK")
                                         final_link = driver.current_url
-                                        msg = f"🎉 Đăng ký thành công!\nEmail: {email}\nLink thanh toán NicePay:\n{final_link}"
+                                        masked_email = email[:3] + "***" + email[email.find("@"):] if "@" in email else email[:3] + "***"
+                                        msg = f"🎉 Đăng ký thành công!\nEmail: {masked_email}\nLink thanh toán NicePay:\n{final_link}"
                                         send_telegram_message(msg)
                                     break
                                 

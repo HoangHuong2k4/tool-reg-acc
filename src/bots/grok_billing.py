@@ -200,7 +200,8 @@ def worker_loop(driver, email, password, index, card_data=None):
                 except Exception as ex:
                     log(f"[{email}] Lỗi xóa acc khỏi file: {ex}", "ERR")
                 
-            send_telegram_message(f"💳 Lấy link Billing thành công!\nEmail: {email}\nLink: {billing_url}")
+            masked_email = email[:3] + "***" + email[email.find("@"):] if "@" in email else email[:3] + "***"
+            send_telegram_message(f"💳 Lấy link Billing thành công!\nEmail: {masked_email}\nLink: {billing_url}")
             
             log(f"[{email}] Mở link Billing và giữ lại trình duyệt...", "INFO")
             driver.get(billing_url)
