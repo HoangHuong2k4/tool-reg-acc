@@ -1256,7 +1256,10 @@
               <div style="font-size:11px;color:var(--muted);padding-bottom:8px;">
                 Định dạng: <code style="color:var(--accent)">4726 **** **** 0619 | *** | 09 / 31</code>
               </div>
-              <textarea id="grk-cardsInput" rows="5" placeholder="Ví dụ: 4726 **** **** 0619 | *** | 09 / 31" style="width:100%; padding:8px; border:1px solid var(--border); border-radius:4px; background:var(--surface); color:var(--text); resize:vertical;" onchange="saveSettings()"></textarea>
+              <textarea id="grk-cardsInput" rows="5" placeholder="Ví dụ: 4726 **** **** 0619 | *** | 09 / 31" style="width:100%; padding:8px; border:1px solid var(--border); border-radius:4px; background:var(--surface); color:var(--text); resize:vertical;" onchange="formatGrokCards()"></textarea>
+              <div style="text-align:right; margin-top:4px;">
+                <button class="btn btn-secondary" style="padding:4px 8px; font-size:11px;" onclick="formatGrokCards(); showToast('✅', 'Đã lưu danh sách thẻ vào Database!');">💾 Định dạng & Lưu</button>
+              </div>
             </div>
             <div class="btn-row">
               <button class="btn btn-start" id="grk-startBtn" onclick="grkStartTask()">▶ BẮT ĐẦU</button>
@@ -1289,7 +1292,8 @@
               <div class="nav-btn" id="grk-tabAccountsAll" onclick="grkSetAccountsTab('all')">Tất cả</div>
             </div>
             <div style="margin-left:auto;display:flex;gap:8px;">
-              <button class="btn-secondary btn" style="width:auto;padding:6px 12px;font-size:11px;border-color:var(--accent);color:var(--accent);" onclick="grkChangeCardsBulk()">💳 Đổi thẻ (Đã chọn)</button>
+              <button class="btn-secondary btn" style="width:auto;padding:6px 12px;font-size:11px;border-color:#10b981;color:#10b981;" onclick="grkChangeCardActiveTabBulk()">⚡ Tab mở (Đã chọn)</button>
+              <button class="btn-secondary btn" style="width:auto;padding:6px 12px;font-size:11px;border-color:var(--accent);color:var(--accent);" onclick="grkChangeCardsBulk()">💳 Đổi thẻ mới (Đã chọn)</button>
               <button class="btn-secondary btn" style="width:auto;padding:6px 12px;font-size:11px;" onclick="grkCopyAccounts()">📋 Copy</button>
               <button class="btn-secondary btn" style="width:auto;padding:6px 12px;font-size:11px;" onclick="grkClearAccounts()">🗑️ Xóa</button>
               <button class="btn-secondary btn" style="width:auto;padding:6px 12px;font-size:11px;" onclick="grkLoadAccounts()">🔄 Refresh</button>

@@ -239,6 +239,95 @@ async function rotateProxy(pfx){
   }
 }
 
+function formatGrokCards() {
+  const el = document.getElementById('grk-cardsInput');
+  if(!el) return;
+  let lines = el.value.split('\n');
+  lines = lines.map(line => {
+    let s = line.trim();
+    if(!s) return s;
+    if(s.includes('\t')) {
+      s = s.split('\t').map(x => x.trim()).filter(x => x).join(' | ');
+    } else if (!s.includes('|')) {
+      let p = s.split(/\s+/);
+      if(p.length >= 3) {
+        s = p[0] + ' | ' + p[1] + ' | ' + p.slice(2).join('');
+      }
+    }
+    return s;
+  });
+  el.value = lines.join('\n');
+  saveSettings();
+}
+
+async function grkChangeCardActiveTab(email) {
+  const cardsText = document.getElementById('grk-cardsInput').value || '';
+  let cards = cardsText.split('\n').map(c => c.trim()).filter(c => c);
+  if (!cards.length) {
+    showToast('❌', 'Vui lòng nhập thẻ bên tab Đổi Thẻ trước!');
+    return;
+  }
+  
+  const card = cards.shift();
+  showConfirmModal('Xác nhận đổi thẻ (Tab Mở)', `Bạn có chắc muốn tự động điền thẻ ${card} cho tài khoản ${email} trên cửa sổ Chrome hiện tại không?`, async () => {
+    document.getElementById('grk-cardsInput').value = cards.join('\n');
+    saveSettings();
+    
+    try {
+      showToast('⏳', 'Đang gửi lệnh đổi thẻ...');
+      const r = await fetch('/api/grok/billing/active_tab', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ email, card })
+      });
+      const d = await r.json();
+      if(d.success) {
+        showToast('✅', 'Đã bắt đầu điền thẻ trên trình duyệt đang mở!');
+      } else {
+        showToast('❌', d.error || 'Lỗi gửi lệnh đổi thẻ');
+      }
+    } catch(e) {
+      showToast('❌', 'Lỗi kết nối tới server');
+    }
+  }, 'Thực Hiện');
+}
+
+async function grkChangeCardActiveTabBulk() {
+  const cbs = document.querySelectorAll('.grk-acc-checkbox:checked');
+  if (cbs.length === 0) {
+    return showToast('⚠️', 'Vui lòng chọn ít nhất 1 tài khoản!');
+  }
+  
+  const cardsText = document.getElementById('grk-cardsInput').value || '';
+  let cards = cardsText.split('\n').map(c => c.trim()).filter(c => c);
+  if (cards.length < cbs.length) {
+    return showToast('❌', `Không đủ thẻ! Bạn chọn ${cbs.length} tài khoản nhưng chỉ có ${cards.length} thẻ.`);
+  }
+
+  const accs = [];
+  cbs.forEach(c => accs.push(c.getAttribute('data-email')));
+
+  showConfirmModal('Xác nhận đổi thẻ hàng loạt (Tab Mở)', `Bạn có chắc muốn tự động điền thẻ cho ${accs.length} tài khoản trên các cửa sổ Chrome hiện tại không?`, async () => {
+    for (let i = 0; i < accs.length; i++) {
+      const email = accs[i];
+      const card = cards.shift();
+      document.getElementById('grk-cardsInput').value = cards.join('\n');
+      saveSettings();
+      
+      showToast('⏳', `Đang gửi lệnh đổi thẻ cho ${email}...`);
+      try {
+        await fetch('/api/grok/billing/active_tab', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ email, card })
+        });
+      } catch(e) {}
+      await new Promise(r => setTimeout(r, 500));
+    }
+    showToast('✅', `Đã gửi lệnh đổi thẻ cho ${accs.length} tài khoản!`);
+  }, 'Thực Hiện');
+}
+
 function startRotateCountdown(btn, seconds) {
   let rem = seconds;
   btn.disabled = true;
@@ -2064,7 +2153,7 @@ function grkStartStream() {
         grkLoadAccounts();
         grkLoadHotmailCount();
         grkLoadBillingCount();
-        if (grkEvt) { grkEvt.close(); grkEvt = null; }
+        // Không close EventSource ở đây để UI vẫn nhận được log từ tiến trình chạy ngầm (ví dụ: Masa168 check thanh toán)
         showToast('✅', `Grok xong: ${grkOk} thành công / ${grkFail} thất bại`);
       } else if (d.type === 'account') {
         grkLoadAccounts();
@@ -2115,6 +2204,7 @@ async function grkLoadAccounts() {
         <td><span class="mono">${escHtml(acc.password||'')}</span></td>
         <td><span class="badge badge-ok">✅</span></td>
         <td style="text-align: right;">
+          <button class="btn-secondary btn" style="padding: 2px 8px; font-size: 10px; border-color: #10b981; color: #10b981; margin-right: 4px;" onclick="grkChangeCardActiveTab('${escHtml(acc.email||'')}')">⚡ Tab mở</button>
           <button class="btn-secondary btn" style="padding: 2px 8px; font-size: 10px; border-color: var(--accent); color: var(--accent);" onclick="grkChangeSingleCard('${escHtml(acc.email||'')}', '${escHtml(acc.password||'')}')">💳 Đổi thẻ</button>
         </td>
       </tr>`).join('');

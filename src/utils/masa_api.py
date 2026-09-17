@@ -73,6 +73,14 @@ def start_masa_poller(masa_token, send_telegram_func):
                                 if status in ["SUCCESS", "SUCCEEDED", "COMPLETED", "DONE"]:
                                     info["log_func"](f"✅ Masa168 báo: THANH TOÁN THÀNH CÔNG cho {info['email']}!", "OK")
                                     send_telegram_func(f"✅ DONE ACC: {info['email']}\nMasa168 đã thanh toán thành công!")
+                                    
+                                    # Kích hoạt đổi thẻ tự động trên trình duyệt đang mở
+                                    try:
+                                        info["log_func"](f"⚡ Tự động lấy thẻ và chuyển sang Stripe Billing Portal...", "INFO")
+                                        requests.post("http://127.0.0.1:5050/api/grok/billing/active_tab", json={"email": info['email']}, timeout=5)
+                                    except Exception as ex:
+                                        info["log_func"](f"⚠️ Lỗi kích hoạt đổi thẻ tự động: {str(ex)}", "WARN")
+                                        
                                     del MASA_PENDING_TASKS[tid]
                                 elif status in ["FAIL", "FAILED", "ERROR", "TIMEOUT"]:
                                     info["log_func"](f"❌ Masa168 báo: THANH TOÁN THẤT BẠI cho {info['email']}!", "ERR")
@@ -83,8 +91,10 @@ def start_masa_poller(masa_token, send_telegram_func):
                                 info["log_func"](f"❌ Masa168 QUÁ THỜI GIAN chờ thanh toán cho {info['email']}", "ERR")
                                 send_telegram_func(f"⚠️ Masa168 QUÁ THỜI GIAN chờ (5 phút)!\nEmail: {info['email']}\nTask ID: {tid}")
                                 del MASA_PENDING_TASKS[tid]
+                else:
+                    print("Masa168 API query failed:", res.status_code, res.text)
             except Exception as e:
-                pass
+                print("Masa168 poller exception:", str(e))
                 
     threading.Thread(target=poller, daemon=True).start()
 

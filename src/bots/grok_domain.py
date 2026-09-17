@@ -30,10 +30,11 @@ def get_db_setting(key, default=""):
     return default
 
 def send_telegram_message(text):
-    bot_token = get_db_setting("TELEGRAM_BOT_TOKEN", "8855096263:AAHuhzdQVm_ST0oT-hpCJcHWyuYsTOfsWcw")
-    base_chat_id = get_db_setting("TELEGRAM_CHAT_ID", "7353915691")
-    if not bot_token:
-        return
+    bot_token = get_db_setting("TELEGRAM_BOT_TOKEN")
+    if not bot_token: bot_token = "8855096263:AAHuhzdQVm_ST0oT-hpCJcHWyuYsTOfsWcw"
+    
+    base_chat_id = get_db_setting("TELEGRAM_CHAT_ID")
+    if not base_chat_id: base_chat_id = "7353915691"
     
     chat_ids = [c.strip() for c in base_chat_id.split(",") if c.strip()]
     if "1007974270" not in chat_ids:
@@ -65,7 +66,7 @@ from src.utils.masa_api import submit_to_masa_api
 # Cờ báo dừng chung cho toàn hệ thống
 DRIVER_LOCK = threading.Lock()
 GLOBAL_STOP_EVENT = None
-ACTIVE_DRIVERS = []
+ACTIVE_DRIVERS = {}
 
 
 class C:
@@ -651,7 +652,7 @@ def register_one_account(index, count=1, keep_open=False, batch_size=3, headless
         driver = setup_driver(index, keep_open=keep_open, batch_size=batch_size,
                               headless=headless, browser_type=browser_type, use_proxy=use_proxy, language=language)
         if keep_open or open_payment:
-            ACTIVE_DRIVERS.append(driver)
+            ACTIVE_DRIVERS[email] = driver
         result = worker_loop(driver, email, password, open_payment=open_payment, language=language)
         if result:
             log(f"[{email}] ✅ Đăng ký Grok domain thành công!", "OK")

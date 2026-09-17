@@ -1887,6 +1887,120 @@ def grok_billing_upload():
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
 
+@app.route("/api/grok/billing/active_tab", methods=["POST"])
+def grok_billing_active_tab():
+    try:
+        data = request.json
+        email = data.get("email")
+        card = data.get("card")
+        if not email:
+            return jsonify({"success": False, "error": "Thiếu email"})
+            
+        if not card:
+            try:
+                conn = get_db()
+                row = conn.execute("SELECT value FROM settings WHERE key='GROK_CARDS_LIST'").fetchone()
+                if row and row['value']:
+                    lines = [l.strip() for l in row['value'].split('\n') if l.strip()]
+                    if lines:
+                        card = lines.pop(0)
+                        conn.execute("UPDATE settings SET value=? WHERE key='GROK_CARDS_LIST'", ('\n'.join(lines),))
+                        conn.commit()
+                conn.close()
+            except:
+                pass
+                
+        if not card:
+            return jsonify({"success": False, "error": "Hết thẻ trong hệ thống, vui lòng nạp thêm"})
+            
+        import importlib
+        hm_mod = importlib.import_module("src.bots.grok_hotmail")
+        driver = hm_mod.ACTIVE_DRIVERS.get(email)
+        if not driver:
+            dm_mod = importlib.import_module("src.bots.grok_domain")
+            driver = dm_mod.ACTIVE_DRIVERS.get(email)
+            
+        if not driver:
+            return jsonify({"success": False, "error": f"Không tìm thấy trình duyệt đang mở cho {email}"})
+            
+        parts = [p.strip() for p in card.split('|')]
+        if len(parts) < 3:
+            return jsonify({"success": False, "error": "Định dạng thẻ không hợp lệ"})
+            
+        import re
+        num = re.sub(r'\D', '', parts[0])
+        p1 = parts[1].replace(' ', '')
+        p2 = parts[2].replace(' ', '')
+        
+        if '/' in p1 or len(p1) == 4: # p1 is exp
+            exp_str = p1
+            cc_cvc = p2
+        else: # p2 is exp
+            exp_str = p2
+            cc_cvc = p1
+            
+        if '/' in exp_str:
+            exp_parts = exp_str.split('/')
+            cc_month = exp_parts[0].strip()
+            cc_year = exp_parts[1].strip()[-2:]
+        else:
+            cc_month = exp_str[:2]
+            cc_year = exp_str[2:][-2:]
+            
+        card_dict = {
+            "number": num,
+            "exp_month": cc_month,
+            "exp_year": cc_year,
+            "cvc": cc_cvc
+        }
+        
+        def local_log(msg, level="INFO"):
+            state_grok.log(f"[{email}] {msg}", level)
+            
+        def worker():
+            try:
+                local_log("Bắt đầu điền thẻ trên tab đang mở...", "INFO")
+                driver.get("https://grok.com/")
+                import time
+                time.sleep(3)
+                
+                local_log("Đang lấy link Billing Portal...", "INFO")
+                js_code = """
+                var callback = arguments[arguments.length - 1];
+                fetch('/rest/subscriptions/billing-portal', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({})
+                })
+                .then(response => response.json())
+                .then(data => callback(data))
+                .catch(error => callback({error: error.message}));
+                """
+                driver.set_script_timeout(10)
+                result = driver.execute_async_script(js_code)
+                
+                if result and 'url' in result:
+                    billing_url = result['url']
+                    local_log("Mở link Billing...", "INFO")
+                    driver.get(billing_url)
+                    time.sleep(4)
+                else:
+                    local_log(f"Không lấy được link Billing: {result}", "ERR")
+                    return
+                    
+                from src.utils.stripe_card_manager import add_card_to_stripe
+                local_log(f"Đang nhập thẻ: {cc_num[:4]} **** **** {cc_num[-4:]}", "INFO")
+                add_card_to_stripe(driver, card_dict, local_log)
+                local_log("Đã điền thẻ thành công trên tab đang mở!", "OK")
+            except Exception as e:
+                local_log(f"Lỗi khi điền thẻ: {str(e)}", "ERR")
+                
+        import threading
+        threading.Thread(target=worker, daemon=True).start()
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
 @app.route("/api/grok/accounts")
 def grok_accounts():
     accounts = []
