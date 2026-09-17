@@ -1917,7 +1917,7 @@ def grok_accounts_raw():
             else:
                 cursor.execute("SELECT email, password FROM accounts WHERE app='grok' ORDER BY id DESC")
             for row in cursor.fetchall():
-                text += f"{row['email']}\t{row['password']}\n"
+                text += f"{row['email']}|{row['password']}\n"
     except Exception:
         pass
     return text, 200, {"Content-Type": "text/plain; charset=utf-8"}
@@ -2063,16 +2063,11 @@ def _run_grok_task(count, threads, browser_type, headless, mail_type, mail_api_s
                 concurrent.futures.wait(futures)
                 
         elif mail_type == "billing":
-            # Đưa thẻ vào queue
-            while not bot.CARDS_QUEUE.empty():
-                try: bot.CARDS_QUEUE.get_nowait()
-                except: break
-            for card in cards:
-                if card: bot.CARDS_QUEUE.put(card)
+            bot.CARDS_LIST = [c for c in cards if c.strip()]
                 
             loaded = bot.load_accounts_to_queue(limit=999999)  # Chạy hết file
             if loaded == 0:
-                state_grok.log("Không có account nào trong file data/hotmails_grok.txt!", "ERR")
+                state_grok.log("Không có account nào trong file data/grok_billing.txt!", "ERR")
                 state_grok.log_queue.put(json.dumps({"type": "done", "ok": 0, "fail": 0}))
                 return
 

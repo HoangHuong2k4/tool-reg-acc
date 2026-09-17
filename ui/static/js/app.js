@@ -1868,11 +1868,13 @@ function grkSetMailType(t) {
   const apiGroup = document.getElementById('grk-apiSourceGroup');
   const bGroup = document.getElementById('grk-billingGroup');
   const paymentGroup = document.getElementById('grk-openPaymentGroup');
+  const cGroup = document.getElementById('grk-cardsGroup');
   
   if (hGroup) hGroup.style.display = t === 'hotmail' ? '' : 'none';
   if (dGroup) dGroup.style.display = t === 'domain' ? '' : 'none';
   if (apiGroup) apiGroup.style.display = t === 'hotmail' ? '' : 'none';
   if (bGroup) bGroup.style.display = t === 'billing' ? '' : 'none';
+  if (cGroup) cGroup.style.display = t === 'billing' ? '' : 'none';
   if (paymentGroup) paymentGroup.style.display = t === 'billing' ? 'none' : '';
 }
 

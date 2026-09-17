@@ -16,7 +16,11 @@ log = print
 ACTIVE_DRIVERS = []
 DRIVER_LOCK = threading.Lock()
 ACCOUNTS_QUEUE = queue.Queue()
-CARDS_QUEUE = queue.Queue()
+CARDS_LIST = []
+
+def save_account(email, password):
+    pass
+
 
 # --- Helpers ---
 def get_db_setting(key, default=""):
@@ -42,7 +46,7 @@ def send_telegram_message(text):
 
 def load_accounts_to_queue(limit=10):
     count = 0
-    with open("data/hotmails_grok.txt", "r", encoding="utf-8") as f:
+    with open("data/grok_billing.txt", "r", encoding="utf-8") as f:
         for line in f:
             if GLOBAL_STOP_EVENT and GLOBAL_STOP_EVENT.is_set():
                 break
@@ -51,13 +55,13 @@ def load_accounts_to_queue(limit=10):
             line = line.strip()
             if not line or line.startswith("#"): continue
             
-            # Hỗ trợ cả định dạng tab và dấu |
+            # Hỗ trợ cả định dạng tab, dấu |, hoặc khoảng trắng
             if "\t" in line:
                 parts = line.split('\t')
             elif "|" in line:
                 parts = line.split('|')
             else:
-                parts = []
+                parts = line.split()
                 
             if len(parts) >= 2:
                 email = parts[0].strip()
@@ -187,13 +191,16 @@ def worker_loop(driver, email, password, index, card_data=None):
             log(f"[{email}] Đã lấy được link Billing!", "OK")
             with open("data/grok_billing_result.txt", "a") as f:
                 f.write(f"{email} | {password} | {billing_url}\n")
+            
+            save_account(email, password)
+
                 
-            # Xóa account khỏi hotmails_grok.txt
+            # Xóa account khỏi grok_billing.txt
             with DRIVER_LOCK:
                 try:
-                    with open("data/hotmails_grok.txt", "r") as f:
+                    with open("data/grok_billing.txt", "r") as f:
                         lines = f.readlines()
-                    with open("data/hotmails_grok.txt", "w") as f:
+                    with open("data/grok_billing.txt", "w") as f:
                         for line in lines:
                             if email not in line:
                                 f.write(line)
@@ -220,23 +227,59 @@ def worker_loop(driver, email, password, index, card_data=None):
                         cc_exp = f"{exp[0].strip()}{exp[1].strip()[-2:]}"
 
                         log(f"[{email}] Tìm nút Thêm/Sửa phương thức thanh toán...", "INFO")
-                        add_btn = None
-                        for sel in ['a[href*="/payment-methods"]', 'a[role="button"]', 'button[data-testid="add-payment-method-button"]']:
-                            try:
-                                add_btn = WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.CSS_SELECTOR, sel)))
-                                if add_btn: break
-                            except: pass
+                        clicked = False
+                        for _ in range(15):
+                            clicked = driver.execute_script("""
+                                let btns = document.querySelectorAll('a[href*="/payment-methods"], a[role="button"], button[data-testid="add-payment-method-button"], div[role="button"]');
+                                for (let b of btns) {
+                                    if ((b.href && b.href.includes('/payment-methods')) || 
+                                        (b.hasAttribute('data-testid') && b.getAttribute('data-testid') === 'add-payment-method-button')) {
+                                        let ev = new MouseEvent('click', {bubbles: true, cancelable: true, view: window});
+                                        b.dispatchEvent(ev);
+                                        return true;
+                                    }
+                                    let paths = b.querySelectorAll('path');
+                                    for (let path of paths) {
+                                        let d = path.getAttribute('d');
+                                        if (d && (d.includes('7.875') || d.includes('6.173') || d.includes('3.09'))) {
+                                            let ev = new MouseEvent('click', {bubbles: true, cancelable: true, view: window});
+                                            b.dispatchEvent(ev);
+                                            return true;
+                                        }
+                                    }
+                                }
+                                return false;
+                            """)
+                            if clicked: break
+                            time.sleep(1)
                             
-                        if not add_btn:
+                        if not clicked:
                             raise Exception("Không tìm thấy nút Thêm/Sửa phương thức thanh toán")
-                            
-                        driver.execute_script("arguments[0].click();", add_btn)
                         
                         log(f"[{email}] Chờ iframe Stripe...", "INFO")
                         iframe = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, 'iframe[src*="elements-inner-payment"]')))
                         driver.switch_to.frame(iframe)
                         
-                        num_input = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, 'input[name="cardnumber"]')))
+                        log(f"[{email}] Đang tìm ô nhập thẻ (chờ iframe và tab Card)...", "INFO")
+                        num_input = None
+                        for _ in range(20):
+                            try:
+                                card_tabs = driver.find_elements(By.CSS_SELECTOR, 'input[value="card"], button[value="card"], [data-testid*="card"]')
+                                for t in card_tabs:
+                                    try: driver.execute_script("arguments[0].click();", t)
+                                    except: pass
+                            except: pass
+                            
+                            try:
+                                inp = driver.find_element(By.CSS_SELECTOR, 'input[name="cardnumber"], input[autocomplete="cc-number"]')
+                                if inp.is_displayed():
+                                    num_input = inp
+                                    break
+                            except: pass
+                            time.sleep(1)
+                            
+                        if not num_input:
+                            raise Exception("Không tìm thấy ô nhập thẻ (iframe chưa load hoặc không click được tab Card)")
                         for c in cc_num: 
                             num_input.send_keys(c)
                             time.sleep(0.05)
@@ -287,9 +330,9 @@ def process_account_single(index, batch_size=3, headless=False):
     driver = None
     success = False
     card_data = None
-    if not CARDS_QUEUE.empty():
-        try: card_data = CARDS_QUEUE.get_nowait()
-        except: pass
+    if CARDS_LIST:
+        import random
+        card_data = random.choice(CARDS_LIST)
 
     try:
         driver = setup_driver(index=index, batch_size=batch_size, headless=headless)
@@ -317,8 +360,8 @@ def run(count=1, threads=1, browser_type="uc", headless=False, mail_type="billin
     
     log("Kết nối log stream Grok (Billing Mode)...", "INFO")
     
-    if not os.path.exists("data/hotmails_grok.txt"):
-        with open("data/hotmails_grok.txt", "w") as f: f.write("")
+    if not os.path.exists("data/grok_billing.txt"):
+        with open("data/grok_billing.txt", "w") as f: f.write("")
         
     n = load_accounts_to_queue(count)
     log(f"Đã nạp {n} tài khoản vào hàng đợi.", "OK")
