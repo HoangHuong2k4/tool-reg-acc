@@ -59,6 +59,11 @@ async function loadSettings() {
     if(teleBotInput) teleBotInput.value = d.TELEGRAM_BOT_TOKEN || '';
     const teleChatInput = document.getElementById('setting-telegram-chat-id');
     if(teleChatInput) teleChatInput.value = d.TELEGRAM_CHAT_ID || '';
+    const masaTokenInput = document.getElementById('setting-masa-token');
+    if(masaTokenInput) masaTokenInput.value = d.MASA_TOKEN || '';
+    // Load Grok Cards
+    const grokCardsInput = document.getElementById('grk-cardsInput');
+    if(grokCardsInput) grokCardsInput.value = d.GROK_CARDS_LIST || '';
     // Gmail94 token
     const gmail94Input = document.getElementById('setting-gmail94-token');
     const gmail94Status = document.getElementById('settings-gmail94-status');
@@ -116,6 +121,9 @@ async function saveSettings() {
   if(document.getElementById('setting-telegram-chat-id')) {
       data.TELEGRAM_CHAT_ID = document.getElementById('setting-telegram-chat-id').value.trim();
   }
+  if(document.getElementById('setting-masa-token')) {
+      data.MASA_TOKEN = document.getElementById('setting-masa-token').value.trim();
+  }
   // Gmail94 token & password
   const gmail94Input = document.getElementById('setting-gmail94-token');
   if(gmail94Input) {
@@ -133,6 +141,11 @@ async function saveSettings() {
   const otpgmailPassInput = document.getElementById('setting-otpgmail-password');
   if(otpgmailPassInput) {
     data.OTPGMAIL_PASSWORD = otpgmailPassInput.value.trim();
+  }
+  // Grok Cards
+  const grokCardsInput = document.getElementById('grk-cardsInput');
+  if(grokCardsInput) {
+    data.GROK_CARDS_LIST = grokCardsInput.value.trim();
   }
   try {
     const r = await fetch('/api/settings', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data)});
@@ -2089,16 +2102,96 @@ async function grkLoadAccounts() {
     const tbody = document.getElementById('grk-accountsBody');
     if (!tbody) return;
     if (!d.accounts || !d.accounts.length) {
-      tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:var(--muted);padding:20px;">Chưa có tài khoản nào</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:20px;">Chưa có tài khoản nào</td></tr>';
       return;
     }
-    tbody.innerHTML = d.accounts.map(acc => `
+    const selectAllCheck = document.getElementById('grk-selectAllAccs');
+    if (selectAllCheck) selectAllCheck.checked = false;
+    
+    tbody.innerHTML = d.accounts.map((acc, i) => `
       <tr>
+        <td style="text-align: center;"><input type="checkbox" class="grk-acc-checkbox" data-email="${escHtml(acc.email||'')}" data-password="${escHtml(acc.password||'')}"></td>
         <td><span class="mono">${escHtml(acc.email||'')}</span></td>
         <td><span class="mono">${escHtml(acc.password||'')}</span></td>
         <td><span class="badge badge-ok">✅</span></td>
+        <td style="text-align: right;">
+          <button class="btn-secondary btn" style="padding: 2px 8px; font-size: 10px; border-color: var(--accent); color: var(--accent);" onclick="grkChangeSingleCard('${escHtml(acc.email||'')}', '${escHtml(acc.password||'')}')">💳 Đổi thẻ</button>
+        </td>
       </tr>`).join('');
   } catch(e) {}
+}
+
+function grkToggleSelectAll(chk) {
+  const cbs = document.querySelectorAll('.grk-acc-checkbox');
+  cbs.forEach(c => c.checked = chk.checked);
+}
+
+async function grkExecuteChangeCards(accs) {
+  if (!accs.length) return;
+  
+  // Create file content
+  const lines = accs.map(a => `${a.email}|${a.password}`).join('\n');
+  
+  // Upload to grok billing endpoint
+  try {
+    const formData = new FormData();
+    const blob = new Blob([lines], { type: 'text/plain' });
+    formData.append("file", blob, "grok_billing.txt");
+    
+    // For grok billing we have an upload API: /api/grok/billing/upload
+    // Wait, the API uses request.json.get("data")! Let's check how it's defined.
+    // In app.py: request.json.get("data", "")
+    const res = await fetch('/api/grok/billing/upload', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ data: lines })
+    });
+    
+    const r = await res.json();
+    if (r.success) {
+      // Switch to billing mode
+      grkSetMailType('billing');
+      // Scroll to top
+      document.querySelector('.main-content').scrollTo({top: 0, behavior: 'smooth'});
+      showToast('💳', `Đã chuyển ${accs.length} tài khoản sang chế độ Lấy Link Billing!\nHãy điền thẻ và bấm BẮT ĐẦU.`);
+    } else {
+      showToast('❌', 'Lỗi khi lưu tài khoản Billing');
+    }
+  } catch (e) {
+    console.error(e);
+    showToast('❌', 'Có lỗi xảy ra!');
+  }
+}
+
+function grkChangeSingleCard(email, password) {
+  showConfirmModal(
+    'Xác nhận đổi thẻ', 
+    `Bạn có chắc muốn đẩy tài khoản ${email} sang chế độ đổi thẻ?`, 
+    () => grkExecuteChangeCards([{email, password}]), 
+    'Đổi thẻ'
+  );
+}
+
+function grkChangeCardsBulk() {
+  const cbs = document.querySelectorAll('.grk-acc-checkbox:checked');
+  if (cbs.length === 0) {
+    return showToast('⚠️', 'Vui lòng chọn ít nhất 1 tài khoản!');
+  }
+  
+  const accs = [];
+  cbs.forEach(c => {
+    accs.push({
+      email: c.getAttribute('data-email'),
+      password: c.getAttribute('data-password')
+    });
+  });
+  
+  showConfirmModal(
+    'Xác nhận đổi thẻ hàng loạt', 
+    `Bạn có chắc muốn đẩy ${accs.length} tài khoản đã chọn sang chế độ đổi thẻ?`, 
+    () => grkExecuteChangeCards(accs), 
+    'Đổi thẻ'
+  );
 }
 
 async function grkCopyAccounts() {
@@ -2111,8 +2204,9 @@ async function grkCopyAccounts() {
 }
 
 async function grkClearAccounts() {
-  if (!confirm('Xóa tất cả tài khoản Grok?')) return;
-  await fetch('/api/grok/accounts/clear', { method: 'POST' });
-  grkLoadAccounts();
-  showToast('🗑️', 'Đã xóa tài khoản Grok!');
+  showConfirmModal('Xóa tài khoản', 'Xóa tất cả tài khoản Grok?', async () => {
+    await fetch('/api/grok/accounts/clear', { method: 'POST' });
+    grkLoadAccounts();
+    showToast('🗑️', 'Đã xóa tài khoản Grok!');
+  }, 'Xóa');
 }

@@ -1749,9 +1749,9 @@ def dreamina_task_start():
     try:
         with get_db() as conn:
             cur = conn.cursor()
-            cur.execute("SELECT MAX(id) FROM accounts WHERE app='dreamina'")
+            cur.execute("SELECT MAX(id) as max_id FROM accounts WHERE app='dreamina'")
             row = cur.fetchone()
-            state_dreamina.last_start_id = row[0] if row and row[0] else 0
+            state_dreamina.last_start_id = row['max_id'] if row and row['max_id'] else 0
     except:
         state_dreamina.last_start_id = 0
 
@@ -1960,9 +1960,9 @@ def grok_task_start():
     try:
         with get_db() as conn:
             cur = conn.cursor()
-            cur.execute("SELECT MAX(id) FROM accounts WHERE app='grok'")
+            cur.execute("SELECT MAX(id) as max_id FROM accounts WHERE app='grok'")
             row = cur.fetchone()
-            state_grok.last_start_id = row[0] if row and row[0] else 0
+            state_grok.last_start_id = row['max_id'] if row and row['max_id'] else 0
     except:
         state_grok.last_start_id = 0
 
@@ -2154,9 +2154,9 @@ if __name__ == "__main__":
                 'grok': state_grok
             }
             for app_name, b_state in states_map.items():
-                cur.execute("SELECT MAX(id) FROM accounts WHERE app=?", (app_name,))
+                cur.execute("SELECT MAX(id) as max_id FROM accounts WHERE app=?", (app_name,))
                 row = cur.fetchone()
-                b_state.last_start_id = row[0] if row and row[0] else 0
+                b_state.last_start_id = row['max_id'] if row and row['max_id'] else 0
     except Exception as e:
         print("Lỗi khởi tạo last_start_id:", e)
 

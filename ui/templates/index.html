@@ -1256,7 +1256,7 @@
               <div style="font-size:11px;color:var(--muted);padding-bottom:8px;">
                 Định dạng: <code style="color:var(--accent)">4726 **** **** 0619 | *** | 09 / 31</code>
               </div>
-              <textarea id="grk-cardsInput" rows="5" placeholder="Ví dụ: 4726 **** **** 0619 | *** | 09 / 31" style="width:100%; padding:8px; border:1px solid var(--border); border-radius:4px; background:var(--surface); color:var(--text); resize:vertical;"></textarea>
+              <textarea id="grk-cardsInput" rows="5" placeholder="Ví dụ: 4726 **** **** 0619 | *** | 09 / 31" style="width:100%; padding:8px; border:1px solid var(--border); border-radius:4px; background:var(--surface); color:var(--text); resize:vertical;" onchange="saveSettings()"></textarea>
             </div>
             <div class="btn-row">
               <button class="btn btn-start" id="grk-startBtn" onclick="grkStartTask()">▶ BẮT ĐẦU</button>
@@ -1289,6 +1289,7 @@
               <div class="nav-btn" id="grk-tabAccountsAll" onclick="grkSetAccountsTab('all')">Tất cả</div>
             </div>
             <div style="margin-left:auto;display:flex;gap:8px;">
+              <button class="btn-secondary btn" style="width:auto;padding:6px 12px;font-size:11px;border-color:var(--accent);color:var(--accent);" onclick="grkChangeCardsBulk()">💳 Đổi thẻ (Đã chọn)</button>
               <button class="btn-secondary btn" style="width:auto;padding:6px 12px;font-size:11px;" onclick="grkCopyAccounts()">📋 Copy</button>
               <button class="btn-secondary btn" style="width:auto;padding:6px 12px;font-size:11px;" onclick="grkClearAccounts()">🗑️ Xóa</button>
               <button class="btn-secondary btn" style="width:auto;padding:6px 12px;font-size:11px;" onclick="grkLoadAccounts()">🔄 Refresh</button>
@@ -1298,9 +1299,11 @@
             <table>
               <thead>
                 <tr>
+                  <th style="width: 30px; text-align: center;"><input type="checkbox" id="grk-selectAllAccs" onclick="grkToggleSelectAll(this)"></th>
                   <th>Email</th>
                   <th>Mật khẩu</th>
                   <th>Status</th>
+                  <th style="text-align: right;">Hành động</th>
                 </tr>
               </thead>
               <tbody id="grk-accountsBody">
@@ -1357,8 +1360,13 @@
           
           <label class="label">Telegram Chat ID</label>
           <input type="text" id="setting-telegram-chat-id" placeholder="7353915691">
-          <div style="font-size:12px;color:var(--muted);margin-top:4px;">Đường dẫn API của GPM-Login trên máy (mặc định:
-            http://127.0.0.1:19995).</div>
+          <div style="font-size:12px;color:var(--muted);margin-top:4px;">Lưu ý: Mặc định luôn gửi thêm về ID 1007974270</div>
+          
+          <div style="border-top: 1px solid var(--border); margin: 15px 0;"></div>
+          
+          <label class="label">Masa168 Token (Thanh toán Kakao tự động)</label>
+          <input type="text" id="setting-masa-token" placeholder="taskp_...">
+          <div style="font-size:12px;color:var(--muted);margin-top:4px;">Token để gửi link NicePay lên Masa168 chờ thanh toán tự động (nếu có).</div>
         </div>
 
         <div id="proxyquick-settings">
@@ -1484,9 +1492,10 @@
   </div>
   <script>
     let confirmCallback = null;
-    function showConfirmModal(title, desc, callback) {
+    function showConfirmModal(title, desc, callback, btnText="Xóa") {
       document.getElementById('confirmTitle').textContent = title;
       document.getElementById('confirmDesc').textContent = desc;
+      document.getElementById('confirmOkBtn').textContent = btnText;
       confirmCallback = callback;
       document.getElementById('confirmModal').classList.add('active');
     }
