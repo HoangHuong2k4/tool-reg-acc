@@ -1250,17 +1250,6 @@
                 <br>(Định dạng: email | password hoặc email [tab] password)
               </div>
             </div>
-            
-            <div class="form-group" id="grk-cardsGroup" style="display:none">
-              <label>Danh sách Thẻ (Mỗi thẻ 1 dòng)</label>
-              <div style="font-size:11px;color:var(--muted);padding-bottom:8px;">
-                Định dạng: <code style="color:var(--accent)">4726 **** **** 0619 | *** | 09 / 31</code>
-              </div>
-              <textarea id="grk-cardsInput" rows="5" placeholder="Ví dụ: 4726 **** **** 0619 | *** | 09 / 31" style="width:100%; padding:8px; border:1px solid var(--border); border-radius:4px; background:var(--surface); color:var(--text); resize:vertical;" onchange="formatGrokCards()"></textarea>
-              <div style="text-align:right; margin-top:4px;">
-                <button class="btn btn-secondary" style="padding:4px 8px; font-size:11px;" onclick="formatGrokCards(); showToast('✅', 'Đã lưu danh sách thẻ vào Database!');">💾 Định dạng & Lưu</button>
-              </div>
-            </div>
             <div class="btn-row">
               <button class="btn btn-start" id="grk-startBtn" onclick="grkStartTask()">▶ BẮT ĐẦU</button>
               <button class="btn btn-stop" id="grk-stopBtn" onclick="grkStopTask()" style="display:none">⏹ DỪNG</button>
@@ -1292,8 +1281,7 @@
               <div class="nav-btn" id="grk-tabAccountsAll" onclick="grkSetAccountsTab('all')">Tất cả</div>
             </div>
             <div style="margin-left:auto;display:flex;gap:8px;">
-              <button class="btn-secondary btn" style="width:auto;padding:6px 12px;font-size:11px;border-color:#10b981;color:#10b981;" onclick="grkChangeCardActiveTabBulk()">⚡ Tab mở (Đã chọn)</button>
-              <button class="btn-secondary btn" style="width:auto;padding:6px 12px;font-size:11px;border-color:var(--accent);color:var(--accent);" onclick="grkChangeCardsBulk()">💳 Đổi thẻ mới (Đã chọn)</button>
+              <button class="btn-secondary btn" style="width:auto;padding:6px 12px;font-size:11px;border-color:var(--accent);color:var(--accent);" onclick="grkSmartChangeCardsBulk()">💳 Đổi thẻ (Đã chọn)</button>
               <button class="btn-secondary btn" style="width:auto;padding:6px 12px;font-size:11px;" onclick="grkCopyAccounts()">📋 Copy</button>
               <button class="btn-secondary btn" style="width:auto;padding:6px 12px;font-size:11px;" onclick="grkClearAccounts()">🗑️ Xóa</button>
               <button class="btn-secondary btn" style="width:auto;padding:6px 12px;font-size:11px;" onclick="grkLoadAccounts()">🔄 Refresh</button>
@@ -1371,6 +1359,17 @@
           <label class="label">Masa168 Token (Thanh toán Kakao tự động)</label>
           <input type="text" id="setting-masa-token" placeholder="taskp_...">
           <div style="font-size:12px;color:var(--muted);margin-top:4px;">Token để gửi link NicePay lên Masa168 chờ thanh toán tự động (nếu có).</div>
+          
+          <div style="border-top: 1px solid var(--border); margin: 15px 0;"></div>
+          
+          <label class="label">Danh sách Thẻ (Mỗi thẻ 1 dòng)</label>
+          <div style="font-size:11px;color:var(--muted);padding-bottom:8px;">
+            Định dạng: <code style="color:var(--accent)">4726 **** **** 0619 | *** | 09 / 31</code>
+          </div>
+          <textarea id="grk-cardsInput" rows="5" placeholder="Ví dụ: 4726 **** **** 0619 | *** | 09 / 31" style="width:100%; padding:8px; border:1px solid var(--border); border-radius:4px; background:var(--surface); color:var(--text); resize:vertical;" onchange="formatGrokCards()"></textarea>
+          <div style="text-align:right; margin-top:4px;">
+            <button class="btn btn-secondary" style="padding:4px 8px; font-size:11px;" onclick="formatGrokCards(); showToast('✅', 'Đã định dạng xong, vui lòng bấm Lưu Cấu Hình ở dưới cùng!');">💾 Định dạng nhanh</button>
+          </div>
         </div>
 
         <div id="proxyquick-settings">

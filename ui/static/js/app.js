@@ -41,6 +41,10 @@ function switchTab(tab, updateHash=true) {
 async function loadSettings() {
   try {
     const r = await fetch('/api/settings'); const d = await r.json();
+    if (d._error) {
+      showToast('⚠️', 'Lỗi tải cấu hình từ DB (bị lock), giữ nguyên giao diện để tránh ghi đè!');
+      return;
+    }
     document.getElementById('setting-api-token').value = d.PROXY_API_TOKEN || '';
     document.getElementById('setting-merchant-id').value = d.PROXY_MERCHANT || '';
     document.getElementById('setting-proxy-id').value = d.PROXY_ID || '';
@@ -268,10 +272,8 @@ async function grkChangeCardActiveTab(email) {
     return;
   }
   
-  const card = cards.shift();
+  const card = cards[Math.floor(Math.random() * cards.length)];
   showConfirmModal('Xác nhận đổi thẻ (Tab Mở)', `Bạn có chắc muốn tự động điền thẻ ${card} cho tài khoản ${email} trên cửa sổ Chrome hiện tại không?`, async () => {
-    document.getElementById('grk-cardsInput').value = cards.join('\n');
-    saveSettings();
     
     try {
       showToast('⏳', 'Đang gửi lệnh đổi thẻ...');
@@ -307,12 +309,10 @@ async function grkChangeCardActiveTabBulk() {
   const accs = [];
   cbs.forEach(c => accs.push(c.getAttribute('data-email')));
 
-  showConfirmModal('Xác nhận đổi thẻ hàng loạt (Tab Mở)', `Bạn có chắc muốn tự động điền thẻ cho ${accs.length} tài khoản trên các cửa sổ Chrome hiện tại không?`, async () => {
+  showConfirmModal('Xác nhận đổi thẻ hàng loạt (Tab Mở)', `Bạn có chắc muốn tự động điền thẻ ngẫu nhiên cho ${accs.length} tài khoản trên các cửa sổ Chrome hiện tại không?`, async () => {
     for (let i = 0; i < accs.length; i++) {
       const email = accs[i];
-      const card = cards.shift();
-      document.getElementById('grk-cardsInput').value = cards.join('\n');
-      saveSettings();
+      const card = cards[Math.floor(Math.random() * cards.length)];
       
       showToast('⏳', `Đang gửi lệnh đổi thẻ cho ${email}...`);
       try {
@@ -1970,13 +1970,11 @@ function grkSetMailType(t) {
   const apiGroup = document.getElementById('grk-apiSourceGroup');
   const bGroup = document.getElementById('grk-billingGroup');
   const paymentGroup = document.getElementById('grk-openPaymentGroup');
-  const cGroup = document.getElementById('grk-cardsGroup');
   
   if (hGroup) hGroup.style.display = t === 'hotmail' ? '' : 'none';
   if (dGroup) dGroup.style.display = t === 'domain' ? '' : 'none';
   if (apiGroup) apiGroup.style.display = t === 'hotmail' ? '' : 'none';
   if (bGroup) bGroup.style.display = t === 'billing' ? '' : 'none';
-  if (cGroup) cGroup.style.display = t === 'billing' ? '' : 'none';
   if (paymentGroup) paymentGroup.style.display = t === 'billing' ? 'none' : '';
 }
 

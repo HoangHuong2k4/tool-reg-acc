@@ -17,16 +17,17 @@ import sqlite3
 
 def get_db_setting(key, default=""):
     try:
-        conn = sqlite3.connect("data/database.db")
+        db_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "database.db"))
+        conn = sqlite3.connect(db_path, timeout=10)
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         cursor.execute("SELECT value FROM settings WHERE key=?", (key,))
         row = cursor.fetchone()
         conn.close()
-        if row:
+        if row and row["value"]:
             return row["value"]
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"Lỗi đọc DB ({key}):", e)
     return default
 
 def send_telegram_message(text):
@@ -136,9 +137,9 @@ def wait_for_otp_domain(email_address, timeout=120, interval=4):
 def _extract_xai_code(text):
     if not text:
         return None
-    match = re.search(r'\b([A-Z0-9]{3})-?([A-Z0-9]{3})\b', text, re.IGNORECASE)
+    match = re.search(r'\b(\d{3})-?(\d{3})\b', text)
     if match:
-        return (match.group(1) + match.group(2)).upper()
+        return match.group(1) + match.group(2)
     return None
 
 
@@ -363,12 +364,20 @@ def worker_loop(driver, email, password, open_payment=False, language="en-US"):
                         log(f"[{email}] Chờ 4 giây hoàn tất xác nhận...", "INFO")
                         time.sleep(4)
                         
+                        try:
+                            import json, os
+                            os.makedirs("data/cookies", exist_ok=True)
+                            with open(f"data/cookies/{email}.json", "w", encoding="utf-8") as f:
+                                json.dump(driver.get_cookies(), f)
+                        except:
+                            pass
+                            
                         payment_url = "https://www.google.com/url?q=https://click.email.grok.com/f/a/D44YCrJINRlgI2nErQ2N4w~~/AAQRxRA~/o0ricJbDY0rYPxCddFIDNRk2rG8EhS26KMn4apYEY-nr5FVszrYVqzImlPsu8vfrgKF0FDNuaRbdv6FpHk28pqS1U_QbRThaJXq2gQ5kS6Kq7PHN-qbhqmI_S0v4c8kwZLpv5MxoCt4-NHuKiAbRNfuKPaKKadwrK5qyXW_4DV1SmDj5rbIN58HAqOsDJvZ-txKf9S5c34i5kRa3cvXLZorKvePXynuJgcjyNYlFAV4brCqx9YfZ3Z_BUQyMWuXKZ5JA_JUVoqaxMmhKIEYLegWBe__10w_McQJSnoGwLvmHAOlVMZ0F5HNP-vOv97LJ6Dx_K4DkAG4PTT5S3sa2ruUinHy0N6kNLDFqGishvN7zb_NyaCc6vZZNHXbB1oiafAQlED9USuI_1dpIfm8IUNnCJ-3TVkFOtU5o3b4bBKk~&source=gmail&ust=1788539378411000&usg=AOvVaw1j8Snr-3bNvMemb1zmc57D"
                         driver.switch_to.new_window('tab')
                         driver.get(payment_url)
                         
                         start_time = time.time()
-                        while time.time() - start_time < 30:
+                        while time.time() - start_time < 90:
                             current_url = driver.current_url
                             
                             if "/tos-gate" in current_url:
@@ -380,12 +389,14 @@ def worker_loop(driver, email, password, open_payment=False, language="en-US"):
                                     time.sleep(3)
                                     driver.get(payment_url)
                                     time.sleep(2)
+                                    start_time = time.time()
                                     continue
                             
                             redirect_link = _find(driver, By.CSS_SELECTOR, 'a[href^="/goto?url="], a[href^="/url?q="]')
                             if redirect_link:
                                 try_click(driver, redirect_link)
                                 time.sleep(2)
+                                start_time = time.time()
                                 continue
                                 
                             claim_btn = _find(driver, By.XPATH, "//button[contains(., 'Claim') or contains(., '무료 혜택 받기')]")
@@ -393,6 +404,7 @@ def worker_loop(driver, email, password, open_payment=False, language="en-US"):
                                 try_click(driver, claim_btn)
                                 log(f"[{email}] Đã click Claim offer!", "INFO")
                                 time.sleep(5)
+                                start_time = time.time()
                                 continue
                                 
                             # Stripe Checkout
@@ -503,6 +515,20 @@ def worker_loop(driver, email, password, open_payment=False, language="en-US"):
                         return False
 
                 elif otp_entered:
+                    # Check for invalid OTP message
+                    invalid_msg = driver.execute_script("return document.body.innerText.toLowerCase().includes('invalid') || document.body.innerText.toLowerCase().includes('expired') || document.body.innerText.toLowerCase().includes('incorrect');")
+                    if invalid_msg:
+                        log(f"[{email}] Mã OTP bị lỗi hoặc hết hạn! Yêu cầu gửi lại mã mới...", "WARN")
+                        resend_btn = _find(driver, By.XPATH, "//button[contains(., 'Resend')] | //a[contains(., 'Request a new one')] | //button[contains(., 'Request a new one')] | //span[contains(., 'Resend')]")
+                        if resend_btn:
+                            try_click(driver, resend_btn, "Resend")
+                            time.sleep(3)
+                        # Đặt lại trạng thái để lấy mã mới
+                        otp_fetched = False
+                        otp_entered = False
+                        confirm_retries = 0
+                        continue
+
                     # Vẫn còn trên trang OTP sau khi đã nhập → thử click Confirm lại
                     btn = _find(driver, By.XPATH, "//button[@type='submit' and contains(., 'Confirm email')]")
                     if btn:

@@ -26,7 +26,7 @@ def dict_factory(cursor, row):
 
 def get_db():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn = sqlite3.connect(DB_PATH, timeout=20, check_same_thread=False)
     conn.row_factory = dict_factory
     return conn
 
@@ -112,6 +112,7 @@ def load_settings():
                     settings[row['key']] = row['value']
     except Exception as e:
         print("Lỗi load settings:", e)
+        settings["_error"] = True
     return settings
 
 # Biến lưu trữ Proxy server hiện hành
@@ -1896,23 +1897,6 @@ def grok_billing_active_tab():
         if not email:
             return jsonify({"success": False, "error": "Thiếu email"})
             
-        if not card:
-            try:
-                conn = get_db()
-                row = conn.execute("SELECT value FROM settings WHERE key='GROK_CARDS_LIST'").fetchone()
-                if row and row['value']:
-                    lines = [l.strip() for l in row['value'].split('\n') if l.strip()]
-                    if lines:
-                        card = lines.pop(0)
-                        conn.execute("UPDATE settings SET value=? WHERE key='GROK_CARDS_LIST'", ('\n'.join(lines),))
-                        conn.commit()
-                conn.close()
-            except:
-                pass
-                
-        if not card:
-            return jsonify({"success": False, "error": "Hết thẻ trong hệ thống, vui lòng nạp thêm"})
-            
         import importlib
         hm_mod = importlib.import_module("src.bots.grok_hotmail")
         driver = hm_mod.ACTIVE_DRIVERS.get(email)
@@ -1922,6 +1906,22 @@ def grok_billing_active_tab():
             
         if not driver:
             return jsonify({"success": False, "error": f"Không tìm thấy trình duyệt đang mở cho {email}"})
+            
+        if not card:
+            try:
+                conn = get_db()
+                row = conn.execute("SELECT value FROM settings WHERE key='GROK_CARDS_LIST'").fetchone()
+                if row and row['value']:
+                    lines = [l.strip() for l in row['value'].split('\n') if l.strip()]
+                    if lines:
+                        import random
+                        card = random.choice(lines)
+                conn.close()
+            except:
+                pass
+                
+        if not card:
+            return jsonify({"success": False, "error": "Hết thẻ trong hệ thống, vui lòng nạp thêm"})
             
         parts = [p.strip() for p in card.split('|')]
         if len(parts) < 3:
@@ -1989,8 +1989,8 @@ def grok_billing_active_tab():
                     return
                     
                 from src.utils.stripe_card_manager import add_card_to_stripe
-                local_log(f"Đang nhập thẻ: {cc_num[:4]} **** **** {cc_num[-4:]}", "INFO")
-                add_card_to_stripe(driver, card_dict, local_log)
+                local_log(f"Đang nhập thẻ: {num[:4]} **** **** {num[-4:]}", "INFO")
+                add_card_to_stripe(billing_url, card_dict, local_log)
                 local_log("Đã điền thẻ thành công trên tab đang mở!", "OK")
             except Exception as e:
                 local_log(f"Lỗi khi điền thẻ: {str(e)}", "ERR")
@@ -2177,7 +2177,18 @@ def _run_grok_task(count, threads, browser_type, headless, mail_type, mail_api_s
                 concurrent.futures.wait(futures)
                 
         elif mail_type == "billing":
-            bot.CARDS_LIST = [c for c in cards if c.strip()]
+            if cards and any(c.strip() for c in cards):
+                bot.CARDS_LIST = [c for c in cards if c.strip()]
+            else:
+                try:
+                    with get_db() as conn:
+                        row = conn.execute("SELECT value FROM settings WHERE key='GROK_CARDS_LIST'").fetchone()
+                        if row and row['value']:
+                            bot.CARDS_LIST = [l.strip() for l in row['value'].split('\n') if l.strip()]
+                        else:
+                            bot.CARDS_LIST = []
+                except:
+                    bot.CARDS_LIST = []
                 
             loaded = bot.load_accounts_to_queue(limit=999999)  # Chạy hết file
             if loaded == 0:
