@@ -214,7 +214,9 @@ def add_card_to_stripe(stripe_link, card, log_func=print):
         )
         confirm_data = confirm_resp.json()
         if "error" in confirm_data:
-            log_func(f"⚠️ Lỗi confirm Setup Intent: {confirm_data['error'].get('message')}", "WARN")
+            err_msg = confirm_data['error'].get('message', 'Unknown error')
+            log_func(f"⚠️ Lỗi confirm Setup Intent: {err_msg}", "WARN")
+            return False, f"Card declined: {err_msg}"
 
         # 6. Gán thẻ mới làm mặc định cho Subscription
         log_func("-> Đang gán thẻ mới làm mặc định...", "INFO")
@@ -222,6 +224,7 @@ def add_card_to_stripe(stripe_link, card, log_func=print):
         def_resp = requests.post(default_url, headers=portal_headers, timeout=30)
         if def_resp.status_code not in [200, 201]:
             log_func(f"⚠️ Phản hồi gán mặc định ({def_resp.status_code}): {def_resp.text[:100]}", "WARN")
+            return False, "Failed to set default payment method"
         else:
             log_func("✅ Đã gán thẻ mới làm mặc định thành công!", "OK")
 

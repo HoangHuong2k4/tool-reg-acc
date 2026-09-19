@@ -1989,11 +1989,80 @@ def grok_billing_active_tab():
                     return
                     
                 from src.utils.stripe_card_manager import add_card_to_stripe
-                local_log(f"Đang nhập thẻ: {num[:4]} **** **** {num[-4:]}", "INFO")
-                add_card_to_stripe(billing_url, card_dict, local_log)
-                local_log("Đã điền thẻ thành công trên tab đang mở!", "OK")
+                from src.bots.grok_billing import send_telegram_message
+                masked_email = email[:3] + "***" + email[email.find("@"):] if "@" in email else email[:3] + "***"
+                
+                # Fetch all cards for retry pool
+                all_cards = []
+                try:
+                    import sqlite3
+                    from src.web.app import get_db
+                    with get_db() as conn:
+                        row = conn.execute("SELECT value FROM settings WHERE key='GROK_CARDS_LIST'").fetchone()
+                        if row and row['value']:
+                            all_cards = [l.strip() for l in row['value'].split('\n') if l.strip()]
+                except Exception:
+                    pass
+
+                current_card_str = card
+                current_card_dict = card_dict
+                for attempt in range(3):
+                    local_log(f"Đang nhập thẻ: {current_card_dict['number'][:4]}...{current_card_dict['number'][-4:]} (Lần {attempt+1})", "INFO")
+                    ok, err_msg = add_card_to_stripe(billing_url, current_card_dict, local_log)
+                    
+                    if ok:
+                        local_log("Đã điền thẻ thành công trên tab đang mở!", "OK")
+                        send_telegram_message(f"🎉 HOÀN TẤT ĐỔI THẺ!\nEmail: {masked_email}\nThẻ: {current_card_dict['number'][:4]}...{current_card_dict['number'][-4:]}")
+                        try:
+                            driver.quit()
+                            import importlib
+                            hm_m = importlib.import_module("src.bots.grok_hotmail")
+                            dm_m = importlib.import_module("src.bots.grok_domain")
+                            if hasattr(hm_m, "ACTIVE_DRIVERS") and email in hm_m.ACTIVE_DRIVERS:
+                                del hm_m.ACTIVE_DRIVERS[email]
+                            if hasattr(dm_m, "ACTIVE_DRIVERS") and email in dm_m.ACTIVE_DRIVERS:
+                                del dm_m.ACTIVE_DRIVERS[email]
+                            local_log("Đã đóng trình duyệt tự động.", "INFO")
+                        except Exception as ex:
+                            local_log(f"Lỗi khi đóng trình duyệt: {str(ex)}", "ERR")
+                        break
+                    else:
+                        local_log(f"Lỗi khi điền thẻ: {err_msg}", "ERR")
+                        
+                        try:
+                            if current_card_str in all_cards:
+                                all_cards.remove(current_card_str)
+                            new_value = '\n'.join(all_cards)
+                            from src.web.app import get_db
+                            with get_db() as conn:
+                                conn.execute("UPDATE settings SET value=? WHERE key='GROK_CARDS_LIST'", (new_value,))
+                            local_log(f"🗑️ Đã xoá thẻ lỗi khỏi hệ thống: {current_card_dict['number'][:4]}...{current_card_dict['number'][-4:]}", "WARN")
+                        except Exception as ex:
+                            pass
+                            
+                        if attempt == 2 or not all_cards:
+                            send_telegram_message(f"❌ LỖI ĐỔI THẺ (Sau {attempt+1} lần)!\nEmail: {masked_email}\nLỗi: {err_msg}")
+                            break
+                        else:
+                            local_log("Thử lại với thẻ khác...", "INFO")
+                            import random
+                            import re
+                            new_card = random.choice(all_cards)
+                            current_card_str = new_card
+                            parts = [p.strip() for p in new_card.split('|')]
+                            if len(parts) >= 3:
+                                n = re.sub(r'\D', '', parts[0])
+                                p1 = parts[1].replace(' ', '')
+                                p2 = parts[2].replace(' ', '')
+                                exp_str, cvc = (p1, p2) if '/' in p1 or len(p1) == 4 else (p2, p1)
+                                if '/' in exp_str:
+                                    m, y = exp_str.split('/')[0].strip(), exp_str.split('/')[1].strip()[-2:]
+                                else:
+                                    m, y = exp_str[:2], exp_str[2:][-2:]
+                                current_card_dict = {"number": n, "exp_month": m, "exp_year": y, "cvc": cvc}
+
             except Exception as e:
-                local_log(f"Lỗi khi điền thẻ: {str(e)}", "ERR")
+                local_log(f"Lỗi khi xử lý thẻ: {str(e)}", "ERR")
                 
         import threading
         threading.Thread(target=worker, daemon=True).start()
@@ -2063,6 +2132,7 @@ def grok_task_start():
     mail_type = data.get("mail_type", "hotmail")
     mail_api_source = data.get("mail_api_source", "mixmmo")
     open_payment = bool(data.get("open_payment", False))
+    apple_pay = bool(data.get("apple_pay", False))
     language = data.get("language", "en-US")
     cards = data.get("cards", [])
 
@@ -2083,7 +2153,7 @@ def grok_task_start():
     state_grok.is_running = True
     state_grok.task_thread = threading.Thread(
         target=_run_grok_task,
-        args=(count, threads, browser_type, headless, mail_type, mail_api_source, open_payment, language, cards),
+        args=(count, threads, browser_type, headless, mail_type, mail_api_source, open_payment, apple_pay, language, cards),
         daemon=True
     )
     state_grok.task_thread.start()
@@ -2098,10 +2168,17 @@ def grok_task_stop():
 @app.route("/api/grok/task/close_browsers", methods=["POST"])
 def grok_close_browsers():
     if state_grok.module and hasattr(state_grok.module, "ACTIVE_DRIVERS"):
-        for d in state_grok.module.ACTIVE_DRIVERS:
-            try: d.quit()
-            except: pass
-        state_grok.module.ACTIVE_DRIVERS.clear()
+        drivers = state_grok.module.ACTIVE_DRIVERS
+        if isinstance(drivers, dict):
+            for d in drivers.values():
+                try: d.quit()
+                except: pass
+            drivers.clear()
+        elif isinstance(drivers, list):
+            for d in drivers:
+                try: d.quit()
+                except: pass
+            drivers.clear()
     return jsonify({"success": True})
 
 @app.route("/api/grok/task/stream")
@@ -2117,7 +2194,7 @@ def grok_task_stream():
     return Response(stream_with_context(generate()), mimetype="text/event-stream",
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
-def _run_grok_task(count, threads, browser_type, headless, mail_type, mail_api_source, open_payment, language, cards=None):
+def _run_grok_task(count, threads, browser_type, headless, mail_type, mail_api_source, open_payment, apple_pay, language, cards=None):
     import importlib
     try:
         root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))

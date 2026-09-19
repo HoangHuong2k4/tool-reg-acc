@@ -274,37 +274,60 @@ def worker_loop(driver, email, password, index, card_data=None):
             
             if card_data:
                 try:
-                    # Parse card
-                    parts = [p.strip() for p in card_data.split('|')]
-                    if len(parts) >= 3:
-                        cc_num = parts[0].replace(' ', '')
-                        masked = f"{cc_num[:4]} **** **** {cc_num[-4:]}" if len(cc_num) >= 12 else "****"
-                        log(f"[{email}] Đang nhập thẻ: {masked}", "INFO")
-                        
-                        cc_cvc = parts[1]
-                        exp = parts[2].split('/')
-                        cc_exp = f"{exp[0].strip()}{exp[1].strip()[-2:]}"
-
-                        from src.utils.stripe_card_manager import add_card_to_stripe
-                        card_dict = {
-                            "number": cc_num,
-                            "exp_month": exp[0].strip(),
-                            "exp_year": exp[1].strip()[-2:],
-                            "cvc": cc_cvc
-                        }
-                        
-                        def local_log(msg, level="INFO"):
-                            log(f"[{email}] {msg}", level)
+                    current_card = card_data
+                    for attempt in range(3):
+                        # Parse card
+                        parts = [p.strip() for p in current_card.split('|')]
+                        if len(parts) >= 3:
+                            cc_num = parts[0].replace(' ', '')
+                            masked = f"{cc_num[:4]} **** **** {cc_num[-4:]}" if len(cc_num) >= 12 else "****"
+                            log(f"[{email}] Đang nhập thẻ: {masked} (Lần {attempt+1})", "INFO")
                             
-                        ok, err_msg = add_card_to_stripe(billing_url, card_dict, log_func=local_log)
-                        if ok:
-                            log(f"[{email}] Đã đổi thẻ thành công qua API Stripe!", "OK")
-                            send_telegram_message(f"✅ Đổi thẻ thành công!\nEmail: {masked_email}\nĐã đổi thẻ {masked} thành công qua API Stripe.")
+                            cc_cvc = parts[1]
+                            exp = parts[2].split('/')
+                            cc_exp = f"{exp[0].strip()}{exp[1].strip()[-2:]}"
+
+                            from src.utils.stripe_card_manager import add_card_to_stripe
+                            card_dict = {
+                                "number": cc_num,
+                                "exp_month": exp[0].strip(),
+                                "exp_year": exp[1].strip()[-2:],
+                                "cvc": cc_cvc
+                            }
+                            
+                            def local_log(msg, level="INFO"):
+                                log(f"[{email}] {msg}", level)
+                                
+                            ok, err_msg = add_card_to_stripe(billing_url, card_dict, log_func=local_log)
+                            if ok:
+                                log(f"[{email}] Đã đổi thẻ thành công qua API Stripe!", "OK")
+                                send_telegram_message(f"✅ Đổi thẻ thành công!\nEmail: {masked_email}\nĐã đổi thẻ {masked} thành công qua API Stripe.")
+                                break
+                            else:
+                                log(f"[{email}] Lỗi đổi thẻ API: {err_msg}", "ERR")
+                                
+                                try:
+                                    if current_card in CARDS_LIST:
+                                        CARDS_LIST.remove(current_card)
+                                    import sqlite3
+                                    from src.web.app import get_db
+                                    with get_db() as conn:
+                                        new_val = '\n'.join(CARDS_LIST)
+                                        conn.execute("UPDATE settings SET value=? WHERE key='GROK_CARDS_LIST'", (new_val,))
+                                    log(f"[{email}] 🗑️ Đã xoá thẻ lỗi khỏi hệ thống: {cc_num[:4]}...", "WARN")
+                                except Exception:
+                                    pass
+                                
+                                if attempt == 2 or not CARDS_LIST:
+                                    send_telegram_message(f"❌ Đổi thẻ thất bại (Sau {attempt+1} lần)!\nEmail: {masked_email}\nLỗi: {err_msg}")
+                                    break
+                                else:
+                                    log(f"[{email}] Thử lại với thẻ khác...", "INFO")
+                                    import random
+                                    current_card = random.choice(CARDS_LIST)
                         else:
-                            log(f"[{email}] Lỗi đổi thẻ API: {err_msg}", "ERR")
-                            send_telegram_message(f"❌ Đổi thẻ thất bại!\nEmail: {masked_email}\nLỗi: {err_msg}")
-                    else:
-                        log(f"[{email}] Định dạng thẻ không hợp lệ: {card_data}", "ERR")
+                            log(f"[{email}] Định dạng thẻ không hợp lệ: {current_card}", "ERR")
+                            break
                 except Exception as ex:
                     log(f"[{email}] Lỗi khi nhập thẻ: {str(ex)}", "ERR")
                     
@@ -355,7 +378,7 @@ def process_account_single(index, batch_size=3, headless=False):
 TOTAL_OK = 0
 TOTAL_FAIL = 0
 
-def run(count=1, threads=1, browser_type="uc", headless=False, mail_type="billing", mail_api_source="mixmmo", open_payment=False, language="en-US"):
+def run(count=1, threads=1, browser_type="uc", headless=False, mail_type="billing", mail_api_source="mixmmo", open_payment=False, language="en-US", apple_pay=False):
     global TOTAL_OK, TOTAL_FAIL
     TOTAL_OK = 0
     TOTAL_FAIL = 0

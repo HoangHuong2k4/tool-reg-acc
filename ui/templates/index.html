@@ -1215,6 +1215,13 @@
               </div>
             </div>
 
+            <div class="form-group" id="grk-applePayGroup">
+              <div class="toggle-btn" id="grk-applePayToggle" onclick="grkToggleApplePay()">
+                <div class="toggle-switch"></div>
+                <span>Chỉ lấy link checkout (Để pay Apple Pay)</span>
+              </div>
+            </div>
+
             <div class="form-group">
               <div class="toggle-btn" id="grk-headlessToggle" onclick="grkToggleHeadless()">
                 <div class="toggle-switch"></div>
@@ -1482,7 +1489,7 @@
 
   <div id="toast"><span id="toastIcon">✅</span><span id="toastMsg">OK</span></div>
 
-  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/app.js') }}?v=2"></script>
   <div class="modal-overlay" id="confirmModal">
     <div class="modal-box">
       <div class="modal-title" id="confirmTitle">Xác nhận</div>

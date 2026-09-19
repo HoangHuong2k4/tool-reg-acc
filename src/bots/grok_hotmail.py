@@ -331,7 +331,7 @@ def is_element_present(driver, By, selector):
         return None
 
 
-def worker_loop(driver, email, password, acc_info, mail_api_source="mixmmo", open_payment=False, language="en-US"):
+def worker_loop(driver, email, password, acc_info, mail_api_source="mixmmo", open_payment=False, apple_pay=False, language="en-US"):
     from selenium.webdriver.common.by import By
     from selenium.webdriver.common.keys import Keys
     log(f"[{email}] Bắt đầu đăng ký Grok (hotmail)...", "INFO")
@@ -384,7 +384,7 @@ def worker_loop(driver, email, password, acc_info, mail_api_source="mixmmo", ope
                         save_account(email, password)
                         saved = True
                 time.sleep(2)
-                if open_payment:
+                if open_payment or apple_pay:
                     log(f"[{email}] Mở link thanh toán...", "INFO")
                     try:
                         driver.get("https://grok.com")
@@ -421,9 +421,18 @@ def worker_loop(driver, email, password, acc_info, mail_api_source="mixmmo", ope
                         driver.switch_to.new_window('tab')
                         driver.get(payment_url)
                         
+                        has_reloaded_tmr = False
                         start_time = time.time()
                         while time.time() - start_time < 90:
                             current_url = driver.current_url
+                            
+                            if not has_reloaded_tmr and "Too Many Requests" in driver.page_source:
+                                log(f"[{email}] Bị Too Many Requests, chờ 15s rồi load lại...", "WARN")
+                                time.sleep(15)
+                                driver.refresh()
+                                has_reloaded_tmr = True
+                                time.sleep(5)
+                                continue
                             
                             if "/tos-gate" in current_url:
                                 log(f"[{email}] Đang xác nhận TOS, chờ 5s...", "INFO")
@@ -454,6 +463,12 @@ def worker_loop(driver, email, password, acc_info, mail_api_source="mixmmo", ope
                                 
                             # Stripe Checkout
                             if "checkout.stripe.com" in current_url:
+                                if apple_pay:
+                                    log(f"[{email}] Đã dừng ở trang Checkout để bạn tự thanh toán Apple Pay!", "OK")
+                                    masked_email = email[:3] + "***" + email[email.find("@"):] if "@" in email else email[:3] + "***"
+                                    send_telegram_message(f"🍏 Đã dừng ở trang Checkout (Apple Pay)\nEmail: {masked_email}")
+                                    return True
+                                    
                                 kakao_btn = _find(driver, By.CSS_SELECTOR, '[data-testid="kakao_pay-accordion-item"]')
                                 if kakao_btn:
                                     try_click(driver, kakao_btn)
@@ -715,7 +730,7 @@ def _set_react_value(driver, element, value):
 
 
 def register_one_account(index, keep_open=False, batch_size=3, headless=False,
-                         browser_type="uc", mail_api_source="mixmmo", use_proxy=False, open_payment=False, language="en-US"):
+                         browser_type="uc", mail_api_source="mixmmo", use_proxy=False, open_payment=False, apple_pay=False, language="en-US"):
     global ACTIVE_DRIVERS
     acc = None
     driver = None
@@ -732,10 +747,10 @@ def register_one_account(index, keep_open=False, batch_size=3, headless=False,
 
         driver = setup_driver(index, keep_open=keep_open, batch_size=batch_size,
                               headless=headless, browser_type=browser_type, use_proxy=use_proxy, language=language)
-        if keep_open or open_payment:
+        if keep_open or open_payment or apple_pay:
             ACTIVE_DRIVERS[email] = driver
 
-        result = worker_loop(driver, email, password, acc, mail_api_source=mail_api_source, open_payment=open_payment, language=language)
+        result = worker_loop(driver, email, password, acc, mail_api_source=mail_api_source, open_payment=open_payment, apple_pay=apple_pay, language=language)
         if result:
             mark_hotmail_used(acc)
             log(f"[{email}] ✅ Đăng ký Grok thành công!", "OK")
@@ -746,7 +761,7 @@ def register_one_account(index, keep_open=False, batch_size=3, headless=False,
         log(f"LỖI worker Grok {index}: {e}", "ERR")
         return False
     finally:
-        if driver and not (keep_open or open_payment):
+        if driver and not (keep_open or open_payment or apple_pay):
             try:
                 driver.quit()
             except:

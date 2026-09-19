@@ -1950,6 +1950,7 @@ let grkBrowserType = 'uc';
 let grkLanguage = 'ko-KR';
 let grkHeadless = false;
 let grkOpenPayment = true;
+let grkApplePay = false;
 let grkSessionMode = 'session';
 let grkFilter = 'ALL';
 let grkTotal = 0, grkOk = 0, grkFail = 0;
@@ -2008,8 +2009,22 @@ function grkToggleHeadless() {
 
 function grkToggleOpenPayment() {
   grkOpenPayment = !grkOpenPayment;
+  if(grkOpenPayment) {
+    grkApplePay = false;
+    document.getElementById('grk-applePayToggle')?.classList.remove('active');
+  }
   const tog = document.getElementById('grk-openPaymentToggle');
   if(tog) tog.classList.toggle('active', grkOpenPayment);
+}
+
+function grkToggleApplePay() {
+  grkApplePay = !grkApplePay;
+  if(grkApplePay) {
+    grkOpenPayment = false;
+    document.getElementById('grk-openPaymentToggle')?.classList.remove('active');
+  }
+  const tog = document.getElementById('grk-applePayToggle');
+  if(tog) tog.classList.toggle('active', grkApplePay);
 }
 
 async function grkLoadHotmailCount() {
@@ -2119,7 +2134,7 @@ async function grkStartTask() {
     const r = await fetch('/api/grok/task/start', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ count, threads, mail_type: grkMailType, mail_api_source: grkApiSource, browser_type: grkBrowserType, headless: grkHeadless, open_payment: grkOpenPayment, language: grkLanguage, cards })
+      body: JSON.stringify({ count, threads, mail_type: grkMailType, mail_api_source: grkApiSource, browser_type: grkBrowserType, headless: grkHeadless, open_payment: grkOpenPayment, apple_pay: grkApplePay, language: grkLanguage, cards })
     });
     const d = await r.json();
     if (!d.success) { showToast('❌', d.error || 'Lỗi khởi động'); return; }
