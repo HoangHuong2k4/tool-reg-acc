@@ -31,6 +31,7 @@ def _build_proxies(proxy_str=None):
     Tạo dict proxies cho requests từ settings DB.
     Đọc LAST_PROXY_HOST/PORT/USER/PASS đã lưu sẵn trong DB.
     proxy_str: nếu truyền vào thì dùng chuỗi đó, không đọc DB.
+    Tự phát hiện SOCKS5 khi port là 1080/1081.
     Trả về None nếu không có proxy.
     """
     if proxy_str is None:
@@ -39,15 +40,24 @@ def _build_proxies(proxy_str=None):
         user = _get_db_setting("LAST_PROXY_USER", "")
         pwd  = _get_db_setting("LAST_PROXY_PASS", "")
         if host and port:
+            # Phân biệt SOCKS5 (port 1080/1081) và HTTP
+            port_int = int(port) if str(port).isdigit() else 0
+            scheme = "socks5" if port_int in (1080, 1081) else "http"
             if user and pwd:
-                proxy_str = f"http://{user}:{pwd}@{host}:{port}"
+                proxy_str = f"{scheme}://{user}:{pwd}@{host}:{port}"
             else:
-                proxy_str = f"http://{host}:{port}"
+                proxy_str = f"{scheme}://{host}:{port}"
     proxy_str = (proxy_str or "").strip()
     if not proxy_str:
         return None
+    # Nếu không có scheme thì mặc định http
     if not proxy_str.startswith(("http", "socks")):
         proxy_str = "http://" + proxy_str
+    # Kiểm tra thêm nếu chưa có scheme đúng với port 1080
+    if ":1080" in proxy_str and proxy_str.startswith("http://"):
+        proxy_str = proxy_str.replace("http://", "socks5://", 1)
+    if ":1081" in proxy_str and proxy_str.startswith("http://"):
+        proxy_str = proxy_str.replace("http://", "socks5://", 1)
     return {"http": proxy_str, "https": proxy_str}
 
 

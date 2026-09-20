@@ -2041,7 +2041,13 @@ def grok_billing_active_tab():
                             pass
                             
                         if attempt == 2 or not all_cards:
-                            send_telegram_message(f"❌ LỖI ĐỔI THẺ (Sau {attempt+1} lần)!\nEmail: {masked_email}\nLỗi: {err_msg}")
+                            local_log(f"❌ Hết thẻ sau {attempt+1} lần thử! Gửi link để đổi tay...", "ERR")
+                            send_telegram_message(
+                                f"❌ Hết thẻ sau {attempt+1} lần thử!\n"
+                                f"Email: {masked_email}\n"
+                                f"Lỗi cuối: {err_msg}\n"
+                                f"👉 Link Stripe Portal để đổi thẻ tay:\n{billing_url}"
+                            )
                             break
                         else:
                             local_log("Thử lại với thẻ khác...", "INFO")
