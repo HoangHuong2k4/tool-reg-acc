@@ -84,12 +84,20 @@ def start_masa_poller(masa_token, send_telegram_func):
                                     del MASA_PENDING_TASKS[tid]
                                 elif status in ["FAIL", "FAILED", "ERROR", "TIMEOUT"]:
                                     info["log_func"](f"❌ Masa168 báo: THANH TOÁN THẤT BẠI cho {info['email']}!", "ERR")
-                                    send_telegram_func(f"❌ Masa168 báo THANH TOÁN THẤT BẠI!\nEmail: {info['email']}\nTask ID: {tid}")
+                                    send_telegram_func(
+                                        f"❌ Masa168 báo THANH TOÁN THẤT BẠI!\n"
+                                        f"Email: {info['email']}\nTask ID: {tid}\n"
+                                        f"👉 Link NicePay để quét tay:\n{info['url']}"
+                                    )
                                     del MASA_PENDING_TASKS[tid]
                             
                             if tid in MASA_PENDING_TASKS and time.time() - info["added_time"] > 300:
                                 info["log_func"](f"❌ Masa168 QUÁ THỜI GIAN chờ thanh toán cho {info['email']}", "ERR")
-                                send_telegram_func(f"⚠️ Masa168 QUÁ THỜI GIAN chờ (5 phút)!\nEmail: {info['email']}\nTask ID: {tid}")
+                                send_telegram_func(
+                                    f"⏰ Masa168 QUÁ THỜI GIAN chờ (5 phút)!\n"
+                                    f"Email: {info['email']}\nTask ID: {tid}\n"
+                                    f"👉 Link NicePay để quét tay:\n{info['url']}"
+                                )
                                 del MASA_PENDING_TASKS[tid]
                 else:
                     print("Masa168 API query failed:", res.status_code, res.text)
@@ -99,8 +107,14 @@ def start_masa_poller(masa_token, send_telegram_func):
     threading.Thread(target=poller, daemon=True).start()
 
 def submit_to_masa_api(url, email, masa_token, send_telegram_func, log_func):
+    # Luôn gửi link NicePay qua Telegram trước, dù có token hay không
+    masked_email = email[:3] + "***" + email[email.find("@"):] if "@" in email else email[:3] + "***"
+    send_telegram_func(
+        f"💳 Link thanh toán NicePay:\nEmail: {masked_email}\n{url}"
+    )
+
     if not masa_token:
-        log_func("⚠️ Không có MASA_TOKEN, bỏ qua bước gửi link thanh toán lên Masa168", "WARN")
+        log_func("⚠️ Không có MASA_TOKEN — đã gửi link NicePay qua Telegram để quét tay!", "WARN")
         return
         
     start_masa_poller(masa_token, send_telegram_func)
@@ -132,6 +146,16 @@ def submit_to_masa_api(url, email, masa_token, send_telegram_func, log_func):
             else:
                 log_func(f"✅ Đã gửi link lên Masa168 thành công, nhưng không tìm thấy Task ID để chờ. RAW: {res.text}", "WARN")
         else:
-            log_func(f"❌ Lỗi khi gửi Masa168: {res.text}", "ERR")
+            log_func(f"❌ Lỗi khi gửi Masa168 (HTTP {res.status_code}): {res.text}", "ERR")
+            send_telegram_func(
+                f"❌ Lỗi gửi Masa168 (HTTP {res.status_code})!\n"
+                f"Email: {masked_email}\n"
+                f"👉 Link NicePay để quét tay đã được gửi ở trên."
+            )
     except Exception as e:
         log_func(f"❌ Lỗi kết nối Masa168: {str(e)}", "ERR")
+        send_telegram_func(
+            f"❌ Lỗi kết nối Masa168: {str(e)}\n"
+            f"Email: {masked_email}\n"
+            f"👉 Link NicePay để quét tay đã được gửi ở trên."
+        )

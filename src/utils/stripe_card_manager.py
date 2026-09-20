@@ -1,11 +1,55 @@
 import re
 import os
 import time
+import sqlite3
 import requests
 import html as html_lib
 
 STRIPE_VERSION = "2025-06-30.basil"
 CARDS_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "cards.txt"))
+
+
+def _get_db_setting(key, default=""):
+    """Đọc setting từ database.db."""
+    try:
+        db_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "database.db"))
+        conn = sqlite3.connect(db_path, timeout=10)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("SELECT value FROM settings WHERE key=?", (key,))
+        row = cursor.fetchone()
+        conn.close()
+        if row and row["value"]:
+            return row["value"]
+    except Exception:
+        pass
+    return default
+
+
+def _build_proxies(proxy_str=None):
+    """
+    Tạo dict proxies cho requests từ settings DB.
+    Đọc LAST_PROXY_HOST/PORT/USER/PASS đã lưu sẵn trong DB.
+    proxy_str: nếu truyền vào thì dùng chuỗi đó, không đọc DB.
+    Trả về None nếu không có proxy.
+    """
+    if proxy_str is None:
+        host = _get_db_setting("LAST_PROXY_HOST", "")
+        port = _get_db_setting("LAST_PROXY_PORT", "")
+        user = _get_db_setting("LAST_PROXY_USER", "")
+        pwd  = _get_db_setting("LAST_PROXY_PASS", "")
+        if host and port:
+            if user and pwd:
+                proxy_str = f"http://{user}:{pwd}@{host}:{port}"
+            else:
+                proxy_str = f"http://{host}:{port}"
+    proxy_str = (proxy_str or "").strip()
+    if not proxy_str:
+        return None
+    if not proxy_str.startswith(("http", "socks")):
+        proxy_str = "http://" + proxy_str
+    return {"http": proxy_str, "https": proxy_str}
+
 
 
 class CardManager:
@@ -111,16 +155,22 @@ def get_stripe_portal_link(driver, log_func=print, timeout=30):
         return None
 
 
-def add_card_to_stripe(stripe_link, card, log_func=print):
+def add_card_to_stripe(stripe_link, card, log_func=print, proxy=None):
     """
     Thêm thẻ mới vào tài khoản qua Stripe Billing Portal API, gán làm mặc định và gỡ thẻ cũ.
+    proxy: chuỗi proxy (vd: http://user:pass@host:port). None = đọc từ DB key VN_PROXY.
     """
+    proxies = _build_proxies(proxy)
+    if proxies:
+        log_func(f"-> Dùng proxy VN: {list(proxies.values())[0].split('@')[-1]}", "INFO")
+    else:
+        log_func("-> Không có proxy VN, kết nối trực tiếp.", "INFO")
     masked_card = f"{card['number'][:4]}...{card['number'][-4:]}"
     log_func(f"Đang phân tích link Stripe Portal để nạp thẻ [{masked_card}]...", "INFO")
 
     try:
         # 1. Tải HTML của trang Stripe Portal
-        resp = requests.get(stripe_link, timeout=30)
+        resp = requests.get(stripe_link, timeout=30, proxies=proxies)
         raw_html = resp.text
         decoded = html_lib.unescape(raw_html)
 
@@ -149,7 +199,7 @@ def add_card_to_stripe(stripe_link, card, log_func=print):
         # 2. Lấy Subscription ID
         sub_resp = requests.get(
             f"https://billing.stripe.com/v1/billing_portal/sessions/{bps}/subscriptions?include_only[]=data.id",
-            headers=portal_headers, timeout=30
+            headers=portal_headers, timeout=30, proxies=proxies
         )
         sub_data = sub_resp.json()
         if not sub_data.get("data") or len(sub_data["data"]) == 0:
@@ -162,7 +212,7 @@ def add_card_to_stripe(stripe_link, card, log_func=print):
         # 3. Lấy danh sách thẻ cũ
         pm_resp = requests.get(
             f"https://billing.stripe.com/v1/billing_portal/sessions/{bps}/payment_methods",
-            headers=portal_headers, timeout=30
+            headers=portal_headers, timeout=30, proxies=proxies
         )
         old_pms = [pm["id"] for pm in pm_resp.json().get("data", [])]
         log_func(f"-> Thẻ hiện có ({len(old_pms)}): {', '.join(old_pms) if old_pms else 'Không có'}", "INFO")
@@ -179,7 +229,8 @@ def add_card_to_stripe(stripe_link, card, log_func=print):
                 "card[cvc]": card["cvc"]
             },
             headers=api_headers,
-            timeout=30
+            timeout=30,
+            proxies=proxies
         )
         pm_result = create_pm_resp.json()
         if "error" in pm_result:
@@ -193,7 +244,7 @@ def add_card_to_stripe(stripe_link, card, log_func=print):
         # 5. Tạo và Confirm Setup Intent để gắn thẻ vào customer
         si_resp = requests.post(
             f"https://billing.stripe.com/v1/billing_portal/sessions/{bps}/setup_intents/",
-            headers=portal_headers, timeout=30
+            headers=portal_headers, timeout=30, proxies=proxies
         )
         si_data = si_resp.json()
         if "error" in si_data:
@@ -210,7 +261,7 @@ def add_card_to_stripe(stripe_link, card, log_func=print):
                 "client_secret": client_secret,
                 "return_url": "https://billing.stripe.com"
             },
-            headers=api_headers, timeout=30
+            headers=api_headers, timeout=30, proxies=proxies
         )
         confirm_data = confirm_resp.json()
         if "error" in confirm_data:
@@ -221,7 +272,7 @@ def add_card_to_stripe(stripe_link, card, log_func=print):
         # 6. Gán thẻ mới làm mặc định cho Subscription
         log_func("-> Đang gán thẻ mới làm mặc định...", "INFO")
         default_url = f"https://billing.stripe.com/v1/billing_portal/sessions/{bps}/subscriptions/{sub_id}/payment_methods/{new_pm}"
-        def_resp = requests.post(default_url, headers=portal_headers, timeout=30)
+        def_resp = requests.post(default_url, headers=portal_headers, timeout=30, proxies=proxies)
         if def_resp.status_code not in [200, 201]:
             log_func(f"⚠️ Phản hồi gán mặc định ({def_resp.status_code}): {def_resp.text[:100]}", "WARN")
             return False, "Failed to set default payment method"
@@ -234,7 +285,7 @@ def add_card_to_stripe(stripe_link, card, log_func=print):
         for old_pm in cards_to_delete:
             try:
                 detach_url = f"https://billing.stripe.com/v1/billing_portal/sessions/{bps}/payment_methods/{old_pm}/detach"
-                det_resp = requests.post(detach_url, headers=portal_headers, timeout=30)
+                det_resp = requests.post(detach_url, headers=portal_headers, timeout=30, proxies=proxies)
                 if det_resp.status_code in [200, 201]:
                     log_func(f"✅ Đã gỡ bỏ thẻ cũ: {old_pm}", "OK")
                 else:

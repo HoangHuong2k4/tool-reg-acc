@@ -331,7 +331,7 @@ def is_element_present(driver, By, selector):
         return None
 
 
-def worker_loop(driver, email, password, acc_info, mail_api_source="mixmmo", open_payment=False, apple_pay=False, language="en-US"):
+def worker_loop(driver, email, password, acc_info, mail_api_source="mixmmo", open_payment=False, apple_pay=False, language="en-US", payment_mode="masa"):
     from selenium.webdriver.common.by import By
     from selenium.webdriver.common.keys import Keys
     log(f"[{email}] Bắt đầu đăng ký Grok (hotmail)...", "INFO")
@@ -483,10 +483,17 @@ def worker_loop(driver, email, password, acc_info, mail_api_source="mixmmo", ope
                                         log(f"[{email}] Đã chuyển qua cổng NicePay thành công!", "OK")
                                         final_link = driver.current_url
                                         masked_email = email[:3] + "***" + email[email.find("@"):] if "@" in email else email[:3] + "***"
-                                        msg = f"🎉 Đăng ký thành công!\nEmail: {masked_email}\nLink thanh toán NicePay:\n{final_link}"
-                                        send_telegram_message(msg)
-                                        masa_token = get_db_setting("MASA_TOKEN", "")
-                                        submit_to_masa_api(final_link, email, masa_token, send_telegram_message, lambda txt, lvl="INFO": log(f"[{email}] {txt}", lvl))
+                                        if payment_mode == "manual":
+                                            # Chỉ gửi link qua Telegram, không gọi Masa168
+                                            log(f"[{email}] Chế độ quét tay — gửi link NicePay qua Telegram.", "OK")
+                                            send_telegram_message(
+                                                f"💳 Link thanh toán NicePay (Quét tay):\nEmail: {masked_email}\n{final_link}"
+                                            )
+                                        else:
+                                            msg = f"🎉 Đăng ký thành công!\nEmail: {masked_email}\nLink thanh toán NicePay:\n{final_link}"
+                                            send_telegram_message(msg)
+                                            masa_token = get_db_setting("MASA_TOKEN", "")
+                                            submit_to_masa_api(final_link, email, masa_token, send_telegram_message, lambda txt, lvl="INFO": log(f"[{email}] {txt}", lvl))
                                     break
                                 
                             time.sleep(1)
@@ -730,7 +737,7 @@ def _set_react_value(driver, element, value):
 
 
 def register_one_account(index, keep_open=False, batch_size=3, headless=False,
-                         browser_type="uc", mail_api_source="mixmmo", use_proxy=False, open_payment=False, apple_pay=False, language="en-US"):
+                         browser_type="uc", mail_api_source="mixmmo", use_proxy=False, open_payment=False, apple_pay=False, language="en-US", payment_mode="masa"):
     global ACTIVE_DRIVERS
     acc = None
     driver = None
@@ -750,7 +757,7 @@ def register_one_account(index, keep_open=False, batch_size=3, headless=False,
         if keep_open or open_payment or apple_pay:
             ACTIVE_DRIVERS[email] = driver
 
-        result = worker_loop(driver, email, password, acc, mail_api_source=mail_api_source, open_payment=open_payment, apple_pay=apple_pay, language=language)
+        result = worker_loop(driver, email, password, acc, mail_api_source=mail_api_source, open_payment=open_payment, apple_pay=apple_pay, language=language, payment_mode=payment_mode)
         if result:
             mark_hotmail_used(acc)
             log(f"[{email}] ✅ Đăng ký Grok thành công!", "OK")

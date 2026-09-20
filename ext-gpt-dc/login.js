@@ -88,34 +88,13 @@
         if (!account || !account.email) return;
         await sleep(1200);
 
-        async function step1_ClickLogin() {
-            try {
-                updateMainStatus('<span style="color:#4a90e2">🔄 Đang tìm nút Log in...</span>');
-                const btn = await waitForElement(
-                    'button[data-mobile-auth-entry-action="login"], a[href*="log-in"], button.wm-app-loginButton'
-                );
-                await sleep(800); btn.click();
-            } catch(e) { console.log('[AutoLogin] Không tìm thấy Log in btn:', e.message); }
-        }
-
-        async function step2_EnterEmail() {
-            try {
-                updateMainStatus('<span style="color:#4a90e2">🔄 Đang nhập email...</span>');
-                const input = await waitForElement(
-                    '#mobile-auth-email, input[type="email"], input[autocomplete="email"], input[name="username"], input[name="login_hint"]'
-                );
-                await sleep(600);
-                await simulateTyping(input, account.email);
-                updateMainStatus('<span style="color:#4a90e2">🔄 Đã nhập email, đang click...</span>');
-                await sleep(400);
-                // Ưu tiên nút submit bên trong form email, tránh click nhầm nút Dismiss của bottom sheet
-                const btn = document.querySelector(
-                    'form[data-auth-provider="email"] button[type="submit"],' +
-                    'button._X60mza_emailButton,' +
-                    'button[data-dd-action-name="Continue"]'
-                );
-                if (btn) btn.click();
-            } catch(e) { console.log('[AutoLogin] Lỗi nhập email:', e.message); }
+        // Bỏ qua modal hoàn toàn — đá thẳng qua URL direct login với email
+        async function step1_DirectLogin() {
+            updateMainStatus('<span style="color:#4a90e2">🔄 Đang chuyển thẳng sang trang login...</span>');
+            const encodedEmail = encodeURIComponent(account.email);
+            const loginUrl = `https://chatgpt.com/auth/login_with?callback_path=%2F&screen_hint=login_or_signup&login_hint=${encodedEmail}`;
+            await sleep(500);
+            window.location.href = loginUrl;
         }
 
         async function step3_EnterPassword() {
@@ -158,19 +137,14 @@
         }
 
         if (hostname === 'chatgpt.com') {
+            // Nếu đã login rồi thì không làm gì
             if (document.querySelector('[data-testid="profile-button"]')) return;
-            const emailInput = document.querySelector('input[type="email"], input[autocomplete="email"]');
-            if (emailInput) {
-                await step2_EnterEmail();
-            } else {
-                await step1_ClickLogin();
-                await sleep(1500);
-                await step2_EnterEmail();
-            }
+            // Đá thẳng qua URL login với email — bỏ qua modal hoàn toàn
+            await step1_DirectLogin();
         } else if (hostname === 'auth.openai.com') {
-            if (pathname.includes('/log-in/password'))              await step3_EnterPassword();
-            else if (pathname.includes('/mfa-challenge'))           await step4_Enter2FA();
-            else if (pathname.includes('/log-in'))                  await step2_EnterEmail();
+            if (pathname.includes('/log-in/password'))  await step3_EnterPassword();
+            else if (pathname.includes('/mfa-challenge')) await step4_Enter2FA();
+            else if (pathname.includes('/log-in'))       await step3_EnterPassword(); // fallback thử nhập pass
         }
     }
 

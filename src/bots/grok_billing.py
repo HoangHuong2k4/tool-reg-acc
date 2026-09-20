@@ -333,12 +333,41 @@ def worker_loop(driver, email, password, index, card_data=None):
                     
             return True
         else:
-            log(f"[{email}] Không lấy được URL: {result}", "ERR")
+            # Không lấy được billing URL (tài khoản không có thẻ / chưa có subscription)
+            # → KHÔNG đóng browser, chờ người dùng can thiệp thủ công
+            masked_email = email[:3] + "***" + email[email.find("@"):] if "@" in email else email[:3] + "***"
+            log(f"[{email}] Không lấy được billing URL (result={result}). Giữ browser để xử lý tay...", "WARN")
+            
+            # Thử mở trang billing portal trực tiếp để user có thể thao tác
+            try:
+                driver.get("https://grok.com/billing")
+                log(f"[{email}] Đã mở trang billing grok.com/billing để xử lý tay.", "INFO")
+                current_url = driver.current_url
+            except Exception:
+                current_url = driver.current_url if driver else "N/A"
+
+            send_telegram_message(
+                f"⚠️ Không lấy được link Billing!\n"
+                f"Email: {masked_email}\n"
+                f"API trả về: {result}\n"
+                f"Trình duyệt đang mở: {current_url}\n"
+                f"👉 Hãy can thiệp thủ công, trình duyệt sẽ đóng sau 10 phút."
+            )
+            
+            # Chờ tối đa 10 phút để user làm tay (check stop event mỗi 5s)
+            log(f"[{email}] ⏳ Đang chờ 10 phút để xử lý tay... (hoặc nhấn Stop để kết thúc sớm)", "WARN")
+            for _ in range(120):  # 120 * 5s = 600s = 10 phút
+                if GLOBAL_STOP_EVENT and GLOBAL_STOP_EVENT.is_set():
+                    break
+                time.sleep(5)
+            
+            log(f"[{email}] Hết thời gian chờ thủ công. Tiếp tục...", "INFO")
             return False
             
     except Exception as e:
         log(f"[{email}] Lỗi trong quá trình: {str(e)}", "ERR")
         return False
+
 
 def process_account_single(index, batch_size=3, headless=False):
     if GLOBAL_STOP_EVENT and GLOBAL_STOP_EVENT.is_set(): return False

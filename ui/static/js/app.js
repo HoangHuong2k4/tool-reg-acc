@@ -1951,6 +1951,7 @@ let grkLanguage = 'ko-KR';
 let grkHeadless = false;
 let grkOpenPayment = true;
 let grkApplePay = false;
+let grkPaymentMode = 'masa'; // 'masa' = Masa168 tự động | 'manual' = quét tay qua Telegram
 let grkSessionMode = 'session';
 let grkFilter = 'ALL';
 let grkTotal = 0, grkOk = 0, grkFail = 0;
@@ -2015,6 +2016,9 @@ function grkToggleOpenPayment() {
   }
   const tog = document.getElementById('grk-openPaymentToggle');
   if(tog) tog.classList.toggle('active', grkOpenPayment);
+  // Hiện/ẩn panel chế độ thanh toán
+  const modeGroup = document.getElementById('grk-paymentModeGroup');
+  if(modeGroup) modeGroup.style.display = grkOpenPayment ? '' : 'none';
 }
 
 function grkToggleApplePay() {
@@ -2022,9 +2026,20 @@ function grkToggleApplePay() {
   if(grkApplePay) {
     grkOpenPayment = false;
     document.getElementById('grk-openPaymentToggle')?.classList.remove('active');
+    document.getElementById('grk-paymentModeGroup').style.display = 'none';
   }
   const tog = document.getElementById('grk-applePayToggle');
   if(tog) tog.classList.toggle('active', grkApplePay);
+}
+
+function grkSetPaymentMode(mode) {
+  grkPaymentMode = mode;
+  document.getElementById('grk-payModeMasa')?.classList.toggle('active', mode === 'masa');
+  document.getElementById('grk-payModeManual')?.classList.toggle('active', mode === 'manual');
+  const hint = document.getElementById('grk-payModeHint');
+  if(hint) hint.textContent = mode === 'masa'
+    ? 'Link NicePay sẽ được gửi lên Masa168 để quét tự động'
+    : 'Link NicePay sẽ được gửi qua Telegram — không gọi API Masa168';
 }
 
 async function grkLoadHotmailCount() {
@@ -2134,7 +2149,7 @@ async function grkStartTask() {
     const r = await fetch('/api/grok/task/start', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ count, threads, mail_type: grkMailType, mail_api_source: grkApiSource, browser_type: grkBrowserType, headless: grkHeadless, open_payment: grkOpenPayment, apple_pay: grkApplePay, language: grkLanguage, cards })
+      body: JSON.stringify({ count, threads, mail_type: grkMailType, mail_api_source: grkApiSource, browser_type: grkBrowserType, headless: grkHeadless, open_payment: grkOpenPayment, apple_pay: grkApplePay, language: grkLanguage, cards, payment_mode: grkPaymentMode })
     });
     const d = await r.json();
     if (!d.success) { showToast('❌', d.error || 'Lỗi khởi động'); return; }
