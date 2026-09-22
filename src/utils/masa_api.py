@@ -76,8 +76,8 @@ def start_masa_poller(masa_token, send_telegram_func):
                                     
                                     # Kích hoạt đổi thẻ tự động trên trình duyệt đang mở
                                     try:
-                                        info["log_func"](f"⚡ Tự động lấy thẻ và chuyển sang Stripe Billing Portal...", "INFO")
-                                        requests.post("http://127.0.0.1:5050/api/grok/billing/active_tab", json={"email": info['email']}, timeout=5)
+                                        info["log_func"](f"⚡ Tự động đổi thẻ Stripe...", "INFO")
+                                        requests.post("http://127.0.0.1:5050/api/grok/change_card", json={"email": info['email']}, timeout=5)
                                     except Exception as ex:
                                         info["log_func"](f"⚠️ Lỗi kích hoạt đổi thẻ tự động: {str(ex)}", "WARN")
                                         

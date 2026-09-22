@@ -65,7 +65,7 @@ copyBtn.onclick = () => {
 // ---- Parse raw line ----
 function parse(raw) {
     if (!raw) return null;
-    const parts = raw.split(/\t+|\s{2,}/);
+    const parts = raw.split(/\t+|\s{2,}|\|/);
     if (parts.length < 2 || !parts[0].includes('@')) return null;
     return {
         email:       parts[0].trim(),

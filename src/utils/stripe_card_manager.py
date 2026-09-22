@@ -34,40 +34,20 @@ def _build_proxies(proxy_str=None):
     Tự phát hiện SOCKS5 khi port là 1080/1081.
     Trả về None nếu không có proxy.
     """
-    if proxy_str is None:
-        host = _get_db_setting("LAST_PROXY_HOST", "")
-        port = _get_db_setting("LAST_PROXY_PORT", "")
-        user = _get_db_setting("LAST_PROXY_USER", "")
-        pwd  = _get_db_setting("LAST_PROXY_PASS", "")
-        if host and port:
-            # Phân biệt SOCKS5 (port 1080/1081) và HTTP
-            port_int = int(port) if str(port).isdigit() else 0
-            scheme = "socks5" if port_int in (1080, 1081) else "http"
-            if user and pwd:
-                proxy_str = f"{scheme}://{user}:{pwd}@{host}:{port}"
-            else:
-                proxy_str = f"{scheme}://{host}:{port}"
-    proxy_str = (proxy_str or "").strip()
-    if not proxy_str:
-        return None
-    # Nếu không có scheme thì mặc định http
-    if not proxy_str.startswith(("http", "socks")):
-        proxy_str = "http://" + proxy_str
-    # Kiểm tra thêm nếu chưa có scheme đúng với port 1080
-    if ":1080" in proxy_str and proxy_str.startswith("http://"):
-        proxy_str = proxy_str.replace("http://", "socks5://", 1)
-    if ":1081" in proxy_str and proxy_str.startswith("http://"):
-        proxy_str = proxy_str.replace("http://", "socks5://", 1)
-    return {"http": proxy_str, "https": proxy_str}
+    # Tắt proxy theo yêu cầu:
+    return None
 
 
 
 class CardManager:
-    def __init__(self, file_path=CARDS_FILE):
-        self.file_path = file_path
+    def __init__(self, file_path=CARDS_FILE, card_file=None):
+        self.file_path = card_file if card_file is not None else file_path
         self.cards = []
         self.failed_cards = set()
         self.load_cards()
+
+    def count(self):
+        return len(self.cards)
 
     def load_cards(self):
         if not os.path.exists(self.file_path):
@@ -165,11 +145,19 @@ def get_stripe_portal_link(driver, log_func=print, timeout=30):
         return None
 
 
+import threading
+STRIPE_API_LOCK = threading.Lock()
+
 def add_card_to_stripe(stripe_link, card, log_func=print, proxy=None):
     """
     Thêm thẻ mới vào tài khoản qua Stripe Billing Portal API, gán làm mặc định và gỡ thẻ cũ.
+    Dùng STRIPE_API_LOCK để đảm bảo tại 1 thời điểm chỉ có 1 luồng được đổi thẻ, chống spam API Stripe từ 1 Proxy.
     proxy: chuỗi proxy (vd: http://user:pass@host:port). None = đọc từ DB key VN_PROXY.
     """
+    with STRIPE_API_LOCK:
+        return _add_card_to_stripe_internal(stripe_link, card, log_func, proxy)
+
+def _add_card_to_stripe_internal(stripe_link, card, log_func=print, proxy=None):
     proxies = _build_proxies(proxy)
     if proxies:
         log_func(f"-> Dùng proxy VN: {list(proxies.values())[0].split('@')[-1]}", "INFO")
@@ -196,14 +184,21 @@ def add_card_to_stripe(stripe_link, card, log_func=print, proxy=None):
             log_func("❌ Không tìm thấy token Stripe trong HTML! Link có thể đã hết hạn.", "ERR")
             return False, "Token missing in Stripe HTML"
 
+        UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
         portal_headers = {
             "Authorization": f"Bearer {ek_live}",
             "Stripe-Version": STRIPE_VERSION,
-            "Accept": "application/json"
+            "Accept": "application/json",
+            "User-Agent": UA,
+            "Origin": "https://billing.stripe.com",
+            "Referer": "https://billing.stripe.com/"
         }
         api_headers = {
             "Authorization": f"Bearer {pk_live}",
-            "Accept": "application/json"
+            "Accept": "application/json",
+            "User-Agent": UA,
+            "Origin": "https://billing.stripe.com",
+            "Referer": "https://billing.stripe.com/"
         }
 
         # 2. Lấy Subscription ID
@@ -278,6 +273,11 @@ def add_card_to_stripe(stripe_link, card, log_func=print, proxy=None):
             err_msg = confirm_data['error'].get('message', 'Unknown error')
             log_func(f"⚠️ Lỗi confirm Setup Intent: {err_msg}", "WARN")
             return False, f"Card declined: {err_msg}"
+            
+        status = confirm_data.get("status")
+        if status and status not in ["succeeded", "processing"]:
+            log_func(f"⚠️ Thẻ yêu cầu xác thực thêm hoặc bị từ chối ngầm (status: {status})", "WARN")
+            return False, f"Card requires action or declined: {status}"
 
         # 6. Gán thẻ mới làm mặc định cho Subscription
         log_func("-> Đang gán thẻ mới làm mặc định...", "INFO")
@@ -308,4 +308,68 @@ def add_card_to_stripe(stripe_link, card, log_func=print, proxy=None):
 
     except Exception as e:
         log_func(f"❌ Ngoại lệ khi đổi thẻ: {e}", "ERR")
+        return False, str(e)
+
+
+GROK_UPGRADED_FILE = "data/grok_upgraded.txt"
+
+
+def save_upgraded_account(email, password="grokai123", card_info="", kakao_url="", file_path=GROK_UPGRADED_FILE):
+    """Lưu tài khoản đã nâng cấp gói (Kakao) & đổi thẻ Stripe thành công vào file txt."""
+    try:
+        os.makedirs(os.path.dirname(os.path.abspath(file_path)), exist_ok=True)
+        line = f"{email}|{password}\n"
+        with open(file_path, "a", encoding="utf-8") as f:
+            f.write(line)
+        return True
+    except Exception as e:
+        print(f"Lỗi ghi {file_path}: {e}")
+        return False
+
+
+def change_card_for_driver(driver, card_manager=None, index=0, log_func=print):
+    """
+    Tiến hành đổi thẻ Stripe trực tiếp trên 1 driver browser cụ thể (dành cho luồng tự động 1 mạch).
+    """
+    try:
+        if card_manager is None:
+            card_manager = CardManager()
+
+        if not card_manager.cards:
+            log_func("❌ Không tìm thấy thẻ hợp lệ trong data/cards.txt!", "ERR")
+            return False, "No cards in data/cards.txt"
+
+        card = card_manager.get_card(index)
+        if not card:
+            log_func("❌ Không có thẻ khả dụng để đổi!", "ERR")
+            return False, "No available card"
+
+        log_func("💳 Đang kết nối tới Grok để lấy link Stripe Billing Portal...", "INFO")
+        stripe_link = get_stripe_portal_link(driver, log_func=log_func)
+        if not stripe_link:
+            log_func("❌ Không lấy được link Stripe Portal!", "ERR")
+            return False, "Failed to get Stripe portal link"
+
+        card_masked = f"{card['number'][:4]}...{card['number'][-4:]}"
+        log_func(f"💳 Đã lấy link Portal! Bắt đầu gán thẻ {card_masked}...", "INFO")
+        ok, msg = add_card_to_stripe(stripe_link, card, log_func=log_func)
+        if ok:
+            driver._last_card = card_masked
+            log_func(f"🎉 TỰ ĐỘNG ĐỔI THẺ STRIPE THÀNH CÔNG! (Thẻ {card_masked})", "OK")
+            drv_email = getattr(driver, "_email", None)
+            drv_pass = getattr(driver, "_password", "grokai123")
+            drv_kakao = getattr(driver, "_kakao_url", "")
+            if drv_email:
+                save_upgraded_account(drv_email, drv_pass, card_info=card_masked, kakao_url=drv_kakao)
+                log_func(f"[{drv_email}] 💾 Đã lưu tài khoản nâng cấp + đổi thẻ vào data/grok_upgraded.txt", "OK")
+            try:
+                driver.get(stripe_link)
+            except:
+                pass
+            return True, msg
+        else:
+            log_func(f"❌ Đổi thẻ Stripe thất bại: {msg}", "ERR")
+            return False, msg
+    except Exception as e:
+        log_func(f"❌ Ngoại lệ khi đổi thẻ driver: {e}", "ERR")
         return False, str(e)

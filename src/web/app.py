@@ -1888,6 +1888,121 @@ def grok_billing_upload():
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
 
+# === Card Management ===
+GROK_CARDS_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "cards.txt"))
+
+def _get_grok_active_drivers():
+    """Lấy danh sách tất cả driver đang mở từ tất cả module grok."""
+    drivers = []
+    modules_to_check = []
+    if state_grok.module:
+        modules_to_check.append(state_grok.module)
+    for mod_name in ["src.bots.grok_hotmail", "src.bots.grok_domain"]:
+        if mod_name in sys.modules and sys.modules[mod_name] not in modules_to_check:
+            modules_to_check.append(sys.modules[mod_name])
+    for mod in modules_to_check:
+        if hasattr(mod, "ACTIVE_DRIVERS"):
+            active = mod.ACTIVE_DRIVERS
+            items = list(active.values()) if isinstance(active, dict) else list(active)
+            for d in items:
+                try:
+                    _ = d.window_handles  # Check còn sống không
+                    if d not in drivers:
+                        drivers.append(d)
+                except Exception:
+                    pass
+    return drivers
+
+@app.route("/api/grok/cards/count")
+def grok_cards_count():
+    from src.utils.stripe_card_manager import CardManager
+    mgr = CardManager(card_file=GROK_CARDS_FILE)
+    return jsonify({"count": mgr.count(), "cards": [c["raw"] for c in mgr.cards]})
+
+@app.route("/api/grok/cards/upload", methods=["POST"])
+def grok_cards_upload():
+    f = request.files.get("file")
+    text = request.form.get("text", "")
+    os.makedirs(os.path.dirname(GROK_CARDS_FILE), exist_ok=True)
+    if f:
+        f.save(GROK_CARDS_FILE)
+    elif text:
+        with open(GROK_CARDS_FILE, "w", encoding="utf-8") as out:
+            out.write(text.strip() + "\n")
+    else:
+        return jsonify({"success": False, "error": "Không có dữ liệu thẻ!"})
+    from src.utils.stripe_card_manager import CardManager
+    mgr = CardManager(card_file=GROK_CARDS_FILE)
+    return jsonify({"success": True, "count": mgr.count()})
+
+@app.route("/api/grok/change_card", methods=["POST"])
+def grok_change_card():
+    from src.utils.stripe_card_manager import CardManager
+    card_mgr = CardManager(card_file=GROK_CARDS_FILE)
+    if card_mgr.count() == 0:
+        state_grok.log("❌ File data/cards.txt trống hoặc không có thẻ hợp lệ!", "ERR")
+        return jsonify({"success": False, "error": "Chưa có thẻ trong data/cards.txt!"})
+
+    drivers = _get_grok_active_drivers()
+    if not drivers:
+        state_grok.log("⚠️ Không có trình duyệt Grok nào đang mở để đổi thẻ!", "WARN")
+        return jsonify({"success": False, "error": "Không có trình duyệt nào đang mở!"})
+
+    state_grok.log(f"💳 Bắt đầu ĐỔI THẺ STRIPE cho {len(drivers)} trình duyệt đang mở...", "INFO")
+
+    def _async_change_card_task(drvs, mgr):
+        from src.utils.stripe_card_manager import change_card_for_driver, save_upgraded_account
+        success_count = 0
+        fail_count = 0
+
+        def do_change(idx, drv):
+            nonlocal success_count, fail_count
+            try:
+                drv_email = getattr(drv, "_email", None)
+                drv_pass = getattr(drv, "_password", "grokai123")
+                drv_kakao = getattr(drv, "_kakao_url", "")
+                tag = drv_email if drv_email else f"Tab {idx+1}"
+
+                ok, msg = change_card_for_driver(drv, card_manager=mgr, index=idx, log_func=state_grok.log)
+                if ok:
+                    success_count += 1
+                    card_masked = getattr(drv, "_last_card", "")
+                    if drv_email:
+                        save_upgraded_account(drv_email, drv_pass, card_info=card_masked, kakao_url=drv_kakao)
+                        try:
+                            with get_db() as conn:
+                                cursor = conn.cursor()
+                                cursor.execute("UPDATE accounts SET uid='trial_card' WHERE app='grok' AND email=?", (drv_email,))
+                                conn.commit()
+                        except Exception:
+                            pass
+                    state_grok.log(f"[{tag}] 🎯 Đổi thẻ thành công! Đã lưu vào data/grok_upgraded.txt", "OK")
+                else:
+                    fail_count += 1
+                    state_grok.log(f"[{tag}] ❌ Đổi thẻ thất bại: {msg}", "ERR")
+            except Exception as ex:
+                fail_count += 1
+                state_grok.log(f"[Tab {idx+1}] Lỗi đổi thẻ: {ex}", "ERR")
+
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max(len(drvs), 1)) as ex:
+            futures = [ex.submit(do_change, i, d) for i, d in enumerate(drvs)]
+            concurrent.futures.wait(futures)
+
+        state_grok.log(
+            f"🎉 Hoàn tất đổi thẻ: {success_count} thành công / {fail_count} thất bại. "
+            f"(Danh sách đã lưu tại data/grok_upgraded.txt)",
+            "OK" if success_count > 0 else "WARN"
+        )
+
+    threading.Thread(
+        target=_async_change_card_task,
+        args=(drivers, card_mgr),
+        daemon=True
+    ).start()
+
+    return jsonify({"success": True, "count": len(drivers)})
+
 @app.route("/api/grok/billing/active_tab", methods=["POST"])
 def grok_billing_active_tab():
     try:

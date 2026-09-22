@@ -17,6 +17,30 @@ ACTIVE_DRIVERS = []
 DRIVER_LOCK = threading.Lock()
 ACCOUNTS_QUEUE = queue.Queue()
 CARDS_LIST = []
+CARDS_LOCK = threading.Lock()   # Lock bảo vệ CARDS_LIST và CARDS_IN_USE
+CARDS_IN_USE = set()            # Set thẻ đang được 1 worker sử dụng
+
+def acquire_card():
+    """Lấy 1 thẻ chưa ai dùng, đánh dấu là đang sử dụng. Trả về cẫu str thẻ hoặc None."""
+    import random
+    with CARDS_LOCK:
+        available = [c for c in CARDS_LIST if c not in CARDS_IN_USE]
+        if not available:
+            # Fallback: nếu hết thẻ trống thì dùng bất kỳ (tránh block hoàn toàn)
+            available = list(CARDS_LIST)
+        if not available:
+            return None
+        card = random.choice(available)
+        CARDS_IN_USE.add(card)
+        return card
+
+def release_card(card, remove=False):
+    """Trả thẻ về pool. remove=True thì xóa luôn khỏi CARDS_LIST."""
+    with CARDS_LOCK:
+        CARDS_IN_USE.discard(card)
+        if remove and card in CARDS_LIST:
+            CARDS_LIST.remove(card)
+
 
 def save_account(email, password):
     pass
@@ -302,13 +326,14 @@ def worker_loop(driver, email, password, index, card_data=None):
                             if ok:
                                 log(f"[{email}] Đã đổi thẻ thành công qua API Stripe!", "OK")
                                 send_telegram_message(f"✅ Đổi thẻ thành công!\nEmail: {masked_email}\nĐã đổi thẻ {masked} thành công qua API Stripe.")
+                                release_card(current_card)  # Trả lại thẻ sau khi xông
                                 break
                             else:
                                 log(f"[{email}] Lỗi đổi thẻ API: {err_msg}", "ERR")
                                 
+                                # Xóa thẻ lỗi khỏi pool vĩnh viễn
                                 try:
-                                    if current_card in CARDS_LIST:
-                                        CARDS_LIST.remove(current_card)
+                                    release_card(current_card, remove=True)
                                     import sqlite3
                                     from src.web.app import get_db
                                     with get_db() as conn:
@@ -323,8 +348,12 @@ def worker_loop(driver, email, password, index, card_data=None):
                                     break
                                 else:
                                     log(f"[{email}] Thử lại với thẻ khác...", "INFO")
-                                    import random
-                                    current_card = random.choice(CARDS_LIST)
+                                    # Lấy thẻ mới chưa ai dùng
+                                    current_card = acquire_card()
+                                    if not current_card:
+                                        log(f"[{email}] Hết thẻ khả dụng!", "ERR")
+                                        send_telegram_message(f"❌ Hết thẻ! Email: {masked_email}")
+                                        break
                         else:
                             log(f"[{email}] Định dạng thẻ không hợp lệ: {current_card}", "ERR")
                             break
@@ -384,10 +413,7 @@ def process_account_single(index, batch_size=3, headless=False):
     
     driver = None
     success = False
-    card_data = None
-    if CARDS_LIST:
-        import random
-        card_data = random.choice(CARDS_LIST)
+    card_data = acquire_card()  # Lấy thẻ riêng cho worker này
 
     try:
         driver = setup_driver(index=index, batch_size=batch_size, headless=headless)
@@ -397,6 +423,9 @@ def process_account_single(index, batch_size=3, headless=False):
         log(f"[Worker {index}] Lỗi khởi tạo trình duyệt: {e}", "ERR")
         return False
     finally:
+        # Trả lại thẻ vào pool khi worker xong
+        if card_data:
+            release_card(card_data)
         if driver and not success:
             try:
                 driver.quit()
