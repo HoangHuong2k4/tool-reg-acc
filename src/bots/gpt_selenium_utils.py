@@ -536,7 +536,8 @@ def init_selenium_driver(browser_type, headless, incognito, proxy, thread_id=1, 
         def _ensure_uc_driver_arm64():
             """
             UC 3.5.5 hardcode 'chromedriver-mac-x64' không chạy được trên arm64.
-            Giải pháp: đặt arm64 binary vào đúng vị trí UC expect + ad-hoc codesign.
+            Giải pháp: đặt arm64 binary vào cả hai subdir (arm64 + x64) mà UC expect
+            để symlink được, rồi ad-hoc codesign để macOS chấp nhận.
             """
             import platform as _platform
             import urllib.request
@@ -551,6 +552,9 @@ def init_selenium_driver(browser_type, headless, incognito, proxy, thread_id=1, 
             _uc_bin = os.path.join(_uc_dir, "undetected_chromedriver")
             _arm64_subdir = os.path.join(_uc_dir, "undetected", "chromedriver-mac-arm64")
             _arm64_bin = os.path.join(_arm64_subdir, "chromedriver")
+            # UC 3.5.5 hardcode tìm mac-x64 subdir để symlink — cần đặt arm64 binary vào đây
+            _x64_subdir = os.path.join(_uc_dir, "undetected", "chromedriver-mac-x64")
+            _x64_bin = os.path.join(_x64_subdir, "chromedriver")
 
             # Kiểm tra binary hiện tại có phải arm64 không
             def _is_valid_arm64(path):
@@ -563,8 +567,9 @@ def init_selenium_driver(browser_type, headless, incognito, proxy, thread_id=1, 
                     return False
 
             if _is_valid_arm64(_uc_bin):
-                # Binary OK, chỉ cần codesign lại phòng UC vừa patch
+                # Binary OK, chỉ cần xattr + codesign lại phòng UC vừa patch
                 try:
+                    subprocess.run(["xattr", "-cr", _uc_bin], capture_output=True, check=False)
                     subprocess.run(["codesign", "--force", "--deep", "-s", "-", _uc_bin],
                                    capture_output=True, check=False)
                 except:
@@ -605,25 +610,37 @@ def init_selenium_driver(browser_type, headless, incognito, proxy, thread_id=1, 
             if not _is_valid_arm64(_cache_arm64):
                 return
 
-            # Đặt vào UC cache
+            # Đặt vào UC cache — cả arm64 VÀ x64 subdir (UC 3.5.5 hardcode tìm mac-x64)
             try:
                 os.makedirs(_arm64_subdir, exist_ok=True)
+                os.makedirs(_x64_subdir, exist_ok=True)
                 import shutil
-                shutil.copy2(_cache_arm64, _arm64_bin)
-                shutil.copy2(_cache_arm64, _uc_bin)
-                os.chmod(_arm64_bin, 0o755)
-                os.chmod(_uc_bin, 0o755)
-                # Ad-hoc codesign để macOS chấp nhận binary không signed
-                for _p in [_arm64_bin, _uc_bin]:
-                    subprocess.run(["codesign", "--force", "--deep", "-s", "-", _p],
-                                   capture_output=True, check=False)
+                for _bin in [_arm64_bin, _x64_bin, _uc_bin]:
+                    shutil.copy2(_cache_arm64, _bin)
+                    os.chmod(_bin, 0o755)
+                # Ad-hoc codesign + xattr để macOS chấp nhận binary không signed
+                for _p in [_arm64_bin, _x64_bin, _uc_bin]:
                     subprocess.run(["xattr", "-cr", _p],
+                                   capture_output=True, check=False)
+                    subprocess.run(["codesign", "--force", "--deep", "-s", "-", _p],
                                    capture_output=True, check=False)
                 logger.info(f"[UC-ARM64] Đã cài arm64 chromedriver vào UC cache: {_uc_bin}")
             except Exception as _cp_err:
                 logger.warning(f"[UC-ARM64] Lỗi cài vào UC cache: {_cp_err}")
 
+
         _ensure_uc_driver_arm64()
+
+        # Lấy đường dẫn arm64 binary đã chuẩn bị (bypass UC tự download/patch)
+        def _get_arm64_driver_path():
+            """Trả về đường dẫn chromedriver arm64 đã codesign, hoặc None."""
+            import platform as _platform
+            if sys.platform != "darwin" or _platform.machine() != "arm64":
+                return None
+            _p = os.path.expanduser(
+                "~/Library/Application Support/undetected_chromedriver/undetected_chromedriver"
+            )
+            return _p if (os.path.exists(_p) and os.path.getsize(_p) > 1_000_000) else None
 
         # --- Khởi tạo UC Chrome với version_main ---
         def _make_fallback_options():
@@ -635,8 +652,18 @@ def init_selenium_driver(browser_type, headless, incognito, proxy, thread_id=1, 
                 _opts.binary_location = chrome_options.binary_location
             return _opts
 
+        _arm64_driver = _get_arm64_driver_path()
+
         try:
-            if version_main:
+            if _arm64_driver:
+                # Dùng driver_executable_path để UC không tự download/patch lại binary
+                driver = uc.Chrome(
+                    driver_executable_path=_arm64_driver,
+                    options=chrome_options,
+                    headless=headless,
+                    version_main=version_main,
+                )
+            elif version_main:
                 driver = uc.Chrome(options=chrome_options, headless=headless, version_main=version_main)
             else:
                 driver = uc.Chrome(options=chrome_options, headless=headless)
@@ -646,23 +673,42 @@ def init_selenium_driver(browser_type, headless, incognito, proxy, thread_id=1, 
                     "~/Library/Application Support/undetected_chromedriver/undetected_chromedriver"
                 )
                 if os.path.exists(_uc_bin_path):
+                    subprocess.run(["xattr", "-cr", _uc_bin_path],
+                                   capture_output=True, check=False)
                     subprocess.run(["codesign", "--force", "--deep", "-s", "-", _uc_bin_path],
                                    capture_output=True, check=False)
         except Exception as e:
             logger.warning(f"[UC] Lần 1 thất bại: {e}. Thử lại sau khi codesign...")
-            # Thử codesign lại UC binary rồi chạy lại
+            # Thử xattr + codesign lại UC binary rồi chạy lại
             _uc_bin_path = os.path.expanduser(
                 "~/Library/Application Support/undetected_chromedriver/undetected_chromedriver"
             )
             if os.path.exists(_uc_bin_path):
+                subprocess.run(["xattr", "-cr", _uc_bin_path],
+                               capture_output=True, check=False)
                 subprocess.run(["codesign", "--force", "--deep", "-s", "-", _uc_bin_path],
                                capture_output=True, check=False)
             try:
-                if version_main:
+                # Ngăn UC ghi đè lại file đã patch (gây hỏng codesign trên mac ARM64)
+                original_patch = uc.Patcher.patch
+                uc.Patcher.patch = lambda self: True
+                
+                if _arm64_driver and os.path.exists(_arm64_driver):
+                    driver = uc.Chrome(
+                        driver_executable_path=_arm64_driver,
+                        options=_make_fallback_options(),
+                        headless=headless,
+                        version_main=version_main,
+                    )
+                elif version_main:
                     driver = uc.Chrome(options=_make_fallback_options(), headless=headless, version_main=version_main)
                 else:
                     driver = uc.Chrome(options=_make_fallback_options(), headless=headless)
+                
+                uc.Patcher.patch = original_patch
             except Exception as e2:
+                # Đảm bảo trả lại hàm gốc nếu lỗi
+                uc.Patcher.patch = original_patch
                 logger.warning(f"Không khởi động được chromedriver: {e2}. Thử webdriver-manager...")
                 from webdriver_manager.chrome import ChromeDriverManager
                 driver = uc.Chrome(driver_executable_path=ChromeDriverManager().install(), options=_make_fallback_options(), headless=headless)

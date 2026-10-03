@@ -208,7 +208,13 @@ def mac_clear_system_proxy():
 
 # ── Cấu hình ────────────────────────────────────────────────────────
 BASE_URL    = "https://regmail.phh.info.vn"
-API_KEY     = "1dec9d51e8707e9bf1fa7756612830c676f65a42a1009851580ec0a82384abd8"
+API_KEY     = "rm_36414c094209fea1370de45ec4e48c30783e896ceba0c1659bbba6f82590613c"
+
+# ── mailtemp.vn (TMail Public API) ────────────────────────────────────────
+MAILTEMP_BASE_URL = "https://mailtemp.vn"
+
+# Nguồn mail domain: 'phhinfi' (mặc định) hoặc 'mailtemp'
+MAIL_DOMAIN_SOURCE = "phhinfi"
 
 CAPCUT_URL  = "https://www.capcut.com/vi-vn/signup"
 OUTPUT_FILE = "accounts.txt"
@@ -235,26 +241,192 @@ def log(msg, level="INFO"):
     icon  = {"OK": "✅", "WARN": "⚠️ ", "ERR": "❌", "INFO": "📌"}.get(level, "📌")
     print(f"{color}[{now}] {icon} {msg}{C.RST}")
 
-def create_random_email():
+# ── PHH.INFI functions ────────────────────────────────────────────────
+def _create_email_phhinfi():
     resp = requests.post(f"{BASE_URL}/api/emails/create", headers=API_HEADERS, proxies={"http": None, "https": None}, timeout=10)
     data = resp.json()
     if data.get("success") and data.get("email"):
-        log(f"Đã tạo email: {C.BOLD}{data['email']}{C.RST}", "OK")
+        log(f"[PHH] Đã tạo email: {C.BOLD}{data['email']}{C.RST}", "OK")
         return data["email"]
-    raise Exception(f"Không tạo được email: {data}")
+    raise Exception(f"[PHH] Không tạo được email: {data}")
 
-def get_latest_email(email_address):
+def _get_latest_email_phhinfi(email_address):
     resp = requests.get(f"{BASE_URL}/api/emails/latest", headers=API_HEADERS, params={"email": email_address}, proxies={"http": None, "https": None}, timeout=10)
     data = resp.json()
     if data.get("success") and data.get("email"):
         return data["email"]
     return None
 
+def _delete_mailbox_phhinfi(email_address):
+    try:
+        requests.delete(f"{BASE_URL}/api/emails/address/{email_address}", headers=API_HEADERS, proxies={"http": None, "https": None}, timeout=10)
+        log(f"[PHH] Đã dọn hòm thư: {email_address}", "OK")
+    except Exception as e:
+        log(f"[PHH] Lỗi xóa mail: {e}", "WARN")
+
+# ── MAILTEMP.VN (Public API - không cần API key) ─────────────────────
+# Lưu thông tin mailbox: {email: {"id": ..., "password": ..., "session_cookie": ...}}
+_mailtemp_mailbox_cache = {}
+
+# Callback để lưu vào DB (được inject từ app.py)
+save_mailtemp_to_db = None  # Signature: (email, mailbox_id, password, session_cookie) -> None
+
+def _create_email_mailtemp():
+    """Tạo mailbox random qua mailtemp.vn Public API — dùng Session để giữ cookie"""
+    import string
+    pw = ''.join(random.choices(string.ascii_letters + string.digits, k=10))
+    # Dùng Session để cookie tmail_mailbox_session được giữ lại
+    sess = requests.Session()
+    resp = sess.post(
+        f"{MAILTEMP_BASE_URL}/api/public/mailboxes/random",
+        json={"password": pw},
+        proxies={"http": None, "https": None},
+        timeout=10
+    )
+    data = resp.json()
+    mailbox = data.get("mailbox") or {}
+    email = mailbox.get("address")
+    mailbox_id = mailbox.get("id")
+    actual_pw = data.get("password") or pw
+    # Lấy session cookie để dùng lại khi poll messages
+    session_cookie = sess.cookies.get("tmail_mailbox_session", "")
+    if email and mailbox_id:
+        _mailtemp_mailbox_cache[email] = {
+            "id": mailbox_id,
+            "password": actual_pw,
+            "session_cookie": session_cookie,
+            "session": sess  # Giữ session object trong bộ nhớ
+        }
+        log(f"[MailTemp] Đã tạo email: {C.BOLD}{email}{C.RST}", "OK")
+        # Lưu vào DB nếu có callback
+        if save_mailtemp_to_db:
+            try:
+                save_mailtemp_to_db(email, mailbox_id, actual_pw, session_cookie)
+            except Exception as e:
+                log(f"[MailTemp] Không lưu được vào DB: {e}", "WARN")
+        return email
+    raise Exception(f"[MailTemp] Không tạo được email: {data}")
+
+def _get_messages_mailtemp(email_address):
+    """Lấy danh sách messages — dùng session cookie của mailbox"""
+    info = _mailtemp_mailbox_cache.get(email_address)
+    if not info:
+        return []
+    mailbox_id = info["id"]
+    # Ưu tiên dùng session object (trong bộ nhớ)
+    sess = info.get("session")
+    session_cookie = info.get("session_cookie", "")
+    try:
+        if sess:
+            r = sess.get(
+                f"{MAILTEMP_BASE_URL}/api/public/messages",
+                params={"mailboxId": mailbox_id},
+                proxies={"http": None, "https": None},
+                timeout=10
+            )
+        elif session_cookie:
+            # Fallback: tạo lại request với cookie
+            r = requests.get(
+                f"{MAILTEMP_BASE_URL}/api/public/messages",
+                params={"mailboxId": mailbox_id},
+                cookies={"tmail_mailbox_session": session_cookie},
+                proxies={"http": None, "https": None},
+                timeout=10
+            )
+        else:
+            return []
+        if r.status_code == 200:
+            data = r.json()
+            if isinstance(data, list):
+                return data
+            return data.get("messages") or data.get("data") or []
+        else:
+            log(f"[MailTemp] GET messages {r.status_code}: {r.text[:100]}", "WARN")
+    except Exception as e:
+        log(f"[MailTemp] Lỗi lấy messages: {e}", "WARN")
+    return []
+
+def _extract_otp_from_text(text):
+    """Trích xuất OTP từ nội dung email"""
+    m = re.search(r'\b(\d{6})\b', text)
+    if m:
+        return m.group(1)
+    m = re.search(r'\b([A-Za-z0-9]{3}-[A-Za-z0-9]{3})\b', text)
+    if m:
+        return m.group(1)
+    m = re.search(r'\b(\d{4,8})\b', text)
+    if m:
+        return m.group(1)
+    return None
+
+def _get_otp_mailtemp(email_address, timeout=120, interval=4):
+    """Chờ và lấy OTP từ mailtemp.vn qua Public API"""
+    log(f"[MailTemp] Đang chờ OTP cho {email_address} (tối đa {timeout}s)...", "INFO")
+    elapsed = 0
+    seen_ids = set()
+    while elapsed < timeout:
+        try:
+            messages = _get_messages_mailtemp(email_address)
+            for msg in messages:
+                msg_id = msg.get("id") or msg.get("_id") or ""
+                if msg_id in seen_ids:
+                    continue
+                seen_ids.add(msg_id)
+
+                # Ưu tiên 1: primaryCode (mailtemp.vn tự detect)
+                primary = msg.get("primaryCode")
+                if primary:
+                    log(f"[MailTemp] OTP (primaryCode): {C.BOLD}{primary}{C.RST}", "OK")
+                    return str(primary)
+
+                # Ưu tiên 2: detectedCodes array
+                for dc in (msg.get("detectedCodes") or []):
+                    c = dc.get("code")
+                    if c:
+                        log(f"[MailTemp] OTP (detectedCodes): {C.BOLD}{c}{C.RST}", "OK")
+                        return str(c)
+
+                # Fallback: parse subject + html
+                subject = msg.get("subject", "") or ""
+                body = msg.get("html") or msg.get("text") or msg.get("preview") or ""
+                otp = _extract_otp_from_text(subject + " " + str(body))
+                if otp:
+                    log(f"[MailTemp] OTP (parsed): {C.BOLD}{otp}{C.RST}", "OK")
+                    return otp
+
+                log(f"[MailTemp] Email nhưng chưa thấy OTP: {subject[:50]}", "WARN")
+        except Exception as e:
+            log(f"[MailTemp] Lỗi polling OTP: {e}", "WARN")
+        time.sleep(interval)
+        elapsed += interval
+    log("[MailTemp] Hết thời gian chờ OTP!", "ERR")
+    return None
+
+def _delete_mailbox_mailtemp(email_address):
+    """mailtemp.vn tự hết hạn sau TTL - dọn cache local"""
+    _mailtemp_mailbox_cache.pop(email_address, None)
+    log(f"[MailTemp] Mailbox {email_address} sẽ tự hết hạn sau 24h.", "INFO")
+
+# ── Dispatcher functions (điều phối theo MAIL_DOMAIN_SOURCE) ────────
+def create_random_email():
+    if MAIL_DOMAIN_SOURCE == "mailtemp":
+        return _create_email_mailtemp()
+    return _create_email_phhinfi()
+
+def get_latest_email(email_address):
+    if MAIL_DOMAIN_SOURCE == "mailtemp":
+        # Không dùng trực tiếp, wait_for_otp sẽ gọi _get_otp_mailtemp
+        return None
+    return _get_latest_email_phhinfi(email_address)
+
 def wait_for_otp(email_address, timeout=120, interval=4):
-    log(f"Đang chờ OTP cho {email_address} (tối đa {timeout}s)...", "INFO")
+    if MAIL_DOMAIN_SOURCE == "mailtemp":
+        return _get_otp_mailtemp(email_address, timeout=timeout, interval=interval)
+    # PHH.INFI polling
+    log(f"[PHH] Đang chờ OTP cho {email_address} (tối đa {timeout}s)...", "INFO")
     elapsed = 0
     while elapsed < timeout:
-        mail = get_latest_email(email_address)
+        mail = _get_latest_email_phhinfi(email_address)
         if mail:
             otp = mail.get("otp")
             if not otp:
@@ -262,20 +434,18 @@ def wait_for_otp(email_address, timeout=120, interval=4):
                 match = re.search(r'\b(\d{6})\b', subject)
                 if match: otp = match.group(1)
             if otp:
-                log(f"Nhận được OTP: {C.BOLD}{otp}{C.RST}", "OK")
+                log(f"[PHH] Nhận được OTP: {C.BOLD}{otp}{C.RST}", "OK")
                 return otp
-            log("Nhận được email nhưng chưa có OTP, chờ thêm...", "WARN")
+            log("[PHH] Nhận được email nhưng chưa có OTP, chờ thêm...", "WARN")
         time.sleep(interval)
         elapsed += interval
-    log("Hết thời gian chờ OTP!", "ERR")
+    log("[PHH] Hết thời gian chờ OTP!", "ERR")
     return None
 
 def delete_mailbox(email_address):
-    try:
-        requests.delete(f"{BASE_URL}/api/emails/address/{email_address}", headers=API_HEADERS, proxies={"http": None, "https": None}, timeout=10)
-        log(f"Đã dọn hòm thư: {email_address}", "OK")
-    except Exception as e:
-        log(f"Lỗi xóa mail: {e}", "WARN")
+    if MAIL_DOMAIN_SOURCE == "mailtemp":
+        return _delete_mailbox_mailtemp(email_address)
+    return _delete_mailbox_phhinfi(email_address)
 
 def get_settings_from_db():
     import sqlite3
@@ -852,27 +1022,28 @@ def step_skip_role_survey(driver, timeout=10):
     log("Không thấy modal khảo sát vai trò (bỏ qua).", "INFO")
     return False
 
-def step_close_whats_new(driver, timeout=10):
-    """Đóng modal 'What's new' nếu xuất hiện"""
+def step_close_whats_new(driver, timeout=15):
+    """Đóng modal 'What's new' và các popup khác nếu xuất hiện"""
     from selenium.webdriver.common.by import By
-    log("Kiểm tra modal 'What's new'...", "INFO")
+    log("Kiểm tra các popup (What's new/Modal) cần đóng...", "INFO")
     start = time.time()
     while time.time() - start < timeout:
         try:
-            # Kiểm tra modal featuresTab có xuất hiện không
-            modals = driver.find_elements(By.CSS_SELECTOR, '.featuresTab')
-            if modals and any(m.is_displayed() for m in modals):
-                close_btns = driver.find_elements(By.CSS_SELECTOR, '.lv-modal-close-icon')
-                for btn in close_btns:
-                    if btn.is_displayed():
-                        try_click(driver, btn, "Đóng modal What's new")
-                        log("Đã đóng modal 'What's new'!", "OK")
-                        time.sleep(1)
-                        return True
+            # Tìm tất cả các nút đóng modal thay vì chỉ .featuresTab
+            close_btns = driver.find_elements(By.CSS_SELECTOR, '.lv-modal-close-icon, svg.lv-icon-lv-close')
+            clicked = False
+            for btn in close_btns:
+                if btn.is_displayed():
+                    try_click(driver, btn, "Đóng modal popup")
+                    log("Đã đóng một popup!", "OK")
+                    time.sleep(1)
+                    clicked = True
+            if clicked:
+                return True
         except Exception as e:
-            log(f"Lỗi kiểm tra modal What's new: {e}", "WARN")
+            log(f"Lỗi kiểm tra popup: {e}", "WARN")
         time.sleep(1)
-    log("Không thấy modal 'What's new' (bỏ qua).", "INFO")
+    log("Không thấy popup cần đóng (bỏ qua).", "INFO")
     return False
 
 def step_get_payment_link(driver, email, password):
@@ -915,6 +1086,8 @@ def _do_get_payment_link(driver, email, password, attempt=0):
                         d.switch_to.window(orig)
             except: pass
             return None
+
+        has_7day_trial = False
 
         if attempt == 0:
             # Reload lại trang để React mount lại sạch, không bị rác popup
@@ -1024,6 +1197,16 @@ def _do_get_payment_link(driver, email, password, attempt=0):
                 except:
                     pass
 
+                # Check ưu đãi 7 ngày
+                try:
+                    pro_section = driver.find_element(By.CSS_SELECTOR, '.subscriptionProductSection-pro')
+                    if pro_section and pro_section.is_displayed():
+                        pro_text = pro_section.text.lower()
+                        if "7 ngày" in pro_text or "7 day" in pro_text or "7-day" in pro_text or "dùng thử" in pro_text or "trial" in pro_text:
+                            has_7day_trial = True
+                except:
+                    pass
+
                 # Tìm nút thanh toán trong modal
                 action_btns = driver.find_elements(By.CSS_SELECTOR, '.subscriptionProductSection-pro button.subscriptionProductSection-actionDark, button.subscriptionProductSection-actionGradient, button.subscriptionProductSection-actionDark')
                 for btn in action_btns:
@@ -1092,6 +1275,10 @@ def _do_get_payment_link(driver, email, password, attempt=0):
             os.makedirs("data", exist_ok=True)
             with open("data/success_links.txt", "a", encoding="utf-8") as f:
                 f.write(f"{email}\t{password}\t{payment_url}\n")
+            if has_7day_trial:
+                with open("data/trial_7day.txt", "a", encoding="utf-8") as f:
+                    f.write(f"{email}\t{password}\t{payment_url}\n")
+                log(f"🎉 Phát hiện và đã lưu account có TRIAL 7 NGÀY: {email}", "OK")
             return payment_url
 
 

@@ -1182,6 +1182,8 @@ def _do_get_payment_link(driver, email, password, attempt=0):
             except: pass
             return None
 
+        has_7day_trial = False
+
         if attempt == 0:
             # Reload lại trang để React mount lại sạch, không bị rác popup
             log("Reload trang để lấy UI sạch...", "INFO")
@@ -1290,6 +1292,16 @@ def _do_get_payment_link(driver, email, password, attempt=0):
                 except:
                     pass
 
+                # Check ưu đãi 7 ngày
+                try:
+                    pro_section = driver.find_element(By.CSS_SELECTOR, '.subscriptionProductSection-pro')
+                    if pro_section and pro_section.is_displayed():
+                        pro_text = pro_section.text.lower()
+                        if "7 ngày" in pro_text or "7 day" in pro_text or "7-day" in pro_text or "dùng thử" in pro_text or "trial" in pro_text:
+                            has_7day_trial = True
+                except:
+                    pass
+
                 # Tìm nút thanh toán trong modal
                 action_btns = driver.find_elements(By.CSS_SELECTOR, '.subscriptionProductSection-pro button.subscriptionProductSection-actionDark, button.subscriptionProductSection-actionGradient, button.subscriptionProductSection-actionDark')
                 for btn in action_btns:
@@ -1358,6 +1370,10 @@ def _do_get_payment_link(driver, email, password, attempt=0):
             os.makedirs("data", exist_ok=True)
             with open("data/success_links.txt", "a", encoding="utf-8") as f:
                 f.write(f"{email}\t{password}\t{payment_url}\n")
+            if has_7day_trial:
+                with open("data/trial_7day.txt", "a", encoding="utf-8") as f:
+                    f.write(f"{email}\t{password}\t{payment_url}\n")
+                log(f"🎉 Phát hiện và đã lưu account có TRIAL 7 NGÀY: {email}", "OK")
             return payment_url
 
 

@@ -50,7 +50,7 @@ def send_telegram_message(text):
 
 # ── Cấu hình ────────────────────────────────────────────────────────
 BASE_URL = "https://regmail.phh.info.vn"
-API_KEY  = "1dec9d51e8707e9bf1fa7756612830c676f65a42a1009851580ec0a82384abd8"
+API_KEY  = "rm_36414c094209fea1370de45ec4e48c30783e896ceba0c1659bbba6f82590613c"
 GROK_URL = "https://accounts.x.ai/sign-up"
 OUTPUT_FILE = "data/grok_accounts.txt"
 PASSWORD = "grokai123"

@@ -419,7 +419,7 @@ window.onload=()=>{
 };
 
 // ==== CAPCUT ====
-let ccMode=3, ccMailType='hotmail', ccMailApiSource='dongvanfb', ccBrowser=localStorage.getItem('ccBrowser')||'chrome', ccHeadless=(localStorage.getItem('ccHeadless')==='true'), ccIncognito=(localStorage.getItem('ccIncognito')==='true'), ccFilter='ALL', ccLogs=[], ccOk=0, ccFail=0, ccTotal=0;
+let ccMode=3, ccMailType='hotmail', ccMailApiSource='dongvanfb', ccDomainSource='phhinfi', ccBrowser=localStorage.getItem('ccBrowser')||'chrome', ccHeadless=(localStorage.getItem('ccHeadless')==='true'), ccIncognito=(localStorage.getItem('ccIncognito')==='true'), ccFilter='ALL', ccLogs=[], ccOk=0, ccFail=0, ccTotal=0;
 function ccSetMode(m){ccMode=m;[1,2,3,4].forEach(i=>{const el=document.getElementById('cc-mode'+i);if(el)el.classList.toggle('active',m===i);});document.getElementById('cc-joinLinkGroup').style.display=(m===2||m===4)?'block':'none';const isApiMode=m===4;document.getElementById('cc-browserGroup').style.display=isApiMode?'none':'block';document.getElementById('cc-headlessGroup').style.display=isApiMode?'none':'block';}
 function ccSetMailType(m){
   ccMailType=m;
@@ -427,11 +427,23 @@ function ccSetMailType(m){
   document.getElementById('cc-mailDomain').classList.toggle('active',m==='domain');
   document.getElementById('cc-hotmailGroup').style.display=m==='hotmail'?'block':'none';
   if(document.getElementById('cc-apiSourceGroup')) document.getElementById('cc-apiSourceGroup').style.display=m==='hotmail'?'block':'none';
+  // Show/hide domain source selector
+  const domainSourceGroup = document.getElementById('cc-domainSourceGroup');
+  if(domainSourceGroup) domainSourceGroup.style.display=m==='domain'?'block':'none';
   // Ẩn nút API Mode nếu chọn Hotmail (vì API Mode chỉ dùng Mail Domain)
   const mode4Btn = document.getElementById('cc-mode4');
   if(mode4Btn) mode4Btn.style.display = m==='hotmail'?'none':'block';
   // Nếu đang ở mode 4 mà chuyển sang hotmail, reset về mode 1
   if(m==='hotmail' && ccMode===4) ccSetMode(1);
+}
+function ccSetDomainSource(src){
+  ccDomainSource=src;
+  document.getElementById('cc-domainPhhinfi').classList.toggle('active',src==='phhinfi');
+  document.getElementById('cc-domainMailtemp').classList.toggle('active',src==='mailtemp');
+  const infoEl=document.getElementById('cc-mailtempInfo');
+  if(infoEl) infoEl.style.display=src==='mailtemp'?'block':'none';
+  // Show/hide mailtemp section
+  mtShowSection(src==='mailtemp');
 }
 function ccSetApiSource(s){
   ccMailApiSource=s;
@@ -536,7 +548,7 @@ async function ccStartTask(){
   const jl=document.getElementById('cc-joinLink').value.trim();
   if((ccMode===2||ccMode===4) && !jl){showToast('⚠️','Vui lòng nhập Link Join Team!');return;}
   try{
-    const r=await fetch('/api/capcut/task/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:ccMode,count,threads,join_link:jl,mail_type:ccMailType,mail_api_source:ccMailApiSource,browser_type:ccBrowser,headless:ccHeadless,incognito:ccIncognito})});
+    const r=await fetch('/api/capcut/task/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:ccMode,count,threads,join_link:jl,mail_type:ccMailType,mail_api_source:ccMailApiSource,mail_domain_source:ccDomainSource,browser_type:ccBrowser,headless:ccHeadless,incognito:ccIncognito})});
     const d=await r.json();
     if(!d.success){showToast('❌',d.error);return;}
     ccIsRunning=true;ccSetUI(true);ccStartSSE();
@@ -580,6 +592,130 @@ function ccSetUI(running){
   document.getElementById('cc-startBtn').style.display=running?'none':'flex'; document.getElementById('cc-stopBtn').style.display=running?'flex':'none';
   const dot=document.getElementById('cc-statusDot'), txt=document.getElementById('cc-statusText');
   if(running){dot.className='dot running';txt.textContent='Đang chạy...';}else{dot.className='dot';txt.textContent='Idle';}
+}
+
+// ==== MAILTEMP OTP MANAGER ====
+let mtAllMailboxes = [];
+
+function mtShowSection(show) {
+  const sec = document.getElementById('cc-mailtempSection');
+  if(sec) sec.style.display = show ? 'block' : 'none';
+  if(show) mtLoadMailboxes();
+}
+
+async function mtLoadMailboxes() {
+  try {
+    const r = await fetch('/api/mailtemp/mailboxes');
+    const d = await r.json();
+    mtAllMailboxes = d.mailboxes || [];
+    mtRenderMailboxes(mtAllMailboxes);
+  } catch(e) { showToast('❌', 'Lỗi tải mailbox'); }
+}
+
+function mtFilterMailboxes() {
+  const q = (document.getElementById('mt-searchInput').value || '').toLowerCase();
+  const filtered = q ? mtAllMailboxes.filter(m => (m.email||'').toLowerCase().includes(q) || (m.capcut_email||'').toLowerCase().includes(q)) : mtAllMailboxes;
+  mtRenderMailboxes(filtered);
+}
+
+function mtRenderMailboxes(list) {
+  const tbody = document.getElementById('mt-mailboxBody');
+  if(!list || list.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:20px;">Chưa có mailbox nào được lưu</td></tr>';
+    return;
+  }
+  tbody.innerHTML = list.map(m => {
+    const ts = m.created_at ? m.created_at.replace('T',' ').substring(0,16) : '—';
+    const ccAcc = m.capcut_email ? `<div style="font-size:10px;color:var(--accent);">${escHtml(m.capcut_email)}</div>` : '<span style="color:var(--muted);font-size:10px;">—</span>';
+    return `<tr style="border-bottom:1px solid var(--border);">
+      <td style="padding:7px 12px;font-size:11px;">
+        <code style="color:var(--accent);font-size:10px;">${escHtml(m.email)}</code>
+        <button class="copy-btn" title="Copy email" onclick="navigator.clipboard.writeText('${escHtml(m.email)}');showToast('📋','Đã copy email!');" style="margin-left:4px;">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+        </button>
+      </td>
+      <td style="padding:7px 12px;font-size:11px;">
+        <code style="color:var(--muted);font-size:10px;">${escHtml(m.password)}</code>
+        <button class="copy-btn" title="Copy password" onclick="navigator.clipboard.writeText('${escHtml(m.password)}');showToast('📋','Đã copy pass!');" style="margin-left:4px;">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+        </button>
+      </td>
+      <td style="padding:7px 12px;">${ccAcc}</td>
+      <td style="padding:7px 12px;font-size:10px;color:var(--muted);">${ts}</td>
+      <td style="padding:7px 12px;text-align:center;">
+        <div style="display:flex;gap:6px;justify-content:center;">
+          <button class="btn btn-secondary" style="width:auto;padding:3px 8px;font-size:10px;border-color:#6366f1;color:#6366f1;" onclick="mtGetOtp('${escHtml(m.email)}')">📨 Lấy OTP</button>
+          <button class="btn btn-secondary" style="width:auto;padding:3px 8px;font-size:10px;border-color:var(--red);color:var(--red);" onclick="mtDeleteMailbox('${escHtml(m.email)}')">🗑️</button>
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+async function mtGetOtp(email) {
+  const modal = document.getElementById('mt-otpModal');
+  const emailEl = document.getElementById('mt-otpModalEmail');
+  const contentEl = document.getElementById('mt-otpModalContent');
+  emailEl.textContent = email;
+  contentEl.innerHTML = '<div style="text-align:center;color:var(--muted);padding:20px;">⏳ Đang lấy OTP...</div>';
+  modal.style.display = 'flex';
+  try {
+    const r = await fetch(`/api/mailtemp/otp?email=${encodeURIComponent(email)}`);
+    const d = await r.json();
+    if(!d.success) {
+      contentEl.innerHTML = `<div style="color:var(--red);padding:12px;">❌ ${escHtml(d.error||'Lỗi')}</div>`;
+      return;
+    }
+    const otps = d.otps || [];
+    const msgs = d.messages || [];
+    if(otps.length > 0) {
+      contentEl.innerHTML = `
+        <div style="margin-bottom:12px;">
+          <div style="font-size:12px;color:var(--muted);margin-bottom:8px;">🔑 Mã OTP phát hiện được (${otps.length}):</div>
+          ${otps.map(o => `
+            <div style="background:rgba(99,102,241,0.12);border:1px solid rgba(99,102,241,0.3);border-radius:8px;padding:10px 14px;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;">
+              <div>
+                <div style="font-size:22px;font-weight:700;color:#a5b4fc;letter-spacing:3px;">${escHtml(o.code)}</div>
+                <div style="font-size:10px;color:var(--muted);margin-top:2px;">Subject: ${escHtml(o.subject||'—')} · From: ${escHtml(o.from||'—')}</div>
+              </div>
+              <button class="btn btn-secondary" style="width:auto;padding:5px 12px;font-size:11px;" onclick="navigator.clipboard.writeText('${escHtml(o.code)}');showToast('✅','Đã copy OTP: ${escHtml(o.code)}');">📋 Copy</button>
+            </div>
+          `).join('')}
+        </div>
+        ${msgs.length > 0 ? `<details style="font-size:11px;color:var(--muted);">
+          <summary style="cursor:pointer;margin-bottom:8px;">📩 Tất cả email (${msgs.length})</summary>
+          ${msgs.map(m => `<div style="border:1px solid var(--border);border-radius:6px;padding:8px;margin-bottom:6px;">
+            <div style="font-weight:600;">${escHtml(m.subject||'(no subject)')}</div>
+            <div style="font-size:10px;color:var(--muted);">From: ${escHtml(m.from||m.sender||'—')}</div>
+          </div>`).join('')}
+        </details>` : ''}
+      `;
+    } else if(msgs.length > 0) {
+      contentEl.innerHTML = `<div style="color:var(--muted);padding:12px;text-align:center;">📭 Có ${msgs.length} email nhưng không tìm thấy OTP</div>
+        <div style="font-size:11px;">${msgs.map(m=>`<div style="border:1px solid var(--border);border-radius:6px;padding:8px;margin-bottom:6px;"><b>${escHtml(m.subject||'(no subject)')}</b><br><small>${escHtml(m.from||'')}</small></div>`).join('')}</div>`;
+    } else {
+      contentEl.innerHTML = '<div style="color:var(--muted);padding:20px;text-align:center;">📭 Hộp thư trống, chưa có email nào</div>';
+    }
+  } catch(e) {
+    contentEl.innerHTML = `<div style="color:var(--red);padding:12px;">❌ Lỗi kết nối: ${escHtml(e.message)}</div>`;
+  }
+}
+
+async function mtDeleteMailbox(email) {
+  try {
+    await fetch('/api/mailtemp/mailbox/delete', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})});
+    showToast('🗑️', 'Đã xóa mailbox');
+    mtLoadMailboxes();
+  } catch(e) { showToast('❌', 'Lỗi xóa'); }
+}
+
+async function mtClearAll() {
+  if(!confirm('Xóa toàn bộ danh sách mailtemp?')) return;
+  try {
+    await fetch('/api/mailtemp/mailbox/clear', {method:'POST'});
+    showToast('🗑️', 'Đã xóa hết');
+    mtLoadMailboxes();
+  } catch(e) { showToast('❌', 'Lỗi xóa'); }
 }
 
 // ==== HIGGSFIELD ====

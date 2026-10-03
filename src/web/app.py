@@ -72,6 +72,23 @@ def setup_db_if_not_exists():
             conn.execute("ALTER TABLE accounts ADD COLUMN uudai TEXT")
         except sqlite3.OperationalError:
             pass
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS mailtemp_mailboxes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                email TEXT NOT NULL UNIQUE,
+                mailbox_id TEXT NOT NULL,
+                password TEXT NOT NULL,
+                session_cookie TEXT DEFAULT '',
+                capcut_email TEXT,
+                capcut_password TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        try:
+            conn.execute("ALTER TABLE mailtemp_mailboxes ADD COLUMN session_cookie TEXT DEFAULT ''")
+        except sqlite3.OperationalError:
+            pass
+
 
         
         default_settings = {
@@ -466,6 +483,7 @@ def capcut_task_start():
     join_link = data.get("join_link", "")
     mail_type = data.get("mail_type", "hotmail")
     mail_api_source = data.get("mail_api_source", "mixmmo")
+    mail_domain_source = data.get("mail_domain_source", "phhinfi")
     browser_type = data.get("browser_type", "chrome")
     headless = bool(data.get("headless", False))
     incognito = bool(data.get("incognito", False))
@@ -486,7 +504,7 @@ def capcut_task_start():
         print("Lỗi get max id:", e)
 
     state_capcut.is_running = True
-    state_capcut.task_thread = threading.Thread(target=_run_capcut_task, args=(mode, count, threads, join_link, mail_type, mail_api_source, browser_type, headless, incognito), daemon=True)
+    state_capcut.task_thread = threading.Thread(target=_run_capcut_task, args=(mode, count, threads, join_link, mail_type, mail_api_source, browser_type, headless, incognito, mail_domain_source), daemon=True)
     state_capcut.task_thread.start()
     return jsonify({"success": True})
 
@@ -772,7 +790,7 @@ def capcut_task_stream():
                 yield f"data: {json.dumps({'type':'ping'})}\n\n"
     return Response(stream_with_context(generate()), mimetype="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
-def _run_capcut_task(mode, count, threads, join_link, mail_type, mail_api_source, browser_type, headless, incognito=False):
+def _run_capcut_task(mode, count, threads, join_link, mail_type, mail_api_source, browser_type, headless, incognito=False, mail_domain_source="phhinfi"):
     import importlib
     try:
         mod_name = "src.bots.capcut_hotmail" if mail_type == "hotmail" else "src.bots.capcut_domain"
@@ -789,6 +807,24 @@ def _run_capcut_task(mode, count, threads, join_link, mail_type, mail_api_source
         ch.GLOBAL_STOP_EVENT = state_capcut.task_stop
         
         bot.get_rotated_proxy = patched_get_proxy
+        
+        # Cấu hình nguồn Mail Domain nếu dùng capcut_domain
+        if mail_type == "domain" and hasattr(bot, 'MAIL_DOMAIN_SOURCE'):
+            bot.MAIL_DOMAIN_SOURCE = mail_domain_source
+            # Inject callback lưu mailtemp mailbox vào DB
+            if mail_domain_source == "mailtemp" and hasattr(bot, 'save_mailtemp_to_db'):
+                def _do_save_mailtemp(email, mailbox_id, password, session_cookie=""):
+                    try:
+                        with get_db() as conn:
+                            conn.execute(
+                                "INSERT OR IGNORE INTO mailtemp_mailboxes (email, mailbox_id, password, session_cookie) VALUES (?, ?, ?, ?)",
+                                (email, mailbox_id, password, session_cookie)
+                            )
+                            conn.commit()
+                    except Exception as ex:
+                        state_capcut.log(f"[MailTemp] Lỗi lưu DB: {ex}", "WARN")
+                bot.save_mailtemp_to_db = _do_save_mailtemp
+
         
         # Patch save_account to use DB
         def capcut_save_db(uid, email, password, *args, **kwargs):
@@ -1412,6 +1448,112 @@ def otpgmail_token_set():
         return jsonify({"success": True})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+# ─── MAILTEMP.VN ─────────────────────────────────────────────────────────────
+@app.route("/api/mailtemp/mailboxes")
+def mailtemp_list_mailboxes():
+    """Lấy danh sách mailbox đã lưu từ mailtemp.vn"""
+    try:
+        with get_db() as conn:
+            conn.row_factory = dict_factory
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT id, email, mailbox_id, password, capcut_email, capcut_password, created_at
+                FROM mailtemp_mailboxes ORDER BY id DESC LIMIT 200
+            """)
+            rows = cursor.fetchall()
+        return jsonify({"success": True, "mailboxes": rows})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e), "mailboxes": []})
+
+@app.route("/api/mailtemp/otp")
+def mailtemp_get_otp():
+    """Lấy OTP từ mailbox mailtemp.vn theo email"""
+    email = request.args.get("email", "").strip()
+    if not email:
+        return jsonify({"success": False, "error": "Thiếu email"})
+    try:
+        with get_db() as conn:
+            conn.row_factory = dict_factory
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM mailtemp_mailboxes WHERE email = ?", (email,))
+            row = cursor.fetchone()
+        if not row:
+            return jsonify({"success": False, "error": "Không tìm thấy mailbox này trong DB"})
+        mailbox_id = row["mailbox_id"]
+        session_cookie = row.get("session_cookie") or ""
+        MAILTEMP_BASE_URL = "https://mailtemp.vn"
+        # Dùng session_cookie để lấy messages (cookie tmail_mailbox_session)
+        req_cookies = {"tmail_mailbox_session": session_cookie} if session_cookie else {}
+        r = requests.get(
+            f"{MAILTEMP_BASE_URL}/api/public/messages",
+            params={"mailboxId": mailbox_id},
+            cookies=req_cookies,
+            proxies={"http": None, "https": None},
+            timeout=10
+        )
+        messages = []
+        if r.status_code == 200:
+            data = r.json()
+            messages = data if isinstance(data, list) else (data.get("messages") or data.get("data") or [])
+
+        # Extract OTP từ messages — ưu tiên primaryCode / detectedCodes
+        import re
+        otps = []
+        seen_codes = set()
+        for msg in messages:
+            subject = msg.get("subject", "") or ""
+            sender = msg.get("from") or msg.get("sender") or ""
+            ts = msg.get("receivedAt") or msg.get("created_at") or msg.get("date") or ""
+            codes = []
+            # Ưu tiên 1: primaryCode
+            if msg.get("primaryCode"):
+                codes.append(str(msg["primaryCode"]))
+            # Ưu tiên 2: detectedCodes
+            for dc in (msg.get("detectedCodes") or []):
+                c = dc.get("code")
+                if c: codes.append(str(c))
+            # Fallback: parse
+            if not codes:
+                body = msg.get("html") or msg.get("text") or msg.get("preview") or ""
+                combined = subject + " " + str(body)
+                m6 = re.findall(r'\b(\d{6})\b', combined)
+                mx = re.findall(r'\b([A-Za-z0-9]{3}-[A-Za-z0-9]{3})\b', combined)
+                codes = m6 + mx
+            for c in codes:
+                if c not in seen_codes:
+                    seen_codes.add(c)
+                    otps.append({"code": c, "subject": subject, "from": sender, "time": ts})
+
+        return jsonify({"success": True, "email": email, "otps": otps, "messages": messages})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+@app.route("/api/mailtemp/mailbox/delete", methods=["POST"])
+def mailtemp_delete_mailbox():
+    """Xóa mailbox khỏi DB"""
+    data = request.json or {}
+    email = data.get("email", "").strip()
+    if not email:
+        return jsonify({"success": False, "error": "Thiếu email"})
+    try:
+        with get_db() as conn:
+            conn.execute("DELETE FROM mailtemp_mailboxes WHERE email = ?", (email,))
+            conn.commit()
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+@app.route("/api/mailtemp/mailbox/clear", methods=["POST"])
+def mailtemp_clear_mailboxes():
+    """Xóa toàn bộ mailbox trong DB"""
+    try:
+        with get_db() as conn:
+            conn.execute("DELETE FROM mailtemp_mailboxes")
+            conn.commit()
+        return jsonify({"success": True})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
 

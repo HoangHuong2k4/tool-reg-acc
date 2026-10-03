@@ -44,7 +44,7 @@ Các hằng số ở đầu file `auto_register_higgsfield.py`:
 
 ```python
 BASE_URL       = "https://regmail.phh.info.vn"   # API tạo email tạm
-API_KEY        = "1dec9d51e8707e9bf1..."           # API key mail
+API_KEY        = "rm_36414c094209fea1370de45ec4e48c30783e896ceba0c1659bbba6f82590613c"           # API key mail
 PASSWORD       = "Higgsfield123@@"                 # Password mặc định cho mọi tài khoản
 HIGGSFIELD_URL = "https://higgsfield.ai/"          # URL đăng ký
 OUTPUT_FILE    = "higgsfield_accounts.txt"         # File lưu kết quả

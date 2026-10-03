@@ -54,7 +54,7 @@ def _format_proxy(proxy_dict):
 
 # ─── Domain Mail API ─────────────────────────────────────────────────────────
 BASE_URL    = "https://regmail.phh.info.vn"
-API_KEY     = "1dec9d51e8707e9bf1fa7756612830c676f65a42a1009851580ec0a82384abd8"
+API_KEY     = "rm_36414c094209fea1370de45ec4e48c30783e896ceba0c1659bbba6f82590613c"
 
 API_HEADERS = {
     "X-API-Key": API_KEY,
