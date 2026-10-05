@@ -1,0 +1,163 @@
+  <div class="wrap" id="tab-higgsfield">
+    <div class="header">
+      <div class="logo">
+        <div class="logo-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="44" height="44">
+            <defs>
+              <linearGradient id="g2" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#ff007b" />
+                <stop offset="100%" stop-color="#4338ca" />
+              </linearGradient>
+              <filter id="f2">
+                <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#ff007b" flood-opacity="0.3" />
+              </filter>
+            </defs>
+            <rect width="100" height="100" rx="24" fill="url(#g2)" filter="url(#f2)" />
+            <path d="M50 20 Q50 50 20 50 Q50 50 50 80 Q50 50 80 50 Q50 50 50 20 Z" fill="#fff" />
+          </svg>
+        </div>
+        <div>
+          <h1>Higgsfield Auto</h1><span>Tạo tài khoản Higgsfield (Temp Mail)</span>
+        </div>
+      </div>
+      <div class="status-pill">
+        <div class="dot" id="hf-statusDot"></div><span id="hf-statusText">Idle</span>
+      </div>
+    </div>
+    <div class="stats stats-4">
+      <div class="stat-card">
+        <div class="stat-label">Đang đợi</div>
+        <div class="stat-value accent" id="hf-statTotal">0</div>
+        <div class="stat-sub">số lượng yêu cầu</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Thành công</div>
+        <div class="stat-value green" id="hf-statOk">0</div>
+        <div class="stat-sub">tài khoản đã tạo</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Thất bại</div>
+        <div class="stat-value red" id="hf-statFail">0</div>
+        <div class="stat-sub">lỗi đăng ký</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Tiến trình</div>
+        <div class="stat-value yellow" id="hf-statPct">0%</div>
+        <div class="progress-bar-wrap">
+          <div class="progress-bar" id="hf-progressBar" style="width:0%"></div>
+        </div>
+      </div>
+    </div>
+    <div class="main-grid">
+      <div style="display:flex;flex-direction:column;gap:16px;">
+        <div class="panel">
+          <div class="panel-header"><span>🔌</span>
+            <h2>Proxy</h2>
+          </div>
+          <div class="panel-body">
+            <div class="proxy-badge">
+              <span id="hf-proxyStatusIcon">⏳</span>
+              <span id="hf-proxyIp" class="ip">Đang kiểm tra...</span>
+              <button class="rotate-btn" id="hf-rotateBtn" onclick="rotateProxy('hf')">↻ Xoay IP</button>
+            </div>
+            <div
+              style="margin-top:10px;font-size:11px;color:var(--muted); display:flex; justify-content:space-between; align-items:center;">
+              <span>Nguồn Proxy: <code style="color:var(--accent)" id="hf-proxySource">Đang tải...</code></span>
+              <label style="cursor:pointer; display:flex; align-items:center; gap:4px;">
+                <input type="checkbox" class="auto-rotate-cb" onchange="toggleAutoRotate(this.checked)" checked> Auto 3p
+              </label>
+            </div>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-header"><span>⚙️</span>
+            <h2>Cấu hình Higgsfield</h2>
+          </div>
+          <div class="panel-body">
+            <div class="form-group">
+              <label>Số lượng tài khoản cần tạo</label>
+              <input type="number" id="hf-count" class="input" value="1" min="1" max="100">
+            </div>
+            <div class="form-group">
+              <label>Số luồng (Threads)</label>
+              <input type="number" id="hf-threads" class="input" value="1" min="1" max="5">
+              <div style="font-size:12px;color:var(--muted);margin-top:4px;">Lưu ý: Mở nhiều tab ẩn danh cùng lúc</div>
+            </div>
+
+            <div class="form-group">
+              <label>Loại Trình Duyệt</label>
+              <div class="mode-selector" style="display:flex; gap: 8px;">
+                <div class="nav-btn active" id="hf-browserChrome" onclick="hfSetBrowser('chrome')">🌐 Chrome</div>
+                <div class="nav-btn" id="hf-browserFirefox" onclick="hfSetBrowser('firefox')">🦊 Firefox</div>
+                <div class="nav-btn" id="hf-browserCamoufox" onclick="hfSetBrowser('camoufox')">🦊 Camoufox</div>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <div class="toggle-btn" id="hf-headlessToggle" onclick="hfToggleHeadless()">
+                <span>Chạy ẩn (Headless)</span>
+                <div class="toggle-switch"></div>
+              </div>
+            </div>
+
+            <button class="btn btn-primary" id="hf-startBtn" onclick="hfStartTask()">▶️ Bắt Đầu Tạo Acc</button>
+            <button class="btn btn-danger" id="hf-stopBtn" onclick="hfStopTask()" style="display:none;margin-top:8px;">⏹
+              Dừng Lại</button>
+            <button class="btn btn-secondary" style="border-color:var(--red);color:var(--red);margin-top:8px;"
+              onclick="hfCloseBrowsers()">💥 ĐÓNG TRÌNH DUYỆT</button>
+          </div>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:16px;">
+        <div class="panel" style="flex:1;">
+          <div class="panel-header">
+            <span>📋</span>
+            <h2>Nhật ký (Higgsfield)</h2>
+            <div class="log-controls">
+              <button class="log-filter-btn active" onclick="hfSetFilter('ALL',this)">All</button>
+              <button class="log-filter-btn" onclick="hfSetFilter('OK',this)">✅ OK</button>
+              <button class="log-filter-btn" onclick="hfSetFilter('ERR',this)">❌ Lỗi</button>
+              <button class="btn-secondary btn" style="width:auto;padding:4px 10px;font-size:11px;"
+                onclick="hfClearLog()">Xóa</button>
+            </div>
+          </div>
+          <div class="log-wrap" id="hf-logWrap">
+            <div class="log-entry log-info"><span class="log-time">--:--:--</span><span class="log-icon">📌</span><span
+                class="log-msg">Sẵn sàng.</span></div>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-header">
+            <span>👤</span>
+            <h2>Tài khoản đã tạo</h2>
+            <div style="margin-left:auto;display:flex;gap:8px;">
+              <button class="btn-secondary btn" style="width:auto;padding:6px 12px;font-size:11px;"
+                onclick="hfCopyAccounts()">📋 Copy</button>
+              <button class="btn-secondary btn" style="width:auto;padding:6px 12px;font-size:11px;"
+                onclick="hfClearAccounts()">🗑️ Xóa</button>
+              <button class="btn-secondary btn" style="width:auto;padding:6px 12px;font-size:11px;"
+                onclick="hfLoadAccounts()">🔄 Refresh</button>
+            </div>
+          </div>
+          <div class="accounts-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Email</th>
+                  <th>Mật khẩu</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="hf-accountsBody">
+                <tr>
+                  <td colspan="3" style="text-align:center;color:var(--muted);padding:20px;">Chưa có tài khoản nào</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================= CHATGPT TAB ======================= -->

@@ -1,0 +1,189 @@
+  <div class="wrap" id="tab-gpm">
+    <div class="header">
+      <div class="logo">
+        <div class="logo-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="44" height="44">
+            <rect width="100" height="100" rx="24" fill="#8b5cf6" />
+            <path d="M25 35 L75 35 L75 65 L25 65 Z" fill="#fff" />
+          </svg>
+        </div>
+        <div>
+          <h1>GPM CapCut Auto Register</h1><span>Tự động Mở GPM Profiles & Đăng ký CapCut</span>
+        </div>
+      </div>
+      <div class="status-pill">
+        <div class="dot" id="gpm-statusDot"></div><span id="gpm-statusText">Idle</span>
+      </div>
+    </div>
+    <div class="stats stats-4">
+      <div class="stat-card">
+        <div class="stat-label">GPM Profiles đã chọn</div>
+        <div class="stat-value accent" id="gpm-statSelected">0</div>
+        <div class="stat-sub">profiles sẵn sàng</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Thành công</div>
+        <div class="stat-value green" id="gpm-statOk">0</div>
+        <div class="stat-sub">tài khoản đã tạo</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Thất bại</div>
+        <div class="stat-value red" id="gpm-statFail">0</div>
+        <div class="stat-sub">lần trong phiên này</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Tiến trình</div>
+        <div class="stat-value yellow" id="gpm-statPct">0%</div>
+        <div class="progress-bar-wrap">
+          <div class="progress-bar" id="gpm-progressBar" style="width:0%"></div>
+        </div>
+      </div>
+    </div>
+    <div class="main-grid">
+      <div style="display:flex;flex-direction:column;gap:16px;">
+        <div class="panel">
+          <div class="panel-header"><span>🖥️</span>
+            <h2>GPM-Login API & Profiles</h2>
+          </div>
+          <div class="panel-body">
+            <div class="form-group">
+              <label>GPM API URL</label>
+              <div style="display:flex;gap:6px;">
+                <input type="text" id="gpm-apiUrl" value="http://127.0.0.1:19995" placeholder="http://127.0.0.1:19995"
+                  style="flex:1;">
+                <button class="btn btn-secondary" style="width:auto;padding:6px 12px;font-size:11px;"
+                  onclick="gpmLoadProfiles()">🔄 Tải Profiles</button>
+              </div>
+            </div>
+            <div class="form-group">
+              <label style="display:flex;justify-content:space-between;align-items:center;">
+                <span>Danh sách GPM Profiles</span>
+                <span style="font-size:10px;color:var(--accent);" id="gpm-profileCountLabel">0 profiles</span>
+              </label>
+              <div id="gpm-profileListWrap"
+                style="max-height:160px;overflow-y:auto;background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:6px;">
+                <div style="color:var(--muted);font-size:11px;text-align:center;padding:15px;">Bấm "Tải Profiles" để nạp
+                  danh sách GPM</div>
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Nhập thêm Profile ID thủ công (Phân cách dòng/phẩy)</label>
+              <textarea id="gpm-manualPids" rows="2" class="input"
+                style="width:100%;font-family:monospace;font-size:11px;"
+                placeholder="id_1, id_2 hoặc mỗi dòng 1 ID..."></textarea>
+            </div>
+            <div class="btn-row" style="margin-top:10px;">
+              <button class="btn btn-secondary" onclick="gpmOpenProfiles()">▶️ MỞ GPM</button>
+              <button class="btn btn-secondary" style="border-color:var(--accent);color:var(--accent);"
+                onclick="gpmCreateNewProfile()">✨ TẠO PROFILE MỚI</button>
+              <button class="btn btn-secondary" style="border-color:var(--red);color:var(--red);"
+                onclick="gpmCloseProfiles()">⏹ ĐÓNG</button>
+            </div>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-header"><span>⚙️</span>
+            <h2>Cấu hình Reg CapCut trên GPM</h2>
+          </div>
+          <div class="panel-body">
+            <div class="form-group">
+              <label>Loại Mail</label>
+              <div class="radio-group">
+                <div class="radio-btn active" id="gpm-mailHotmail" onclick="gpmSetMailType('hotmail')">📧 Hotmail</div>
+                <div class="radio-btn" id="gpm-mailDomain" onclick="gpmSetMailType('domain')">🌐 Mail Domain</div>
+              </div>
+            </div>
+            <div class="form-group" id="gpm-apiSourceGroup">
+              <label>Nguồn đọc Mail (Hotmail)</label>
+              <div class="radio-group">
+                <div class="radio-btn active" id="gpm-sourceDongvanfb" onclick="gpmSetApiSource('dongvanfb')">DongVanFB
+                </div>
+                <div class="radio-btn" id="gpm-sourceMixmmo" onclick="gpmSetApiSource('mixmmo')">MixMMO</div>
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Chế độ</label>
+              <div class="radio-group" style="flex-direction:column;gap:3px;">
+                <div class="radio-btn" id="gpm-mode1" onclick="gpmSetMode(1)" style="flex:none;text-align:left;">🆕 Chỉ
+                  tạo acc</div>
+                <div class="radio-btn" id="gpm-mode2" onclick="gpmSetMode(2)" style="flex:none;text-align:left;">👥 Tạo
+                  + Join Team</div>
+                <div class="radio-btn active" id="gpm-mode3" onclick="gpmSetMode(3)" style="flex:none;text-align:left;">
+                  🔗 Tạo acc + Auto Lấy Link</div>
+              </div>
+            </div>
+            <div class="form-group" id="gpm-joinLinkGroup" style="display:none;">
+              <label>Link Join Team</label>
+              <input type="text" id="gpm-joinLink" placeholder="Nhập link join team...">
+            </div>
+            <div class="row2">
+              <div class="form-group" style="margin-bottom:0"><label>Số luồng (Threads)</label><input type="number"
+                  id="gpm-threads" value="1" min="1" max="10"></div>
+            </div>
+            <div class="btn-row" style="margin-top:14px;">
+              <button class="btn btn-start" id="gpm-startBtn" onclick="gpmStartTask()">▶ BẮT ĐẦU REG CAPCUT</button>
+              <button class="btn btn-stop" id="gpm-stopBtn" onclick="gpmStopTask()" style="display:none">⏹ DỪNG</button>
+              <button class="btn btn-secondary" style="border-color:var(--red);color:var(--red);"
+                onclick="gpmCloseBrowsers()">💥</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:16px;">
+        <div class="panel" style="flex:1;">
+          <div class="panel-header">
+            <span>📋</span>
+            <h2>Nhật ký (GPM CapCut)</h2>
+            <div class="log-controls">
+              <button class="log-filter-btn active" onclick="gpmSetFilter('ALL',this)">All</button>
+              <button class="log-filter-btn" onclick="gpmSetFilter('OK',this)">✅ OK</button>
+              <button class="log-filter-btn" onclick="gpmSetFilter('ERR',this)">❌ Lỗi</button>
+              <button class="btn-secondary btn" style="width:auto;padding:4px 10px;font-size:11px;"
+                onclick="gpmClearLog()">Xóa</button>
+            </div>
+          </div>
+          <div class="log-wrap" id="gpm-logWrap">
+            <div class="log-entry log-info"><span class="log-time">--:--:--</span><span class="log-icon">📌</span><span
+                class="log-msg">Sẵn sàng chờ lệnh...</span></div>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-header">
+            <span>👤</span>
+            <h2>Tài khoản GPM đã tạo</h2>
+            <div style="margin-left:auto;display:flex;gap:8px;">
+              <button class="btn-secondary btn" style="width:auto;padding:6px 12px;font-size:11px;"
+                onclick="gpmCopyAccounts()">📋 Copy</button>
+              <button class="btn-secondary btn" style="width:auto;padding:6px 12px;font-size:11px;"
+                onclick="gpmCopyAccountsEP()">📋 Copy E|P</button>
+              <button class="btn-secondary btn" style="width:auto;padding:6px 12px;font-size:11px;"
+                onclick="gpmCopyAccountsEPL()">📋 Copy E|P|L</button>
+              <button class="btn-secondary btn" style="width:auto;padding:6px 12px;font-size:11px;"
+                onclick="gpmClearAccounts()">🗑️ Xóa</button>
+              <button class="btn-secondary btn" style="width:auto;padding:6px 12px;font-size:11px;"
+                onclick="gpmLoadAccounts()">🔄 Refresh</button>
+            </div>
+          </div>
+          <div class="accounts-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>UID / Profile</th>
+                  <th>Email</th>
+                  <th>Mật khẩu</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="gpm-accountsBody">
+                <tr>
+                  <td colspan="4" style="text-align:center;color:var(--muted);padding:20px;">Chưa có tài khoản nào</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================= DREAMINA TAB ======================= -->

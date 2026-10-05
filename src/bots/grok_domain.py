@@ -150,16 +150,16 @@ def save_account(email, password):
     log(f"Đã lưu tài khoản Grok → {OUTPUT_FILE}", "OK")
 
 
+from .browser_utils import get_rotated_proxy as _grp
 def get_rotated_proxy():
-    return None
+    return _grp(logger_func=log)
+
 
 
 def setup_driver(index=1, keep_open=False, batch_size=3, headless=False, browser_type="uc", use_proxy=False, language="en-US"):
     DRIVER_LOCK = threading.Lock()
-    cols = min(batch_size, 4)
-    window_width = 1920 // cols
-    idx = (index - 1) % cols
-    x = idx * window_width
+    from .browser_utils import get_window_bounds
+    window_width, window_height, x, _ = get_window_bounds(index, batch_size, zero_based_index=False)
 
     if browser_type.lower() == "firefox":
         from selenium import webdriver

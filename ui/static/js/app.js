@@ -1,3 +1,34 @@
+
+function setupSSE(endpoint, prefix, onResultCb) {
+  let evt = new EventSource(endpoint);
+  evt.onmessage = (e) => {
+    const data = JSON.parse(e.data);
+    if(data.type === 'log') {
+      window[prefix + 'AddLog'](data);
+    } else if (data.type === 'result') {
+      if(data.success) window[prefix + 'Ok']++; else window[prefix + 'Fail']++;
+      window[prefix + 'UpdateStats']();
+      if(data.success) window[prefix + 'LoadAccounts']();
+      if(onResultCb) onResultCb(data);
+    } else if (data.type === 'done') {
+      window[prefix + 'IsRunning'] = false;
+      window[prefix + 'SetUI'](false);
+      evt.close();
+      showToast('✅', 'Xong!');
+      window[prefix + 'LoadAccounts']();
+    } else if (data.type === 'stopped') {
+      window[prefix + 'IsRunning'] = false;
+      window[prefix + 'SetUI'](false);
+      evt.close();
+      showToast('⏹', 'Đã dừng.');
+    } else if (data.type === 'pending_count_update') {
+      if(window[prefix + 'LoadPendingLinkCount']) window[prefix + 'LoadPendingLinkCount']();
+      window[prefix + 'LoadAccounts']();
+    }
+  };
+  return evt;
+}
+
 // ==== COMMON ====
 let ccIsRunning=false, hfIsRunning=false, gptIsRunning=false;
 let ccEvt=null, hfEvt=null, gptEvt=null;
@@ -563,15 +594,7 @@ async function ccCloseBrowsers(){
   try{await fetch('/api/capcut/task/close_browsers',{method:'POST'});showToast('💥','Đã đóng tất cả trình duyệt CapCut!');}catch(e){}
 }
 function ccStartSSE(){
-  if(ccEvt)ccEvt.close(); ccEvt=new EventSource('/api/capcut/task/stream');
-  ccEvt.onmessage=(e)=>{
-    const data=JSON.parse(e.data);
-    if(data.type==='log')ccAddLog(data);
-    else if(data.type==='result'){if(data.success)ccOk++;else ccFail++;ccUpdateStats();if(data.success)ccLoadAccounts();}
-    else if(data.type==='done'){ccIsRunning=false;ccSetUI(false);ccEvt.close();showToast('✅','CapCut Xong!');ccLoadHotmailCount();ccLoadAccounts();ccLoadPendingLinkCount();}
-    else if(data.type==='pending_count_update'){ccLoadPendingLinkCount();ccLoadAccounts();}
-    else if(data.type==='stopped'){ccIsRunning=false;ccSetUI(false);ccEvt.close();showToast('⏹','CapCut Đã dừng.');}
-  };
+  if(ccEvt)ccEvt.close(); ccEvt = setupSSE('/api/capcut/task/stream', 'cc', () => { ccLoadHotmailCount(); });
 }
 function ccAddLog(data){ccLogs.push(data);if(ccLogs.length>2000)ccLogs.shift();if(ccFilter==='ALL'||data.level===ccFilter)ccRenderLog(data);}
 function ccRenderLog(data){
@@ -767,14 +790,7 @@ async function hfCloseBrowsers(){
   try{await fetch('/api/higgsfield/task/close_browsers',{method:'POST'});showToast('💥','Đã đóng tất cả trình duyệt Higgsfield!');}catch(e){}
 }
 function hfStartSSE(){
-  if(hfEvt)hfEvt.close(); hfEvt=new EventSource('/api/higgsfield/task/stream');
-  hfEvt.onmessage=(e)=>{
-    const data=JSON.parse(e.data);
-    if(data.type==='log')hfAddLog(data);
-    else if(data.type==='result'){if(data.success)hfOk++;else hfFail++;hfUpdateStats();if(data.success)hfLoadAccounts();}
-    else if(data.type==='done'){hfIsRunning=false;hfSetUI(false);hfEvt.close();showToast('✅','Higgsfield Xong!');hfLoadAccounts();}
-    else if(data.type==='stopped'){hfIsRunning=false;hfSetUI(false);hfEvt.close();showToast('⏹','Higgsfield Đã dừng.');}
-  };
+  if(hfEvt)hfEvt.close(); hfEvt = setupSSE('/api/higgsfield/task/stream', 'hf');
 }
 function hfAddLog(data){hfLogs.push(data);if(hfLogs.length>2000)hfLogs.shift();if(hfFilter==='ALL'||data.level===hfFilter)hfRenderLog(data);}
 function hfRenderLog(data){
@@ -1180,14 +1196,7 @@ async function gptCloseBrowsers(){
 }
 
 function gptStartSSE(){
-  if(gptEvt)gptEvt.close(); gptEvt=new EventSource('/api/gpt/task/stream');
-  gptEvt.onmessage=(e)=>{
-    const data=JSON.parse(e.data);
-    if(data.type==='log')gptAddLog(data);
-    else if(data.type==='result'){if(data.success)gptOk++;else gptFail++;gptUpdateStats();if(data.success)gptLoadAccounts();}
-    else if(data.type==='done'){gptIsRunning=false;gptSetUI(false);gptEvt.close();showToast('✅','GPT Xong!');gptLoadAccounts();}
-    else if(data.type==='stopped'){gptIsRunning=false;gptSetUI(false);gptEvt.close();showToast('⏹','GPT Đã dừng.');}
-  };
+  if(gptEvt)gptEvt.close(); gptEvt = setupSSE('/api/gpt/task/stream', 'gpt');
 }
 
 function gptAddLog(data) {

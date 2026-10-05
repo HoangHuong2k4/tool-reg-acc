@@ -104,11 +104,8 @@ def load_accounts_to_queue(limit=10):
     return count
 
 def setup_driver(index=1, batch_size=3, headless=False):
-    cols = min(batch_size, 4)
-    window_width = 1920 // cols
-    window_height = 1000
-    idx = (index - 1) % cols
-    x = idx * window_width
+    from .browser_utils import get_window_bounds
+    window_width, window_height, x, _ = get_window_bounds(index, batch_size, zero_based_index=False)
     
     options = uc.ChromeOptions()
     options.add_argument("--no-sandbox")

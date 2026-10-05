@@ -66,129 +66,7 @@ def _generate_vietnamese_profile():
 
 # ─── Local Proxy Relay ────────────────────────────────────────────────────────
 
-class LocalProxyRelay:
-    """
-    Local TCP proxy relay chạy trên localhost.
-    Trình duyệt kết nối vào đây không cần auth,
-    relay tự động thêm Proxy-Authorization và forward lên proxy thật.
-    """
-    def __init__(self, upstream_host, upstream_port, username, password, local_port=0):
-        self.upstream_host = upstream_host
-        self.upstream_port = int(upstream_port)
-        self.auth_b64 = base64.b64encode(f"{username}:{password}".encode()).decode()
-        self.local_port = local_port
-        self._sock = None
-        self._running = False
-
-    def start(self):
-        self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self._sock.bind(("127.0.0.1", self.local_port))
-        self.local_port = self._sock.getsockname()[1]
-        self._sock.listen(64)
-        self._sock.settimeout(1.0)
-        self._running = True
-        t = threading.Thread(target=self._accept_loop, daemon=True)
-        t.start()
-        logger.info(f"[Relay] Local proxy listening on 127.0.0.1:{self.local_port}")
-        return self
-
-    def stop(self):
-        self._running = False
-        if self._sock:
-            try: self._sock.close()
-            except: pass
-
-    def _accept_loop(self):
-        while self._running:
-            try:
-                client, _ = self._sock.accept()
-                threading.Thread(target=self._handle_client, args=(client,), daemon=True).start()
-            except socket.timeout:
-                continue
-            except OSError:
-                break
-
-    def _recv_headers(self, sock):
-        data = b""
-        sock.settimeout(10)
-        while b"\r\n\r\n" not in data:
-            chunk = sock.recv(4096)
-            if not chunk:
-                break
-            data += chunk
-            if len(data) > 65536:
-                break
-        return data
-
-    def _tunnel(self, a, b):
-        a.settimeout(600)
-        b.settimeout(600)
-        try:
-            while True:
-                r, _, _ = select.select([a, b], [], [], 300)
-                if not r:
-                    break
-                for s in r:
-                    other = b if s is a else a
-                    chunk = s.recv(65536)
-                    if not chunk:
-                        return
-                    other.sendall(chunk)
-        except Exception:
-            pass
-        finally:
-            for s in (a, b):
-                try: s.close()
-                except: pass
-
-    def _handle_client(self, client):
-        upstream = None
-        try:
-            raw = self._recv_headers(client)
-            if not raw:
-                return
-            first_line = raw.split(b"\r\n")[0].decode(errors="replace")
-            upstream = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            upstream.settimeout(15)
-            upstream.connect((self.upstream_host, self.upstream_port))
-
-            auth_header = f"Proxy-Authorization: Basic {self.auth_b64}\r\n".encode()
-
-            if b"\r\n\r\n" in raw:
-                head, body = raw.split(b"\r\n\r\n", 1)
-                lines = head.split(b"\r\n")
-                lines = [l for l in lines if not l.lower().startswith(b"proxy-authorization:")]
-                modified = b"\r\n".join(lines) + b"\r\n" + auth_header + b"\r\n" + body
-            else:
-                modified = raw + auth_header + b"\r\n"
-
-            upstream.sendall(modified)
-
-            if first_line.upper().startswith("CONNECT "):
-                resp = b""
-                while b"\r\n\r\n" not in resp:
-                    chunk = upstream.recv(4096)
-                    if not chunk:
-                        break
-                    resp += chunk
-                if b" 407 " in resp.split(b"\r\n")[0]:
-                    client.sendall(b"HTTP/1.1 502 Bad Gateway\r\n\r\n")
-                    return
-                client.sendall(resp)
-                if b"200" in resp.split(b"\r\n")[0]:
-                    self._tunnel(client, upstream)
-            else:
-                self._tunnel(client, upstream)
-        except Exception:
-            pass
-        finally:
-            if upstream:
-                try: upstream.close()
-                except: pass
-            if client:
-                try: client.close()
-                except: pass
+from .browser_utils import LocalProxyRelay
 
 
 # ─── DB Helper ────────────────────────────────────────────────────────────────
@@ -352,8 +230,8 @@ def init_selenium_driver(browser_type, headless, incognito, proxy, thread_id=1, 
     # ChatGPT UI bị lỗi layout (chuyển sang mobile view hỏng nút bấm) nếu chia 4 (width=480)
     # Nên tối đa chỉ chia 2 cột (width=960) hoặc full màn hình
     cols = 2
-    SCREEN_W = 1920
-    SCREEN_H = 1080
+    SCREEN_W = 1800
+    SCREEN_H = 1000
     
     # Lấy kích thước màn hình thực tế trên Windows
     if sys.platform == "win32":
@@ -716,7 +594,7 @@ def init_selenium_driver(browser_type, headless, incognito, proxy, thread_id=1, 
     if headless:
         try:
             driver.maximize_window()
-            driver.set_window_size(1920, 1080)
+            driver.set_window_size(1800, 1000)
         except:
             pass
     elif browser_type.lower() not in ["firefox", "camoufox"]:

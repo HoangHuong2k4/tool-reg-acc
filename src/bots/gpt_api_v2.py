@@ -47,10 +47,9 @@ def log(msg, level="INFO"):
     now = datetime.now().strftime("%H:%M:%S")
     print("[{}] [{}] {}".format(now, level, msg))
 
+from .browser_utils import get_rotated_proxy as _grp
 def get_rotated_proxy():
-    # type: () -> Optional[dict]
-    return None
-
+    return _grp(logger_func=log)
 def save_account(email, password, totp_secret, has_momo=False):
     # type: (str, str, str, bool) -> None
     pass

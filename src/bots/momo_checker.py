@@ -30,7 +30,7 @@ class SentinelTokenGenerator:
         self.sid = getattr(session, "sentinel_sid", None) or str(uuid.uuid4())
 
     def _config(self):
-        screen = self.profile.get("screen", "1920x1080")
+        screen = self.profile.get("screen", "1800x1000")
         perf_now = random.uniform(1000, 50000)
         return [
             screen,

@@ -16,143 +16,8 @@ from datetime import datetime
 
 import subprocess
 
-class LocalProxyRelay:
-    """
-    Local TCP proxy relay chạy trên localhost.
-    Chrome kết nối vào đây không cần auth,
-    relay tự động thêm Proxy-Authorization và forward lên proxy thật.
-    """
-    def __init__(self, upstream_host, upstream_port, username, password, local_port):
-        self.upstream_host = upstream_host
-        self.upstream_port = int(upstream_port)
-        self.auth_b64 = base64.b64encode(
-            f"{username}:{password}".encode()
-        ).decode()
-        self.local_port = local_port
-        self._sock = None
-        self._running = False
+from .browser_utils import LocalProxyRelay
 
-    def start(self):
-        self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self._sock.bind(("127.0.0.1", self.local_port))
-        self.local_port = self._sock.getsockname()[1]
-        self._sock.listen(64)
-        self._sock.settimeout(1.0)
-        self._running = True
-        t = _threading.Thread(target=self._accept_loop, daemon=True)
-        t.start()
-        log(f"[Relay] Local proxy listening on 127.0.0.1:{self.local_port}", "OK")
-        return self
-
-    def stop(self):
-        self._running = False
-        if self._sock:
-            try: self._sock.close()
-            except: pass
-
-    def _accept_loop(self):
-        while self._running:
-            try:
-                client, _ = self._sock.accept()
-                _threading.Thread(
-                    target=self._handle_client,
-                    args=(client,),
-                    daemon=True
-                ).start()
-            except socket.timeout:
-                continue
-            except OSError:
-                break
-
-    def _recv_headers(self, sock):
-        data = b""
-        sock.settimeout(10)
-        while b"\r\n\r\n" not in data:
-            chunk = sock.recv(4096)
-            if not chunk:
-                break
-            data += chunk
-            if len(data) > 65536:
-                break
-        return data
-
-    def _tunnel(self, a, b):
-        a.settimeout(60)
-        b.settimeout(60)
-        try:
-            while True:
-                r, _, _ = select.select([a, b], [], [], 30)
-                if not r:
-                    break
-                for s in r:
-                    other = b if s is a else a
-                    chunk = s.recv(65536)
-                    if not chunk:
-                        return
-                    other.sendall(chunk)
-        except Exception:
-            pass
-        finally:
-            for s in (a, b):
-                try: s.close()
-                except: pass
-
-    def _handle_client(self, client):
-        upstream = None
-        try:
-            raw = self._recv_headers(client)
-            if not raw:
-                return
-
-            first_line = raw.split(b"\r\n")[0].decode(errors="replace")
-
-            upstream = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            upstream.settimeout(15)
-            upstream.connect((self.upstream_host, self.upstream_port))
-
-            auth_header = (
-                f"Proxy-Authorization: Basic {self.auth_b64}\r\n"
-            ).encode()
-
-            if b"\r\n\r\n" in raw:
-                head, body = raw.split(b"\r\n\r\n", 1)
-                lines = head.split(b"\r\n")
-                lines = [l for l in lines
-                         if not l.lower().startswith(b"proxy-authorization:")]
-                modified = b"\r\n".join(lines) + b"\r\n" + auth_header + b"\r\n" + body
-            else:
-                modified = raw + auth_header + b"\r\n"
-
-            upstream.sendall(modified)
-
-            if first_line.upper().startswith("CONNECT "):
-                resp = b""
-                while b"\r\n\r\n" not in resp:
-                    chunk = upstream.recv(4096)
-                    if not chunk:
-                        break
-                    resp += chunk
-                
-                # NẾU proxy trả về 407 (Sai pass/hết hạn), KHÔNG trả về cho Chrome (sẽ dính popup)
-                # Thay vào đó trả về 502 để Chrome văng ERR_TUNNEL_CONNECTION_FAILED -> Tự động Retry
-                if b" 407 " in resp.split(b"\r\n")[0]:
-                    client.sendall(b"HTTP/1.1 502 Bad Gateway\r\n\r\n")
-                    return
-                    
-                client.sendall(resp)
-                if b"200" in resp.split(b"\r\n")[0]:
-                    self._tunnel(client, upstream)
-            else:
-                self._tunnel(client, upstream)
-
-        except Exception as e:
-            log(f"[Relay] Lỗi kết nối proxy: {e}", "WARN")
-        finally:
-            for s in (client, upstream):
-                if s:
-                    try: s.close()
-                    except: pass
 
 MAC_WIFI_SERVICE = None  # sẽ tự detect khi chạy
 
@@ -447,58 +312,9 @@ def delete_mailbox(email_address):
         return _delete_mailbox_mailtemp(email_address)
     return _delete_mailbox_phhinfi(email_address)
 
-def get_settings_from_db():
-    import sqlite3
-    import os
-    db_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "database.db"))
-    settings = {}
-    try:
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-        cursor.execute("SELECT `key`, `value` FROM settings")
-        settings = {row[0]: row[1] for row in cursor.fetchall()}
-        conn.close()
-    except Exception:
-        pass
-    return settings
-
+from .browser_utils import get_rotated_proxy as _grp
 def get_rotated_proxy():
-    # Thử đọc settings từ DB
-    try:
-        settings = get_settings_from_db()
-        
-        proxy_type = settings.get("PROXY_TYPE", "proxyquick")
-        if proxy_type == "proxyxoay":
-            key = settings.get("PROXYXOAY_KEY", "")
-            url = f"https://proxyxoay.shop/api/get.php?key={key}&&nhamang=random&&tinhthanh=0&whitelist="
-            log("Đang xoay IP qua ProxyXoay.shop API...", "INFO")
-            resp = requests.get(url, timeout=15).json()
-            if resp.get("status") == 100:
-                proxy_str = resp.get("proxyhttp", "")
-                parts = proxy_str.split(":")
-                log(f"Xoay IP thành công → {parts[0]}:{parts[1]}", "OK")
-                return {"host": parts[0], "port": int(parts[1]), "user": "", "pass": ""}
-            else:
-                log(f"API xoay proxy lỗi: {resp} → dùng proxy cố định", "WARN")
-        else:
-            token = settings.get("PROXY_API_TOKEN", "")
-            merchant = settings.get("PROXY_MERCHANT", "")
-            proxy_id = settings.get("PROXY_ID", "953319")
-            headers = {"Authorization": f"Bearer {token}", "x-merchant-id": merchant}
-            url = f"https://proxyquick.click/api/v2/proxies/{proxy_id}/rotate"
-            log("Đang xoay IP qua ProxyQuick API v2...", "INFO")
-            resp = requests.get(url, headers=headers, proxies={"http": None, "https": None}, timeout=15).json()
-            if resp.get("status") == "success":
-                proxy_str = resp.get("proxy", "")
-                parts = proxy_str.split(":")
-                if len(parts) >= 4:
-                    log(f"Xoay IP thành công → {resp.get('ip', '')}", "OK")
-                    return {"host": parts[0], "port": int(parts[1]), "user": parts[2], "pass": parts[3]}
-            log(f"API xoay proxy lỗi: {resp} → dùng proxy cố định", "WARN")
-    except Exception as e:
-        log(f"Lỗi gọi API proxy: {e}", "ERR")
-    return None
-
+    return _grp(logger_func=log)
 def setup_driver(index=1, keep_open=False, use_api_proxy=True, batch_size=3, use_proxy=True, predefined_proxy=None, is_func2=False, shared_relay_port=None, headless=False, browser_type="chrome", incognito=False, profile_dir=None):
     from selenium import webdriver
     from selenium.webdriver.chrome.options import Options
@@ -516,14 +332,8 @@ def setup_driver(index=1, keep_open=False, use_api_proxy=True, batch_size=3, use
     if keep_open:
         options.add_experimental_option("detach", True)
     
-    # Chia đều màn hình theo số tab (max 4 cột, thừa thì chồng lên)
-    cols = min(batch_size, 4)       # số cột thực tế
-    SCREEN_W = 1920; SCREEN_H = 1080
-    window_width  = SCREEN_W // cols
-    window_height = SCREEN_H
-    idx = index % cols        # tab > 4 sẽ chồng lên cột 0..3
-    x = idx * window_width
-    y = 0
+    from .browser_utils import get_window_bounds
+    window_width, window_height, x, y = get_window_bounds(index, batch_size, zero_based_index=True)
     
     options.add_argument(f"--window-size={window_width},{window_height}")
     options.add_argument(f"--window-position={x},{y}")
