@@ -845,12 +845,17 @@ def _run_capcut_task(mode, count, threads, join_link, mail_type, mail_api_source
         if mail_type == "hotmail":
             bot.load_hotmails_to_queue(limit=count)
             def worker(i):
-                time.sleep((i % threads) * 2.5)
-                while not bot.HOTMAIL_QUEUE.empty() and not state_capcut.task_stop.is_set():
-                    res = bot.register_one_account(i, join_link if mode == 2 else None, keep_open=(mode == 1), batch_size=threads, headless=headless, browser_type=browser_type, get_link=(mode == 3), mail_api_source=mail_api_source, incognito=incognito)
-                    state_capcut.log_queue.put(json.dumps({"type": "result", "success": bool(res)}))
-                    if res: done["ok"] += 1
-                    else: done["fail"] += 1
+                try:
+                    time.sleep((i % threads) * 2.5)
+                    while not bot.HOTMAIL_QUEUE.empty() and not state_capcut.task_stop.is_set():
+                        res = bot.register_one_account(i, join_link if mode == 2 else None, keep_open=(mode == 1), batch_size=threads, headless=headless, browser_type=browser_type, get_link=(mode == 3), mail_api_source=mail_api_source, incognito=incognito)
+                        state_capcut.log_queue.put(json.dumps({"type": "result", "success": bool(res)}))
+                        if res: done["ok"] += 1
+                        else: done["fail"] += 1
+                except Exception as e:
+                    import traceback
+                    err_msg = "".join(traceback.format_exception(type(e), e, e.__traceback__))
+                    state_capcut.log(f"Worker Error: {err_msg}", "ERR")
 
             import concurrent.futures
             with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as ex:

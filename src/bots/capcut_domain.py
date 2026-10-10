@@ -312,6 +312,7 @@ def delete_mailbox(email_address):
         return _delete_mailbox_mailtemp(email_address)
     return _delete_mailbox_phhinfi(email_address)
 
+from .browser_utils import get_settings_from_db
 from .browser_utils import get_rotated_proxy as _grp
 def get_rotated_proxy():
     return _grp(logger_func=log)

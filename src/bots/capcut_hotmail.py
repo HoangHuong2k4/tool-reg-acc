@@ -193,6 +193,7 @@ def wait_for_otp(email, password, refresh_token, client_id, timeout=120, interva
     log("Hết thời gian chờ OTP!", "ERR")
     return None
 
+from .browser_utils import get_settings_from_db
 from .browser_utils import get_rotated_proxy as _grp
 def get_rotated_proxy():
     return _grp(logger_func=log)

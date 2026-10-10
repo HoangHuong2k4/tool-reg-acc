@@ -146,6 +146,7 @@ def wait_for_otp_dreamina(email, password, refresh_token, client_id,
 
 
 
+from .browser_utils import get_settings_from_db
 from .browser_utils import get_rotated_proxy as _grp
 def get_rotated_proxy():
     return _grp(logger_func=log)
