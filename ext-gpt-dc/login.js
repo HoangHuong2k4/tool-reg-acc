@@ -596,13 +596,12 @@
                 }
             }
 
-            // 2. Tự động click nút Claim free offer / Upgrade Plus nếu nó xuất hiện
+            // 2. KHÔNG tự động click nút Claim free offer / Upgrade Plus / Checkout (chỉ fill data)
             const upgradeBtn = document.querySelector('[data-testid="select-plan-button-plus-upgrade"]');
-            if (upgradeBtn && !upgradeBtn.hasAttribute('data-auto-clicked')) {
-                upgradeBtn.setAttribute('data-auto-clicked', 'true');
-                console.log('[AutoLogin] Đã tìm thấy nút Upgrade Plus, tự động click...');
-                updateMainStatus('<span style="color:#4caf50">✓ Đang tự động click Upgrade...</span>');
-                upgradeBtn.click();
+            if (upgradeBtn && !upgradeBtn.hasAttribute('data-detected')) {
+                upgradeBtn.setAttribute('data-detected', 'true');
+                console.log('[AutoLogin] Tìm thấy nút Upgrade/Checkout, KHÔNG tự động click (chỉ fill data).');
+                updateMainStatus('<span style="color:#4caf50">✓ Đã tới trang ưu đãi (chỉ fill data, không auto click)</span>');
             }
         }, 1000);
 
