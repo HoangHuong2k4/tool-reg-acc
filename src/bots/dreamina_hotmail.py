@@ -88,18 +88,21 @@ def wait_for_otp_dreamina(email, password, refresh_token, client_id,
         }
 
     elapsed = 0
+    consecutive_api_errors = 0
+    fatal_keywords = ["empty access token", "imap connection failed", "invalid_grant", "invalid_client", "unauthorized", "expired_token", "account is locked"]
     while elapsed < timeout:
         if GLOBAL_STOP_EVENT and GLOBAL_STOP_EVENT.is_set():
             log("Task bi dung, thoat cho OTP!", "WARN")
             return None
         try:
             if mail_api_source == "dongvanfb":
-                resp = requests.post(api_url, headers=headers, json=payload, timeout=60)
+                resp = requests.post(api_url, headers=headers, json=payload, timeout=15)
             else:
-                resp = requests.post(api_url, headers=headers, data=payload, timeout=60)
+                resp = requests.post(api_url, headers=headers, data=payload, timeout=15)
 
             data = resp.json()
             if data.get("status") or data.get("success"):
+                consecutive_api_errors = 0
                 if data.get("messages"):
                     for msg in data["messages"]:
                         subject = msg.get("subject", "")
@@ -131,14 +134,26 @@ def wait_for_otp_dreamina(email, password, refresh_token, client_id,
                             log(f"Nhan duoc OTP (so): {otp}", "OK")
                             return otp
             else:
-                log(f"API Hotmail tra ve loi: {data}", "WARN")
+                consecutive_api_errors += 1
+                log(f"API Hotmail tra ve loi ({consecutive_api_errors}/3): {data}", "WARN")
+                raw_err = str(data).lower()
+                if any(k in raw_err for k in fatal_keywords) and consecutive_api_errors >= 2:
+                    log(f"Loi Token/Hotmail chet. Bo qua mail {email} ngay!", "ERR")
+                    return None
+                if consecutive_api_errors >= 3:
+                    log(f"API Hotmail loi lien tiep 3 lan. Bo qua mail {email}!", "ERR")
+                    return None
         except Exception as e:
-            log(f"Loi goi API Hotmail: {e}", "WARN")
+            consecutive_api_errors += 1
+            log(f"Loi goi API Hotmail ({consecutive_api_errors}/3): {e}", "WARN")
+            if consecutive_api_errors >= 3:
+                log(f"Khong the ket noi API Hotmail. Bo qua mail {email}!", "ERR")
+                return None
 
         time.sleep(interval)
         elapsed += interval
 
-    log("Het thoi gian cho OTP!", "ERR")
+    log(f"Het thoi gian cho OTP ({timeout}s)!", "ERR")
     return None
 
 

@@ -152,16 +152,19 @@ def wait_for_otp_hotmail(email, password, refresh_token, client_id, timeout=120,
         headers = {"Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"}
         payload = {"action": "get_hotmail_messages", "account": f"{email}|{password}|{refresh_token}|{client_id}", "mode": "oauth", "folder": "inbox", "start_timestamp": "0"}
     elapsed = 0
+    consecutive_api_errors = 0
+    fatal_keywords = ["empty access token", "imap connection failed", "invalid_grant", "invalid_client", "unauthorized", "expired_token", "account is locked"]
     while elapsed < timeout:
         if GLOBAL_STOP_EVENT and GLOBAL_STOP_EVENT.is_set():
             return None
         try:
             if mail_api_source == "dongvanfb":
-                resp = requests.post(api_url, headers=headers, json=payload, timeout=60)
+                resp = requests.post(api_url, headers=headers, json=payload, timeout=15)
             else:
-                resp = requests.post(api_url, headers=headers, data=payload, timeout=60)
+                resp = requests.post(api_url, headers=headers, data=payload, timeout=15)
             data = resp.json()
             if data.get("status") or data.get("success"):
+                consecutive_api_errors = 0
                 if data.get("messages"):
                     for msg in data["messages"]:
                         text_to_search = msg.get("subject", "") + " " + msg.get("message", "") + " " + msg.get("bodyText", "")
@@ -169,11 +172,25 @@ def wait_for_otp_hotmail(email, password, refresh_token, client_id, timeout=120,
                         if code:
                             log(f"Nhận OTP xAI: {code}", "OK")
                             return code
+            else:
+                consecutive_api_errors += 1
+                log(f"API Hotmail trả về lỗi ({consecutive_api_errors}/3): {data}", "WARN")
+                raw_err = str(data).lower()
+                if any(k in raw_err for k in fatal_keywords) and consecutive_api_errors >= 2:
+                    log(f"Lỗi Token/Hotmail chết. Bỏ qua mail {email} ngay!", "ERR")
+                    return None
+                if consecutive_api_errors >= 3:
+                    log(f"API Hotmail lỗi liên tiếp 3 lần. Bỏ qua mail {email}!", "ERR")
+                    return None
         except Exception as e:
-            log(f"Lỗi API Hotmail: {e}", "WARN")
+            consecutive_api_errors += 1
+            log(f"Lỗi API Hotmail ({consecutive_api_errors}/3): {e}", "WARN")
+            if consecutive_api_errors >= 3:
+                log(f"Lỗi kết nối API Hotmail 3 lần. Bỏ qua mail {email}!", "ERR")
+                return None
         time.sleep(interval)
         elapsed += interval
-    log("Hết thời gian chờ OTP xAI!", "ERR")
+    log(f"Hết thời gian chờ OTP xAI ({timeout}s)!", "ERR")
     return None
 
 

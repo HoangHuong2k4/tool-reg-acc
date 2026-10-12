@@ -104,6 +104,23 @@ def mark_hotmail_used(acc):
         except Exception as e:
             log(f"Lỗi khi cập nhật file: {e}", "WARN")
 
+def mark_hotmail_failed(acc, reason="API_OR_OTP_FAILED"):
+    with FILE_LOCK:
+        try:
+            with open("data/hotmail_failed.txt", "a", encoding="utf-8") as f:
+                f.write(f"{acc.get('original_line', '')}|REASON={reason}|DATE={datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            
+            with open(HOTMAIL_FILE, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+                
+            with open(HOTMAIL_FILE, "w", encoding="utf-8") as f:
+                for line in lines:
+                    if line.strip() and line.strip() != acc.get('original_line', '').strip():
+                        f.write(line)
+            log(f"Đã loại bỏ mail lỗi {acc.get('email')} khỏi {HOTMAIL_FILE} (lưu vào data/hotmail_failed.txt)", "INFO")
+        except Exception as e:
+            log(f"Lỗi khi cập nhật file mail lỗi: {e}", "WARN")
+
 class C:
 
 
@@ -125,7 +142,7 @@ def log(msg, level="INFO"):
 
 GLOBAL_STOP_EVENT = None
 
-def wait_for_otp(email, password, refresh_token, client_id, timeout=120, interval=4, after_ts=0, mail_api_source="mixmmo"):
+def wait_for_otp(email, password, refresh_token, client_id, timeout=90, interval=4, after_ts=0, mail_api_source="mixmmo", max_api_errors=3):
     api_url = HOTMAIL_API_URL if mail_api_source == "dongvanfb" else "https://mixmmo.com/api/get-hotmail-messages.php"
     log(f"Đang chờ OTP cho {email} qua {mail_api_source.upper()} API (tối đa {timeout}s)...", "INFO")
     
@@ -148,19 +165,27 @@ def wait_for_otp(email, password, refresh_token, client_id, timeout=120, interva
         }
     
     elapsed = 0
+    consecutive_api_errors = 0
+    fatal_keywords = [
+        "empty access token", "imap connection failed", "invalid_grant", 
+        "invalid_client", "unauthorized", "expired_token", "account is locked", 
+        "account is blocked", "login failed"
+    ]
+    
     while elapsed < timeout:
         if GLOBAL_STOP_EVENT and GLOBAL_STOP_EVENT.is_set():
             log("Task bị dừng bởi người dùng, thoát chờ OTP!", "WARN")
             return None
         try:
             if mail_api_source == "dongvanfb":
-                resp = requests.post(api_url, headers=headers, json=payload, timeout=60)
+                resp = requests.post(api_url, headers=headers, json=payload, timeout=15)
             else:
-                resp = requests.post(api_url, headers=headers, data=payload, timeout=60)
+                resp = requests.post(api_url, headers=headers, data=payload, timeout=15)
                 
             data = resp.json()
             
             if data.get("status") or data.get("success"):
+                consecutive_api_errors = 0  # Reset khi API phản hồi bình thường
                 if data.get("messages"):
                     for msg in data["messages"]:
                         otp = msg.get("code", "").strip()
@@ -182,15 +207,32 @@ def wait_for_otp(email, password, refresh_token, client_id, timeout=120, interva
                             log(f"Nhận được OTP: {C.BOLD}{otp}{C.RST}", "OK")
                             return otp
             else:
-                log(f"API Hotmail trả về lỗi: {data}", "WARN")
+                consecutive_api_errors += 1
+                raw_err = str(data).lower()
+                is_fatal = any(k in raw_err for k in fatal_keywords)
+                
+                log(f"API Hotmail trả về lỗi ({consecutive_api_errors}/{max_api_errors}): {data}", "WARN")
+                
+                # Nếu gặp lỗi token chết/IMAP hỏng: chỉ thử 2 lần là bỏ qua ngay
+                if is_fatal and consecutive_api_errors >= 2:
+                    log(f"⚠️ Phát hiện lỗi Token/Hotmail chết ('{data.get('message', '')}'). Bỏ qua mail {email} ngay để tránh treo CapCut!", "ERR")
+                    return None
+                    
+                if consecutive_api_errors >= max_api_errors:
+                    log(f"⚠️ API Hotmail lỗi liên tiếp {consecutive_api_errors} lần. Bỏ qua mail {email} để tránh treo CapCut!", "ERR")
+                    return None
                 
         except Exception as e:
-            log(f"Lỗi gọi API Hotmail: {e}", "WARN")
+            consecutive_api_errors += 1
+            log(f"Lỗi gọi API Hotmail ({consecutive_api_errors}/{max_api_errors}): {e}", "WARN")
+            if consecutive_api_errors >= max_api_errors:
+                log(f"⚠️ Không thể kết nối API Hotmail sau {consecutive_api_errors} lần thử. Bỏ qua mail {email}!", "ERR")
+                return None
             
         time.sleep(interval)
         elapsed += interval
     
-    log("Hết thời gian chờ OTP!", "ERR")
+    log(f"Hết thời gian chờ OTP ({timeout}s) cho {email}!", "ERR")
     return None
 
 from .browser_utils import get_settings_from_db
@@ -1378,6 +1420,8 @@ def register_one_account(index, join_link=None, keep_open=False, batch_size=3, p
         bday_status = step3_enter_birthday(driver)
         if bday_status != "ALREADY_LOGGED_IN":
             if not step4_enter_otp(driver, email, email_pass, refresh_token, client_id, mail_api_source):
+                log(f"[{email}] Bỏ qua email này do không lấy được OTP / lỗi Hotmail API!", "WARN")
+                mark_hotmail_failed(acc, reason="OTP_FAILED_OR_TOKEN_ERROR")
                 return False
 
         msToken = ""
