@@ -23,10 +23,10 @@ class LocalProxyRelay:
     Trình duyệt kết nối vào đây không cần auth,
     relay tự động thêm Proxy-Authorization và forward lên proxy thật.
     """
-    def __init__(self, upstream_host, upstream_port, username, password, local_port=0):
+    def __init__(self, upstream_host, upstream_port, username="", password="", local_port=0):
         self.upstream_host = upstream_host
         self.upstream_port = int(upstream_port)
-        self.auth_b64 = base64.b64encode(f"{username}:{password}".encode()).decode()
+        self.auth_b64 = base64.b64encode(f"{username}:{password}".encode()).decode() if (username and password) else None
         self.local_port = local_port
         self._sock = None
         self._running = False
@@ -104,15 +104,18 @@ class LocalProxyRelay:
             upstream.settimeout(15)
             upstream.connect((self.upstream_host, self.upstream_port))
 
-            auth_header = f"Proxy-Authorization: Basic {self.auth_b64}\r\n".encode()
+            auth_header = f"Proxy-Authorization: Basic {self.auth_b64}\r\n".encode() if self.auth_b64 else b""
 
             if b"\r\n\r\n" in raw:
                 head, body = raw.split(b"\r\n\r\n", 1)
                 lines = head.split(b"\r\n")
                 lines = [l for l in lines if not l.lower().startswith(b"proxy-authorization:")]
-                modified = b"\r\n".join(lines) + b"\r\n" + auth_header + b"\r\n" + body
+                if auth_header:
+                    modified = b"\r\n".join(lines) + b"\r\n" + auth_header + b"\r\n" + body
+                else:
+                    modified = b"\r\n".join(lines) + b"\r\n\r\n" + body
             else:
-                modified = raw + auth_header + b"\r\n"
+                modified = raw + (auth_header if auth_header else b"") + b"\r\n"
 
             upstream.sendall(modified)
 

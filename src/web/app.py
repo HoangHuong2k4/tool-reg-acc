@@ -651,6 +651,7 @@ def _run_retry_links_task(browser_type, headless, mail_api_source, threads=2, in
             sys.path.insert(0, root_dir)
 
         mod = importlib.import_module("src.bots.capcut_hotmail")
+        mod = importlib.reload(mod)
         state_capcut.module = mod
         mod.log = state_capcut.log
         import src.bots.capcut_hotmail as ch
@@ -786,6 +787,7 @@ def _run_capcut_task(mode, count, threads, join_link, mail_type, mail_api_source
             sys.path.insert(0, root_dir)
             
         state_capcut.module = importlib.import_module(mod_name)
+        state_capcut.module = importlib.reload(state_capcut.module)
         bot = state_capcut.module
         bot.log = state_capcut.log
         

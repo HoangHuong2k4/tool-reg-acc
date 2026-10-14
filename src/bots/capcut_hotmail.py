@@ -263,6 +263,8 @@ def setup_driver(index=1, keep_open=False, use_api_proxy=True, batch_size=3, use
 
     proxy = None
     PROXY_HOST = None
+    PROXY_USER = ""
+    PROXY_PASS = ""
     if use_proxy:
         if predefined_proxy:
             proxy = predefined_proxy
@@ -272,7 +274,8 @@ def setup_driver(index=1, keep_open=False, use_api_proxy=True, batch_size=3, use
             
         if proxy:
             PROXY_HOST, PROXY_PORT = proxy["host"], proxy["port"]
-            PROXY_USER, PROXY_PASS = proxy["user"], proxy["pass"]
+            PROXY_USER = proxy.get("user", "")
+            PROXY_PASS = proxy.get("pass", "")
             log(f"Đang dùng Proxy API: {PROXY_HOST}:{PROXY_PORT}", "INFO")
         else:
             # Dự phòng nếu API lỗi - proxy này có thể đã chết, kiểm tra lại!
@@ -280,22 +283,23 @@ def setup_driver(index=1, keep_open=False, use_api_proxy=True, batch_size=3, use
                 {"host": "180.93.2.171", "port": 3131, "user": "kierangrayson226", "pass": "odq0nda0odmzoa=="}
             ]
             proxy = random.choice(PROXIES)
-            PROXY_HOST, PROXY_PORT, PROXY_USER, PROXY_PASS = proxy["host"], proxy["port"], proxy["user"], proxy["pass"]
-            log(f"[⚠️ DỰ PHÒNG] API proxy lỗi -> dùng proxy cứ: {PROXY_HOST}:{PROXY_PORT} (có thể đã chết!)", "WARN")
+            PROXY_HOST, PROXY_PORT = proxy["host"], proxy["port"]
+            PROXY_USER = proxy.get("user", "")
+            PROXY_PASS = proxy.get("pass", "")
+            log(f"[⚠️ DỰ PHÒNG] API proxy lỗi -> dùng proxy cố định: {PROXY_HOST}:{PROXY_PORT} (có thể đã chết!)", "WARN")
 
+    relay = None
     if PROXY_HOST:
-        if PROXY_USER and PROXY_PASS:
-            relay = LocalProxyRelay(
-                upstream_host=PROXY_HOST,
-                upstream_port=PROXY_PORT,
-                username=PROXY_USER,
-                password=PROXY_PASS,
-                local_port=0
-            ).start()
-            options.add_argument(f"--proxy-server=http://127.0.0.1:{relay.local_port}")
-            options.add_argument("--proxy-bypass-list=<-loopback>")
-        else:
-            options.add_argument(f"--proxy-server=http://{PROXY_HOST}:{PROXY_PORT}")
+        relay = LocalProxyRelay(
+            upstream_host=PROXY_HOST,
+            upstream_port=PROXY_PORT,
+            username=PROXY_USER,
+            password=PROXY_PASS,
+            local_port=0
+        ).start()
+        options.add_argument(f"--proxy-server=http://127.0.0.1:{relay.local_port}")
+        options.add_argument("--proxy-bypass-list=<-loopback>")
+        log(f"🔗 Đã kích hoạt Local Proxy Relay: 127.0.0.1:{relay.local_port} -> {PROXY_HOST}:{PROXY_PORT}", "OK")
 
 
     if browser_type.lower() in ["firefox", "camoufox"]:
@@ -314,19 +318,12 @@ def setup_driver(index=1, keep_open=False, use_api_proxy=True, batch_size=3, use
             ff_options.binary_location = camoufox_path
             log("Đang sử dụng trình duyệt Camoufox!", "OK")
             
-        if PROXY_HOST:
-            if PROXY_USER and PROXY_PASS:
-                ff_options.set_preference("network.proxy.type", 1)
-                ff_options.set_preference("network.proxy.http", "127.0.0.1")
-                ff_options.set_preference("network.proxy.http_port", relay.local_port)
-                ff_options.set_preference("network.proxy.ssl", "127.0.0.1")
-                ff_options.set_preference("network.proxy.ssl_port", relay.local_port)
-            else:
-                ff_options.set_preference("network.proxy.type", 1)
-                ff_options.set_preference("network.proxy.http", PROXY_HOST)
-                ff_options.set_preference("network.proxy.http_port", PROXY_PORT)
-                ff_options.set_preference("network.proxy.ssl", PROXY_HOST)
-                ff_options.set_preference("network.proxy.ssl_port", PROXY_PORT)
+        if PROXY_HOST and relay:
+            ff_options.set_preference("network.proxy.type", 1)
+            ff_options.set_preference("network.proxy.http", "127.0.0.1")
+            ff_options.set_preference("network.proxy.http_port", relay.local_port)
+            ff_options.set_preference("network.proxy.ssl", "127.0.0.1")
+            ff_options.set_preference("network.proxy.ssl_port", relay.local_port)
                 
         driver = webdriver.Firefox(options=ff_options)
     else:
@@ -348,6 +345,8 @@ def setup_driver(index=1, keep_open=False, use_api_proxy=True, batch_size=3, use
                 log(f"webdriver-manager cũng lỗi: {e2}", "ERR")
                 raise
 
+    if relay:
+        driver._proxy_relay = relay
     driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
     return driver
 
@@ -1359,6 +1358,8 @@ def retry_get_payment_link_for_acc(email, password, refresh_token, client_id, co
     finally:
         if driver:
             try:
+                if hasattr(driver, '_proxy_relay') and driver._proxy_relay:
+                    driver._proxy_relay.stop()
                 if driver in ACTIVE_DRIVERS: ACTIVE_DRIVERS.remove(driver)
                 driver.quit()
             except: pass
@@ -1402,6 +1403,8 @@ def register_one_account(index, join_link=None, keep_open=False, batch_size=3, p
                             log(f"Không thể gọi API xoay proxy: {re_err}", "WARN")
 
                         try:
+                            if hasattr(driver, '_proxy_relay') and driver._proxy_relay:
+                                driver._proxy_relay.stop()
                             if driver in ACTIVE_DRIVERS: ACTIVE_DRIVERS.remove(driver)
                             driver.quit()
                         except: pass
@@ -1485,6 +1488,8 @@ def register_one_account(index, join_link=None, keep_open=False, batch_size=3, p
     finally:
         if driver and not keep_open:
             try:
+                if hasattr(driver, '_proxy_relay') and driver._proxy_relay:
+                    driver._proxy_relay.stop()
                 if driver in ACTIVE_DRIVERS: ACTIVE_DRIVERS.remove(driver)
                 driver.quit()
                 log("Đã đóng trình duyệt.", "INFO")
@@ -1642,7 +1647,10 @@ if __name__ == "__main__":
                     if ACTIVE_DRIVERS:
                         log("Đang dọn dẹp các tab cũ trước khi qua đợt mới...", "INFO")
                         for d in ACTIVE_DRIVERS:
-                            try: d.quit()
+                            try:
+                                if hasattr(d, '_proxy_relay') and d._proxy_relay:
+                                    d._proxy_relay.stop()
+                                d.quit()
                             except: pass
                         ACTIVE_DRIVERS.clear()
                 batch_count_idx += 1
@@ -1659,7 +1667,10 @@ if __name__ == "__main__":
             if keep_open and ACTIVE_DRIVERS:
                 log("Đang đóng toàn bộ các tab trình duyệt...", "INFO")
                 for d in ACTIVE_DRIVERS:
-                    try: d.quit()
+                    try:
+                        if hasattr(d, '_proxy_relay') and d._proxy_relay:
+                            d._proxy_relay.stop()
+                        d.quit()
                     except: pass
             print("Tạm biệt!")
             break
@@ -1667,6 +1678,9 @@ if __name__ == "__main__":
             if keep_open and ACTIVE_DRIVERS:
                 log("Đang đóng các tab cũ trước khi mở đợt mới...", "INFO")
                 for d in ACTIVE_DRIVERS:
-                    try: d.quit()
+                    try:
+                        if hasattr(d, '_proxy_relay') and d._proxy_relay:
+                            d._proxy_relay.stop()
+                        d.quit()
                     except: pass
                 ACTIVE_DRIVERS.clear()
