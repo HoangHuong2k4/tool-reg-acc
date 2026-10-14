@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ChatGPT Auto Tool",
-  "version": "1.3",
+  "version": "1.5",
   "description": "Tự động đăng nhập + fill checkout Stripe cho ChatGPT",
   "permissions": [
     "storage"
@@ -28,7 +28,7 @@
     },
     {
       "matches": [
-        "*://chatgpt.com/checkout/*",
+        "*://chatgpt.com/*",
         "*://js.stripe.com/*"
       ],
       "js": ["fill.js"],

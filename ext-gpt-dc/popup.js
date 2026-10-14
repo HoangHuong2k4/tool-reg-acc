@@ -1,13 +1,14 @@
-const ta       = document.getElementById('ta');
-const saveBtn  = document.getElementById('saveBtn');
-const clearBtn = document.getElementById('clearBtn');
-const dot      = document.getElementById('dot');
-const statusTx = document.getElementById('statusTxt');
-const totpWrap = document.getElementById('totpWrap');
-const totpCode = document.getElementById('totpCode');
+const ta        = document.getElementById('ta');
+const saveBtn   = document.getElementById('saveBtn');
+const clearBtn  = document.getElementById('clearBtn');
+const refillBtn = document.getElementById('refillBtn');
+const dot       = document.getElementById('dot');
+const statusTx  = document.getElementById('statusTxt');
+const totpWrap  = document.getElementById('totpWrap');
+const totpCode  = document.getElementById('totpCode');
 const timerFill = document.getElementById('timerFill');
-const toast    = document.getElementById('toast');
-const copyBtn  = document.getElementById('copyBtn');
+const toast     = document.getElementById('toast');
+const copyBtn   = document.getElementById('copyBtn');
 
 let totpInterval = null;
 
@@ -53,6 +54,15 @@ clearBtn.addEventListener('click', () => {
         showToast('🗑 Đã xóa', 'err');
     });
 });
+
+// ---- Đổi địa chỉ Stripe ----
+if (refillBtn) {
+    refillBtn.addEventListener('click', () => {
+        chrome.storage.local.set({ trigger_refill: Date.now() }, () => {
+            showToast('📍 Đã gửi lệnh đổi địa chỉ!', 'ok');
+        });
+    });
+}
 
 // ---- Copy TOTP ----
 copyBtn.onclick = () => {

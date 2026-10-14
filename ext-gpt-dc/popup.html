@@ -71,6 +71,8 @@
   .btn-primary:hover { opacity: 0.88; transform: translateY(-1px); }
   .btn-secondary { background: #1a1a2a; border: 1.5px solid #252535; color: #8899bb; }
   .btn-secondary:hover { background: #1e1e30; color: #e0e0f0; }
+  .btn-warning { background: #261c10; border: 1.5px solid #4a3518; color: #f59e0b; }
+  .btn-warning:hover { background: #352614; color: #fbbf24; border-color: #6a4c20; }
 
   .toast {
     position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%) translateY(50px);
@@ -86,8 +88,8 @@
 <body>
 
 <div class="header">
-  <h1>🔐 ChatGPT Auto Login</h1>
-  <p>Tự động đăng nhập với email, pass & 2FA</p>
+  <h1>🔐 ChatGPT Auto Tool</h1>
+  <p>Tự động đăng nhập & đổi địa chỉ Stripe</p>
 </div>
 
 <div class="status-bar">
@@ -115,6 +117,7 @@
 
 <div class="actions">
   <button class="btn btn-secondary" id="clearBtn">🗑 Xóa</button>
+  <button class="btn btn-warning" id="refillBtn" title="Gửi lệnh đổi địa chỉ thanh toán Stripe">📍 Đổi Đ/C</button>
   <button class="btn btn-primary" id="saveBtn">💾 Lưu</button>
 </div>
 

@@ -46,18 +46,56 @@
     // ─── Simulate human typing (triggers React/Stripe events) ─────────────────
     async function simulateTyping(element, text) {
         if (!element) return;
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
         element.focus();
-        element.value = '';
+        if (setter) setter.call(element, '');
+        else element.value = '';
         element.dispatchEvent(new Event('input', { bubbles: true }));
-        await new Promise(r => setTimeout(r, 80));
+        await new Promise(r => setTimeout(r, 60));
         for (let i = 0; i < text.length; i++) {
-            element.value += text[i];
-            element.dispatchEvent(new Event('input',  { bubbles: true }));
-            element.dispatchEvent(new Event('change', { bubbles: true }));
-            await new Promise(r => setTimeout(r, Math.random() * 50 + 30));
+            const val = text.slice(0, i + 1);
+            if (setter) setter.call(element, val);
+            else element.value = val;
+            element.dispatchEvent(new Event('input', { bubbles: true }));
+            await new Promise(r => setTimeout(r, Math.random() * 30 + 15));
         }
+        element.dispatchEvent(new Event('change', { bubbles: true }));
         element.blur();
     }
+
+    // ─── CHỐNG TỰ ĐỘNG BẤM / SUBMIT NÚT THANH TOÁN (SUBSCRIBE / MUA GÓI) ───
+    // Tuyệt đối không để bất kỳ script hoặc hành vi giả lập nào tự động bấm nút mua / submit
+    function installSubmitProtector() {
+        // Chặn submit tự động trên form
+        window.addEventListener('submit', (e) => {
+            if (!e.isTrusted || isFilling) {
+                console.warn('[AutoFill Block] Đã chặn submit form tự động:', e.target);
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                return false;
+            }
+        }, true);
+
+        // Chặn click tự động vào các nút Mua gói / Subscribe / Submit
+        window.addEventListener('click', (e) => {
+            const target = e.target;
+            const btn = (target && target.closest) ? target.closest(
+                'button[type="submit"], button[form], button.button-uUalnz, button[aria-label*="Subscribe" i], button[aria-label*="Mua gói" i], button[data-testid*="submit" i]'
+            ) : null;
+            if (btn) {
+                // Nếu click giả lập (script click / dispatchEvent, isTrusted === false) hoặc đang fill
+                if (!e.isTrusted || isFilling) {
+                    console.warn('[AutoFill Block] Đã chặn click tự động vào nút thanh toán:', btn);
+                    e.preventDefault();
+                    e.stopPropagation();
+                    e.stopImmediatePropagation();
+                    return false;
+                }
+            }
+        }, true);
+    }
+    installSubmitProtector();
 
     // ─── Core fill logic — KHONG click / KHONG submit bat ky nut nao ──────────
     let isFilling = false;
@@ -70,70 +108,162 @@
     async function autoFillForm(forceRefill) {
         if (isFilling) return;
 
-        const SEL_NAME  = 'input[name="name"], input[autocomplete="name"], input[id*="billingName"], input[data-elements-stable-field-name="billingName"]';
-        const SEL_ADDR  = 'input[name="addressLine1"], input[autocomplete="address-line1"], input[id*="billingAddressLine1"], input[name="address1"], input[id*="addressLine1"]';
-        const SEL_CITY  = 'input[name="locality"], input[autocomplete="address-level2"], input[name="city"], input[id*="billingLocality"]';
-        const SEL_ZIP   = 'input[name="postalCode"], input[autocomplete="postal-code"], input[name="zip"], input[name="postal_code"], input[id*="billingPostalCode"]';
-        const SEL_STATE = 'select[name="administrativeArea"], select[autocomplete*="address-level1"], select[name="state"], select[id*="billingAdministrativeArea"]';
+        // Nếu đang ở frame chính chatgpt.com -> Broadcast lệnh fill xuống tất cả các iframe Stripe
+        if (isCheckout && !isStripe) {
+            updateFloatingStatus('Đang gửi lệnh điền...');
+            broadcastRefill();
+            return;
+        }
+
+        // Đang ở iframe Stripe (js.stripe.com)
+        // 1. Thử click nút "Enter address manually" nếu có (TUYỆT ĐỐI không click bất kỳ nút submit, Mua gói hay Subscribe nào)
+        const manualBtn = Array.from(document.querySelectorAll('button:not([type="submit"]):not([form]), a, [role="button"]:not([type="submit"])')).find(el => {
+            const txt = (el.textContent || el.innerText || '').trim().toLowerCase();
+            const isManual = txt.includes('manually') || txt.includes('thủ công') || txt === 'manual';
+            const isSubmit = el.type === 'submit' || el.hasAttribute('form') || /mua gói|subscribe|pay|thanh toán/i.test(txt);
+            return isManual && !isSubmit;
+        });
+        if (manualBtn && manualBtn.offsetParent !== null) {
+            console.log('[AutoFill] Tìm thấy nút Enter address manually, đang click mở ô nhập...');
+            manualBtn.click();
+            await new Promise(r => setTimeout(r, 600));
+        }
+
+        const SEL_NAME = [
+            'input[name="name"]',
+            'input[autocomplete="name"]',
+            'input[id*="billingName"]',
+            'input[data-elements-stable-field-name="billingName"]',
+            'input[placeholder*="Name" i]',
+            'input[placeholder*="Tên" i]'
+        ].join(',');
+
+        const SEL_ADDR = [
+            'input[name="addressLine1"]',
+            'input[name="address1"]',
+            'input[name="address"]',
+            'input[name="line1"]',
+            'input[autocomplete="address-line1"]',
+            'input[autocomplete="street-address"]',
+            'input[id*="addressLine1"]',
+            'input[id*="billingAddressLine1"]',
+            'input[id*="address1"]',
+            'input[id*="address" i]',
+            'input[id*="line1" i]',
+            'input[data-elements-stable-field-name="addressLine1"]',
+            'input[placeholder*="Address" i]',
+            'input[placeholder*="Địa chỉ" i]'
+        ].join(',');
+
+        const SEL_CITY = [
+            'input[name="locality"]',
+            'input[name="city"]',
+            'input[autocomplete="address-level2"]',
+            'input[id*="billingLocality"]',
+            'input[id*="locality" i]',
+            'input[id*="city" i]',
+            'input[placeholder*="City" i]',
+            'input[placeholder*="Thành phố" i]'
+        ].join(',');
+
+        const SEL_ZIP = [
+            'input[name="postalCode"]',
+            'input[name="postal_code"]',
+            'input[name="zip"]',
+            'input[autocomplete="postal-code"]',
+            'input[id*="billingPostalCode"]',
+            'input[id*="postal" i]',
+            'input[id*="zip" i]',
+            'input[placeholder*="Postal" i]',
+            'input[placeholder*="ZIP" i]',
+            'input[placeholder*="bưu chính" i]'
+        ].join(',');
+
+        const SEL_STATE = [
+            'select[name="administrativeArea"]',
+            'select[name="state"]',
+            'select[autocomplete*="address-level1"]',
+            'select[id*="billingAdministrativeArea"]',
+            'select[id*="state" i]'
+        ].join(',');
 
         const nameInput = document.querySelector(SEL_NAME);
         const addrInput = document.querySelector(SEL_ADDR);
+        const cityInput = document.querySelector(SEL_CITY);
+        const zipInput  = document.querySelector(SEL_ZIP);
 
-        if (!nameInput && !addrInput) {
-            console.log('[AutoFill] Khong tim thay o nhap lieu Stripe tren frame nay.');
+        if (!nameInput && !addrInput && !cityInput && !zipInput) {
             return;
         }
 
         isFilling = true;
-        updateFloatingStatus('Dang dien dia chi...');
-        console.log('[AutoFill] Bat dau fill form (KHONG auto click/submit)');
+        try {
+            console.log('[AutoFill] Tìm thấy ô nhập liệu Stripe trên frame (' + window.location.pathname + '), bắt đầu điền...');
 
-        // 1. Ten
-        if (nameInput && (!nameInput.value || forceRefill)) {
-            await simulateTyping(nameInput, getRandomName());
-            await new Promise(r => setTimeout(r, 400));
-        }
-
-        // 2. Dia chi dong 1
-        if (addrInput && (!addrInput.value || forceRefill)) {
-            await simulateTyping(addrInput, getRandomAddress1());
-            await new Promise(r => setTimeout(r, 900));
-
-            // 3. Thanh pho
-            const cityInput = document.querySelector(SEL_CITY);
-            if (cityInput && (!cityInput.value || forceRefill)) {
-                await simulateTyping(cityInput, getRandomCity());
+            // 1. Tên (thường ở payment frame)
+            if (nameInput && (!nameInput.value || forceRefill)) {
+                await simulateTyping(nameInput, getRandomName());
                 await new Promise(r => setTimeout(r, 300));
             }
 
-            // 4. Zip
-            const zipInput = document.querySelector(SEL_ZIP);
-            if (zipInput && (!zipInput.value || forceRefill)) {
-                await simulateTyping(zipInput, getRandomZip());
-                await new Promise(r => setTimeout(r, 300));
-            }
+            // 2. Địa chỉ dòng 1 (thường ở address frame)
+            if (addrInput && (!addrInput.value || forceRefill)) {
+                await simulateTyping(addrInput, getRandomAddress1());
+                await new Promise(r => setTimeout(r, 600));
 
-            // 5. State dropdown (neu co)
-            const stateSelect = document.querySelector(SEL_STATE);
-            if (stateSelect && (!stateSelect.value || forceRefill)) {
-                const opts = Array.from(stateSelect.options).filter(o => o.value && !o.disabled);
-                if (opts.length) {
-                    const opt = opts[Math.floor(Math.random() * opts.length)];
-                    stateSelect.value = opt.value;
-                    stateSelect.dispatchEvent(new Event('change', { bubbles: true }));
-                    stateSelect.dispatchEvent(new Event('input',  { bubbles: true }));
+                // 3. Thành phố
+                const cInput = document.querySelector(SEL_CITY);
+                if (cInput && (!cInput.value || forceRefill)) {
+                    await simulateTyping(cInput, getRandomCity());
+                    await new Promise(r => setTimeout(r, 300));
+                }
+
+                // 4. Zip code
+                const zInput = document.querySelector(SEL_ZIP);
+                if (zInput && (!zInput.value || forceRefill)) {
+                    await simulateTyping(zInput, getRandomZip());
+                    await new Promise(r => setTimeout(r, 300));
+                }
+
+                // 5. State dropdown (nếu có)
+                const stateSelect = document.querySelector(SEL_STATE);
+                if (stateSelect && (!stateSelect.value || forceRefill)) {
+                    const opts = Array.from(stateSelect.options).filter(o => o.value && !o.disabled);
+                    if (opts.length) {
+                        const opt = opts[Math.floor(Math.random() * opts.length)];
+                        stateSelect.value = opt.value;
+                        stateSelect.dispatchEvent(new Event('change', { bubbles: true }));
+                        stateSelect.dispatchEvent(new Event('input',  { bubbles: true }));
+                    }
                 }
             }
-        }
 
-        console.log('[AutoFill] Hoan thanh fill -- KHONG click submit/checkout.');
-        updateFloatingStatus('Da dien xong dia chi!');
-        isFilling = false;
+            console.log('[AutoFill] Đã điền xong địa chỉ trên frame:', window.location.pathname, '-- TUYỆT ĐỐI KHÔNG click nút Mua gói / Subscribe.');
+            try {
+                window.top.postMessage({ type: 'CHATGPT_AUTOFILL_DONE' }, '*');
+            } catch(e) {}
+        } finally {
+            isFilling = false;
+        }
     }
 
-    // ─── Floating button "Doi dia chi" (chi inject o chatgpt.com, khong vao iframe) ──
+    // ─── Broadcast helper (dành cho frame chính) ──────────────────────────────
+    function broadcastRefill() {
+        console.log('[AutoFill] Gửi lệnh refill tới tất cả iframe Stripe...');
+        try {
+            window.postMessage({ type: 'CHATGPT_AUTOFILL_REFILL' }, '*');
+            document.querySelectorAll('iframe').forEach(f => {
+                try { f.contentWindow.postMessage({ type: 'CHATGPT_AUTOFILL_REFILL' }, '*'); } catch (e) {}
+            });
+        } catch (e) {}
+        if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+            chrome.storage.local.set({ trigger_refill: Date.now() });
+        }
+    }
+
+    // ─── Floating button "Doi dia chi" (chi inject o chatgpt.com) ─────────────
     function injectFloatingButton() {
-        if (document.getElementById('__af_float__')) return;
+        if (!isCheckout || document.getElementById('__af_float__')) return;
 
         const style = document.createElement('style');
         style.textContent = [
@@ -151,54 +281,104 @@
 
         const statusDiv = document.createElement('div');
         statusDiv.id = '__af_status__';
-        statusDiv.textContent = 'San sang dien dia chi';
+        statusDiv.textContent = 'Sẵn sàng điền địa chỉ';
         floatStatusEl = statusDiv;
 
         const btn = document.createElement('button');
         btn.id = '__af_btn__';
-        btn.textContent = '\uD83D\uDD04 Doi dia chi';
-        btn.title = 'Dien ngau nhien dia chi moi vao form thanh toan Stripe (khong tu bam nut thanh toan)';
+        btn.textContent = '\uD83D\uDD04 Đổi địa chỉ';
+        btn.title = 'Điền ngẫu nhiên địa chỉ mới vào form Stripe Checkout (không tự bấm nút thanh toán)';
 
-        btn.onclick = async () => {
-            if (isFilling) return;
+        btn.onclick = () => {
             btn.disabled = true;
-            await autoFillForm(true);
+            broadcastRefill();
+            updateFloatingStatus('Đang gửi lệnh điền...');
             setTimeout(() => { btn.disabled = false; }, 1500);
         };
 
         wrap.appendChild(statusDiv);
         wrap.appendChild(btn);
         document.body.appendChild(wrap);
-        console.log('[AutoFill] Da inject nut "Doi dia chi" vao trang checkout.');
+        console.log('[AutoFill] Đã inject nút "Đổi địa chỉ" vào trang checkout.');
     }
 
-    // ─── Khoi dong ─────────────────────────────────────────────────────────────
-    const FORM_PROBE = 'input[name="name"], input[name="addressLine1"], input[autocomplete="address-line1"], input[id*="billingAddressLine1"]';
+    // ─── Listeners cho lệnh đổi địa chỉ từ login.js / popup.js ──────────────────
+    window.addEventListener('message', (e) => {
+        if (e.data && e.data.type === 'CHATGPT_AUTOFILL_REFILL') {
+            if (isStripe) {
+                console.log('[AutoFill] Nhận lệnh refill qua postMessage (Stripe frame)');
+                autoFillForm(true);
+            }
+        } else if (e.data && e.data.type === 'CHATGPT_AUTOFILL_DONE') {
+            updateFloatingStatus('Đã điền xong địa chỉ!');
+        }
+    });
 
-    function startObserver() {
-        const obs = new MutationObserver((_m, o) => {
-            if (document.querySelector(FORM_PROBE)) {
-                o.disconnect();
-                setTimeout(() => autoFillForm(false), 900);
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.onChanged) {
+        chrome.storage.onChanged.addListener((changes, area) => {
+            if (area === 'local' && changes.trigger_refill) {
+                if (isStripe) {
+                    console.log('[AutoFill] Nhận lệnh refill qua storage (Stripe frame)');
+                    autoFillForm(true);
+                }
             }
         });
-        if (document.body) obs.observe(document.body, { childList: true, subtree: true });
     }
 
-    if (isCheckout) {
-        if (document.body) injectFloatingButton();
-        else document.addEventListener('DOMContentLoaded', injectFloatingButton);
+    // ─── Khởi động ─────────────────────────────────────────────────────────────
+    function startObserver() {
+        if (isStripe) {
+            // Trong iframe Stripe: Kiểm tra và điền ngay khi form render
+            const checkAndFill = () => {
+                const SEL_CHECK = 'input[name="addressLine1"], input[name="address"], input[name="name"], input[id*="address"], input[id*="billing"]';
+                if (document.querySelector(SEL_CHECK)) {
+                    autoFillForm(false);
+                    return true;
+                }
+                return false;
+            };
+
+            const obs = new MutationObserver(() => {
+                if (checkAndFill()) obs.disconnect();
+            });
+            if (document.body) obs.observe(document.body, { childList: true, subtree: true });
+
+            // Kiểm tra định kỳ 400ms trong 6 giây đầu
+            let attempts = 0;
+            const timer = setInterval(() => {
+                attempts++;
+                if (checkAndFill() || attempts >= 15) {
+                    clearInterval(timer);
+                    obs.disconnect();
+                }
+            }, 400);
+
+        } else if (isCheckout) {
+            // Trên trang chính chatgpt.com
+            const checkAndInit = () => {
+                const hasStripe = document.querySelector('iframe[src*="stripe.com"], .StripeElement');
+                if (hasStripe) {
+                    injectFloatingButton();
+                    broadcastRefill();
+                    return true;
+                }
+                return false;
+            };
+
+            const obs = new MutationObserver(() => {
+                if (checkAndInit()) obs.disconnect();
+            });
+            if (document.body) obs.observe(document.body, { childList: true, subtree: true });
+
+            setTimeout(() => {
+                checkAndInit();
+            }, 1200);
+            setTimeout(() => {
+                checkAndInit();
+            }, 3000);
+        }
     }
 
     startObserver();
-    setTimeout(() => {
-        if (document.querySelector(FORM_PROBE)) {
-            autoFillForm(false);
-        } else {
-            setTimeout(() => {
-                if (document.querySelector(FORM_PROBE)) autoFillForm(false);
-            }, 2000);
-        }
-    }, 1200);
 
 })();

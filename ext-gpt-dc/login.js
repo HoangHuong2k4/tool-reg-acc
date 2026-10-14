@@ -255,6 +255,9 @@
             #__alp_btn__:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
             #__alp_promo__ { background: #1a2a1a; color: #6dbd5e; border-color: #2a4a2a; }
             #__alp_promo__:hover { background: #1e3a1e; border-color: #3a6a3a; }
+            #__alp_addr__ { background: #261c10; color: #f59e0b; border-color: #4a3518; }
+            #__alp_addr__:hover:not(:disabled) { background: #352614; border-color: #6a4c20; }
+            #__alp_addr__:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
             #__alp_action_row__ { display: flex; gap: 6px; margin-top: 2px; }
             #__alp_ta__ {
                 width: 100%;
@@ -303,6 +306,7 @@
                     <button id="__alp_home__" class="alp-icon-btn" title="Về trang chủ ChatGPT">🏠</button>
                     <button id="__alp_btn__"  class="alp-icon-btn" title="Bắt đầu đăng nhập">▶️</button>
                     <button id="__alp_promo__" class="alp-icon-btn" title="Trang ưu đãi Plus miễn phí">🎁</button>
+                    <button id="__alp_addr__"  class="alp-icon-btn" title="Đổi địa chỉ thanh toán (Stripe)">📍</button>
                 </div>
             </div>
         `;
@@ -316,6 +320,7 @@
         const drag    = document.getElementById('__alp_drag__');
         const homeBtn  = document.getElementById('__alp_home__');
         const promoBtn = document.getElementById('__alp_promo__');
+        const addrBtn  = document.getElementById('__alp_addr__');
         let collapsed = false;
 
         // ── Nút thu nhỏ / mở lại ──
@@ -381,6 +386,34 @@
         promoBtn.onclick = () => {
             window.location.href = 'https://chatgpt.com/?promo_campaign=plus-1-month-free#pricing';
         };
+
+        // ── Nút Đổi địa chỉ thanh toán ──
+        addrBtn.onclick = async () => {
+            addrBtn.disabled = true;
+            addrBtn.innerHTML = '⏳';
+            updateMainStatus('<span style="color:#f59e0b;">🔄 Đang đổi địa chỉ thanh toán...</span>');
+
+            // Gửi signal tới tất cả frame (kể cả iframe Stripe)
+            try {
+                window.postMessage({ type: 'CHATGPT_AUTOFILL_REFILL' }, '*');
+                document.querySelectorAll('iframe').forEach(f => {
+                    try { f.contentWindow.postMessage({ type: 'CHATGPT_AUTOFILL_REFILL' }, '*'); } catch (e) {}
+                });
+            } catch (e) {}
+            await chrome.storage.local.set({ trigger_refill: Date.now() });
+
+            setTimeout(() => {
+                addrBtn.disabled = false;
+                addrBtn.innerHTML = '📍';
+            }, 1200);
+        };
+
+        // Lắng nghe khi fill.js hoàn tất
+        window.addEventListener('message', (event) => {
+            if (event.data && event.data.type === 'CHATGPT_AUTOFILL_DONE') {
+                updateMainStatus('<span style="color:#4caf50;">✓ Đã đổi xong địa chỉ mới!</span>');
+            }
+        });
 
         // ── Nút Bắt đầu ──
         btn.onclick = async () => {
