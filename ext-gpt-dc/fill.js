@@ -1,27 +1,27 @@
-(function() {
+(function () {
     // Chỉ chạy ở trang Stripe Checkout của ChatGPT hoặc iframe Stripe
-    const isStripe   = window.location.hostname === 'js.stripe.com';
+    const isStripe = window.location.hostname === 'js.stripe.com';
     const isCheckout = window.location.hostname === 'chatgpt.com';
     if (!isStripe && !isCheckout) return;
 
     // ─── Random data helpers ──────────────────────────────────────────────────
     function getRandomName() {
-        const firstNames = ["Nguyễn","Trần","Lê","Phạm","Hoàng","Huỳnh","Phan","Vũ","Võ","Đặng","Bùi","Đỗ","Hồ","Ngô","Dương","Lý","Đinh","Đoàn","Lâm","Trịnh","Mai","Đào"];
-        const middleNames = ["Văn","Thị","Thanh","Minh","Hữu","Đức","Ngọc","Gia","Bảo","Thu","Hồng","Hoàng","Thành","Đình","Quang","Trọng","Tuấn","Lan","Phương","Khánh","Xuân"];
-        const lastNames = ["Anh","Bình","Châu","Dương","Giang","Hải","Khang","Linh","Nhung","Phương","Quân","Sơn","Trang","Vy","Tuấn","Long","Cường","Hùng","Tùng","Khoa","Kiên","Hiếu","Nam","Phúc","Tâm","Hương","Hà","Yến","Thảo","My","Nhi","Đạt","Huy","Tiến"];
+        const firstNames = ["Nguyễn", "Trần", "Lê", "Phạm", "Hoàng", "Huỳnh", "Phan", "Vũ", "Võ", "Đặng", "Bùi", "Đỗ", "Hồ", "Ngô", "Dương", "Lý", "Đinh", "Đoàn", "Lâm", "Trịnh", "Mai", "Đào"];
+        const middleNames = ["Văn", "Thị", "Thanh", "Minh", "Hữu", "Đức", "Ngọc", "Gia", "Bảo", "Thu", "Hồng", "Hoàng", "Thành", "Đình", "Quang", "Trọng", "Tuấn", "Lan", "Phương", "Khánh", "Xuân"];
+        const lastNames = ["Anh", "Bình", "Châu", "Dương", "Giang", "Hải", "Khang", "Linh", "Nhung", "Phương", "Quân", "Sơn", "Trang", "Vy", "Tuấn", "Long", "Cường", "Hùng", "Tùng", "Khoa", "Kiên", "Hiếu", "Nam", "Phúc", "Tâm", "Hương", "Hà", "Yến", "Thảo", "My", "Nhi", "Đạt", "Huy", "Tiến"];
         const r = a => a[Math.floor(Math.random() * a.length)];
         return r(firstNames) + ' ' + r(middleNames) + ' ' + r(lastNames);
     }
 
     function getRandomAddress1() {
         const streets = [
-            "Nguyễn Huệ","Lê Lợi","Trần Hưng Đạo","Hai Bà Trưng","Đồng Khởi",
-            "Lý Tự Trọng","Nguyễn Đình Chiểu","Pasteur","Lê Duẩn","Nguyễn Thị Minh Khai",
-            "Điện Biên Phủ","Cách Mạng Tháng Tám","Nguyễn Trãi","Võ Văn Tần","Trương Định",
-            "Bà Huyện Thanh Quan","Nguyễn Bỉnh Khiêm","Lê Thánh Tôn","Tôn Đức Thắng","Hàm Nghi",
-            "Võ Thị Sáu","Nam Kỳ Khởi Nghĩa","Phan Đăng Lưu","Bạch Đằng","Đinh Tiên Hoàng",
-            "Hoàng Hoa Thám","Quang Trung","Nguyễn Oanh","Phạm Văn Đồng","Mai Chí Thọ",
-            "Trần Phú","Kim Mã","Cầu Giấy","Hoàng Diệu","Phan Đình Phùng","Xã Đàn"
+            "Nguyễn Huệ", "Lê Lợi", "Trần Hưng Đạo", "Hai Bà Trưng", "Đồng Khởi",
+            "Lý Tự Trọng", "Nguyễn Đình Chiểu", "Pasteur", "Lê Duẩn", "Nguyễn Thị Minh Khai",
+            "Điện Biên Phủ", "Cách Mạng Tháng Tám", "Nguyễn Trãi", "Võ Văn Tần", "Trương Định",
+            "Bà Huyện Thanh Quan", "Nguyễn Bỉnh Khiêm", "Lê Thánh Tôn", "Tôn Đức Thắng", "Hàm Nghi",
+            "Võ Thị Sáu", "Nam Kỳ Khởi Nghĩa", "Phan Đăng Lưu", "Bạch Đằng", "Đinh Tiên Hoàng",
+            "Hoàng Hoa Thám", "Quang Trung", "Nguyễn Oanh", "Phạm Văn Đồng", "Mai Chí Thọ",
+            "Trần Phú", "Kim Mã", "Cầu Giấy", "Hoàng Diệu", "Phan Đình Phùng", "Xã Đàn"
         ];
         const number = Math.floor(Math.random() * 999) + 1;
         return 'So ' + number + ' ' + streets[Math.floor(Math.random() * streets.length)];
@@ -29,17 +29,17 @@
 
     function getRandomCity() {
         const cities = [
-            "Ha Noi","Ho Chi Minh","Da Nang","Hai Phong","Can Tho",
-            "Nha Trang","Hue","Vung Tau","Bien Hoa","Da Lat",
-            "Buon Ma Thuot","Vinh","Thanh Hoa","Ha Long","Thai Nguyen",
-            "Viet Tri","Quy Nhon","Phan Thiet","Ca Mau","Long Xuyen",
-            "Rach Gia","My Tho","Tan An","Pleiku","Bac Ninh","Hai Duong"
+            "Ha Noi", "Ho Chi Minh", "Da Nang", "Hai Phong", "Can Tho",
+            "Nha Trang", "Hue", "Vung Tau", "Bien Hoa", "Da Lat",
+            "Buon Ma Thuot", "Vinh", "Thanh Hoa", "Ha Long", "Thai Nguyen",
+            "Viet Tri", "Quy Nhon", "Phan Thiet", "Ca Mau", "Long Xuyen",
+            "Rach Gia", "My Tho", "Tan An", "Pleiku", "Bac Ninh", "Hai Duong"
         ];
         return cities[Math.floor(Math.random() * cities.length)];
     }
 
     function getRandomZip() {
-        const zips = ["100000","700000","550000","180000","900000","650000","530000","790000","810000","670000","260000","430000","400000","200000","250000"];
+        const zips = ["100000", "700000", "550000", "180000", "900000", "650000", "530000", "790000", "810000", "670000", "260000", "430000", "400000", "200000", "250000"];
         return zips[Math.floor(Math.random() * zips.length)];
     }
 
@@ -63,40 +63,6 @@
         element.blur();
     }
 
-    // ─── CHỐNG TỰ ĐỘNG BẤM / SUBMIT NÚT THANH TOÁN (SUBSCRIBE / MUA GÓI) ───
-    // Tuyệt đối không để bất kỳ script hoặc hành vi giả lập nào tự động bấm nút mua / submit
-    function installSubmitProtector() {
-        // Chặn submit tự động trên form
-        window.addEventListener('submit', (e) => {
-            if (!e.isTrusted || isFilling) {
-                console.warn('[AutoFill Block] Đã chặn submit form tự động:', e.target);
-                e.preventDefault();
-                e.stopPropagation();
-                e.stopImmediatePropagation();
-                return false;
-            }
-        }, true);
-
-        // Chặn click tự động vào các nút Mua gói / Subscribe / Submit
-        window.addEventListener('click', (e) => {
-            const target = e.target;
-            const btn = (target && target.closest) ? target.closest(
-                'button[type="submit"], button[form], button.button-uUalnz, button[aria-label*="Subscribe" i], button[aria-label*="Mua gói" i], button[data-testid*="submit" i]'
-            ) : null;
-            if (btn) {
-                // Nếu click giả lập (script click / dispatchEvent, isTrusted === false) hoặc đang fill
-                if (!e.isTrusted || isFilling) {
-                    console.warn('[AutoFill Block] Đã chặn click tự động vào nút thanh toán:', btn);
-                    e.preventDefault();
-                    e.stopPropagation();
-                    e.stopImmediatePropagation();
-                    return false;
-                }
-            }
-        }, true);
-    }
-    installSubmitProtector();
-
     // ─── Core fill logic — KHONG click / KHONG submit bat ky nut nao ──────────
     let isFilling = false;
     let floatStatusEl = null;
@@ -116,83 +82,102 @@
         }
 
         // Đang ở iframe Stripe (js.stripe.com)
-        // 1. Thử click nút "Enter address manually" nếu có (TUYỆT ĐỐI không click bất kỳ nút submit, Mua gói hay Subscribe nào)
-        const manualBtn = Array.from(document.querySelectorAll('button:not([type="submit"]):not([form]), a, [role="button"]:not([type="submit"])')).find(el => {
-            const txt = (el.textContent || el.innerText || '').trim().toLowerCase();
-            const isManual = txt.includes('manually') || txt.includes('thủ công') || txt === 'manual';
-            const isSubmit = el.type === 'submit' || el.hasAttribute('form') || /mua gói|subscribe|pay|thanh toán/i.test(txt);
-            return isManual && !isSubmit;
-        });
-        if (manualBtn && manualBtn.offsetParent !== null) {
-            console.log('[AutoFill] Tìm thấy nút Enter address manually, đang click mở ô nhập...');
-            manualBtn.click();
-            await new Promise(r => setTimeout(r, 600));
+        // Helper nhận diện các trường input chính xác, tránh nhầm lẫn giữa Tên và Địa chỉ
+        function isNameInput(el) {
+            if (!el || el.tagName !== 'INPUT' || el.type === 'hidden' || el.type === 'checkbox' || el.type === 'radio') return false;
+            const id = (el.id || '').toLowerCase();
+            const name = (el.name || '').toLowerCase();
+            const ac = (el.getAttribute('autocomplete') || '').toLowerCase();
+            const ph = (el.getAttribute('placeholder') || '').toLowerCase();
+            const stable = (el.getAttribute('data-elements-stable-field-name') || '').toLowerCase();
+
+            // Nếu trường chứa các từ khóa địa chỉ/city/zip thì chắc chắn không phải Tên
+            if (id.includes('line1') || id.includes('line2') || id.includes('city') || id.includes('locality') || id.includes('postal') || id.includes('zip')) return false;
+            if (name.includes('line1') || name.includes('line2') || name.includes('city') || name.includes('locality') || name.includes('postal') || name.includes('zip')) return false;
+
+            if (stable === 'billingname') return true;
+            if (ac === 'name' || ac.includes('cc-name') || ac.includes('given-name')) return true;
+            if (id.includes('billingname') || id.endsWith('-name') || id.endsWith('_name') || id === 'name') return true;
+            if (name === 'name' || name === 'billingname') return true;
+            if (ph.includes('tên trên thẻ') || ph.includes('họ và tên') || ph.includes('full name') || ph.includes('cardholder name')) return true;
+            if ((ph.includes('name') || ph.includes('tên')) && !ph.includes('address') && !ph.includes('địa chỉ')) return true;
+            return false;
         }
 
-        const SEL_NAME = [
-            'input[name="name"]',
-            'input[autocomplete="name"]',
-            'input[id*="billingName"]',
-            'input[data-elements-stable-field-name="billingName"]',
-            'input[placeholder*="Name" i]',
-            'input[placeholder*="Tên" i]'
-        ].join(',');
+        function isAddress1Input(el, nameEl) {
+            if (!el || el.tagName !== 'INPUT' || el.type === 'hidden' || el.type === 'checkbox' || el.type === 'radio') return false;
+            if (nameEl && el === nameEl) return false; // Tuyệt đối không trùng ô Tên
+            if (isNameInput(el)) return false; // Không lấy ô Tên làm Địa chỉ
 
-        const SEL_ADDR = [
-            'input[name="addressLine1"]',
-            'input[name="address1"]',
-            'input[name="address"]',
-            'input[name="line1"]',
-            'input[autocomplete="address-line1"]',
-            'input[autocomplete="street-address"]',
-            'input[id*="addressLine1"]',
-            'input[id*="billingAddressLine1"]',
-            'input[id*="address1"]',
-            'input[id*="address" i]',
-            'input[id*="line1" i]',
-            'input[data-elements-stable-field-name="addressLine1"]',
-            'input[placeholder*="Address" i]',
-            'input[placeholder*="Địa chỉ" i]'
-        ].join(',');
+            const id = (el.id || '').toLowerCase();
+            const name = (el.name || '').toLowerCase();
+            const ac = (el.getAttribute('autocomplete') || '').toLowerCase();
+            const ph = (el.getAttribute('placeholder') || '').toLowerCase();
+            const stable = (el.getAttribute('data-elements-stable-field-name') || '').toLowerCase();
 
-        const SEL_CITY = [
-            'input[name="locality"]',
-            'input[name="city"]',
-            'input[autocomplete="address-level2"]',
-            'input[id*="billingLocality"]',
-            'input[id*="locality" i]',
-            'input[id*="city" i]',
-            'input[placeholder*="City" i]',
-            'input[placeholder*="Thành phố" i]'
-        ].join(',');
+            // Loại trừ dòng 2, city, zip, state
+            if (id.includes('line2') || id.includes('address2') || name.includes('line2') || name.includes('address2')) return false;
+            if (id.includes('locality') || id.includes('city') || id.includes('postal') || id.includes('zip') || id.includes('state')) return false;
+            if (name.includes('locality') || name.includes('city') || name.includes('postal') || name.includes('zip')) return false;
 
-        const SEL_ZIP = [
-            'input[name="postalCode"]',
-            'input[name="postal_code"]',
-            'input[name="zip"]',
-            'input[autocomplete="postal-code"]',
-            'input[id*="billingPostalCode"]',
-            'input[id*="postal" i]',
-            'input[id*="zip" i]',
-            'input[placeholder*="Postal" i]',
-            'input[placeholder*="ZIP" i]',
-            'input[placeholder*="bưu chính" i]'
-        ].join(',');
+            if (stable === 'addressline1' || stable === 'billingaddressline1') return true;
+            if (ac === 'address-line1' || ac === 'street-address') return true;
+            if (id.includes('addressline1') || id.includes('address-line1') || id.includes('billingaddressline1') || id.includes('billingaddress-addressline1') || id.includes('line1') || id.includes('address1')) return true;
+            if (name.includes('addressline1') || name.includes('address-line1') || name.includes('address1') || name.includes('line1') || name === 'address') return true;
+            if (ph.includes('address line 1') || ph.includes('địa chỉ dòng 1') || ph.includes('địa chỉ 1') || ph.includes('street address')) return true;
+            // Stripe Address autocomplete / fallback
+            if (id.includes('billingaddress') && !id.includes('name') && !id.includes('line2')) return true;
+            if ((ph.includes('address') || ph.includes('địa chỉ')) && !ph.includes('name') && !ph.includes('tên') && !ph.includes('line 2') && !ph.includes('dòng 2')) return true;
 
-        const SEL_STATE = [
-            'select[name="administrativeArea"]',
-            'select[name="state"]',
-            'select[autocomplete*="address-level1"]',
-            'select[id*="billingAdministrativeArea"]',
-            'select[id*="state" i]'
-        ].join(',');
+            return false;
+        }
 
-        const nameInput = document.querySelector(SEL_NAME);
-        const addrInput = document.querySelector(SEL_ADDR);
-        const cityInput = document.querySelector(SEL_CITY);
-        const zipInput  = document.querySelector(SEL_ZIP);
+        function isCityInput(el, excludeList) {
+            if (!el || el.tagName !== 'INPUT') return false;
+            if (excludeList && excludeList.includes(el)) return false;
+            const id = (el.id || '').toLowerCase();
+            const name = (el.name || '').toLowerCase();
+            const ac = (el.getAttribute('autocomplete') || '').toLowerCase();
+            const ph = (el.getAttribute('placeholder') || '').toLowerCase();
+            const stable = (el.getAttribute('data-elements-stable-field-name') || '').toLowerCase();
 
-        if (!nameInput && !addrInput && !cityInput && !zipInput) {
+            if (ac === 'address-level2' || stable === 'locality' || stable === 'billinglocality') return true;
+            if (id.includes('locality') || id.includes('city')) return true;
+            if (name.includes('locality') || name.includes('city')) return true;
+            if (ph.includes('city') || ph.includes('thành phố')) return true;
+            return false;
+        }
+
+        // 1. Kiểm tra xem ô địa chỉ đã có chưa, nếu chưa có và có nút "Enter address manually" thì click mở
+        const inputs = Array.from(document.querySelectorAll('input'));
+        let nameInput = inputs.find(isNameInput);
+        let addrInput = inputs.find(el => isAddress1Input(el, nameInput));
+
+        if (!addrInput) {
+            const manualBtn = Array.from(document.querySelectorAll('button:not([type="submit"]):not([form]), a, [role="button"]:not([type="submit"])')).find(el => {
+                const txt = (el.textContent || el.innerText || '').trim().toLowerCase();
+                const isManual = txt.includes('address manually') || txt.includes('nhập địa chỉ thủ công') || txt.includes('manually') || txt.includes('thủ công');
+                const isSubmit = el.type === 'submit' || el.hasAttribute('form') || /mua gói|subscribe|pay|thanh toán|bắt đầu|start trial|upgrade/i.test(txt);
+                return isManual && !isSubmit;
+            });
+            if (manualBtn && manualBtn.offsetParent !== null) {
+                console.log('[AutoFill] Tìm thấy nút Enter address manually, đang click mở ô nhập...');
+                manualBtn.click();
+                await new Promise(r => setTimeout(r, 600));
+            }
+        }
+
+        // Lấy lại danh sách inputs sau khi mở thủ công (nếu có)
+        const updatedInputs = Array.from(document.querySelectorAll('input'));
+        nameInput = updatedInputs.find(isNameInput);
+        addrInput = updatedInputs.find(el => isAddress1Input(el, nameInput));
+        const cityInput = updatedInputs.find(el => isCityInput(el, [nameInput, addrInput]));
+
+        const stateSelect = document.querySelector(
+            'select[name="administrativeArea"], select[name="state"], select[autocomplete*="address-level1"], select[id*="administrativeArea" i], select[id*="state" i]'
+        );
+
+        if (!nameInput && !addrInput && !cityInput) {
             return;
         }
 
@@ -200,48 +185,50 @@
         try {
             console.log('[AutoFill] Tìm thấy ô nhập liệu Stripe trên frame (' + window.location.pathname + '), bắt đầu điền...');
 
-            // 1. Tên (thường ở payment frame)
+            // 1. Họ và tên (Chỉ nhập vào ô Tên)
             if (nameInput && (!nameInput.value || forceRefill)) {
+                console.log('[AutoFill] Điền Tên vào ô:', nameInput.id || nameInput.name);
                 await simulateTyping(nameInput, getRandomName());
-                await new Promise(r => setTimeout(r, 300));
+                await new Promise(r => setTimeout(r, 250));
             }
 
-            // 2. Địa chỉ dòng 1 (thường ở address frame)
+            // 2. Địa chỉ dòng 1 (Chỉ nhập vào ô Address Line 1)
             if (addrInput && (!addrInput.value || forceRefill)) {
+                console.log('[AutoFill] Điền Địa chỉ dòng 1 vào ô:', addrInput.id || addrInput.name);
                 await simulateTyping(addrInput, getRandomAddress1());
-                await new Promise(r => setTimeout(r, 600));
+                await new Promise(r => setTimeout(r, 350));
+            }
 
-                // 3. Thành phố
-                const cInput = document.querySelector(SEL_CITY);
-                if (cInput && (!cInput.value || forceRefill)) {
-                    await simulateTyping(cInput, getRandomCity());
-                    await new Promise(r => setTimeout(r, 300));
-                }
+            // 3. Thành phố (Chỉ nhập vào ô City)
+            const cInput = cityInput || Array.from(document.querySelectorAll('input')).find(el => isCityInput(el, [nameInput, addrInput]));
+            if (cInput && (!cInput.value || forceRefill)) {
+                console.log('[AutoFill] Điền Thành phố vào ô:', cInput.id || cInput.name);
+                await simulateTyping(cInput, getRandomCity());
+                await new Promise(r => setTimeout(r, 250));
+            }
 
-                // 4. Zip code
-                const zInput = document.querySelector(SEL_ZIP);
-                if (zInput && (!zInput.value || forceRefill)) {
-                    await simulateTyping(zInput, getRandomZip());
-                    await new Promise(r => setTimeout(r, 300));
-                }
+            // 4. BỎ HẲN ĐIỀN Ô ZIP CODE THEO YÊU CẦU:
+            // Tránh việc Stripe/ChatGPT nhận diện form hoàn tất 100% rồi tự động kích hoạt thanh toán.
+            // Ô Zip code để người dùng tự gõ hoặc kiểm soát khi thanh toán.
 
-                // 5. State dropdown (nếu có)
-                const stateSelect = document.querySelector(SEL_STATE);
-                if (stateSelect && (!stateSelect.value || forceRefill)) {
-                    const opts = Array.from(stateSelect.options).filter(o => o.value && !o.disabled);
-                    if (opts.length) {
-                        const opt = opts[Math.floor(Math.random() * opts.length)];
-                        stateSelect.value = opt.value;
-                        stateSelect.dispatchEvent(new Event('change', { bubbles: true }));
-                        stateSelect.dispatchEvent(new Event('input',  { bubbles: true }));
-                    }
+            // 5. State dropdown (nếu có)
+            const curStateSelect = stateSelect || document.querySelector(
+                'select[name="administrativeArea"], select[name="state"], select[autocomplete*="address-level1"], select[id*="administrativeArea" i], select[id*="state" i]'
+            );
+            if (curStateSelect && (!curStateSelect.value || forceRefill)) {
+                const opts = Array.from(curStateSelect.options).filter(o => o.value && !o.disabled);
+                if (opts.length) {
+                    const opt = opts[Math.floor(Math.random() * opts.length)];
+                    curStateSelect.value = opt.value;
+                    curStateSelect.dispatchEvent(new Event('change', { bubbles: true }));
+                    curStateSelect.dispatchEvent(new Event('input', { bubbles: true }));
                 }
             }
 
-            console.log('[AutoFill] Đã điền xong địa chỉ trên frame:', window.location.pathname, '-- TUYỆT ĐỐI KHÔNG click nút Mua gói / Subscribe.');
+            console.log('[AutoFill] Đã điền xong thông tin (Tên, Địa chỉ 1, Thành phố). Đã bỏ qua ô Zip. Dừng lại, không bấm nút thanh toán.');
             try {
                 window.top.postMessage({ type: 'CHATGPT_AUTOFILL_DONE' }, '*');
-            } catch(e) {}
+            } catch (e) { }
         } finally {
             isFilling = false;
         }
@@ -253,9 +240,9 @@
         try {
             window.postMessage({ type: 'CHATGPT_AUTOFILL_REFILL' }, '*');
             document.querySelectorAll('iframe').forEach(f => {
-                try { f.contentWindow.postMessage({ type: 'CHATGPT_AUTOFILL_REFILL' }, '*'); } catch (e) {}
+                try { f.contentWindow.postMessage({ type: 'CHATGPT_AUTOFILL_REFILL' }, '*'); } catch (e) { }
             });
-        } catch (e) {}
+        } catch (e) { }
         if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
             chrome.storage.local.set({ trigger_refill: Date.now() });
         }
@@ -355,9 +342,12 @@
 
         } else if (isCheckout) {
             // Trên trang chính chatgpt.com
+            let hasInitCheckout = false;
             const checkAndInit = () => {
+                if (hasInitCheckout) return true;
                 const hasStripe = document.querySelector('iframe[src*="stripe.com"], .StripeElement');
                 if (hasStripe) {
+                    hasInitCheckout = true;
                     injectFloatingButton();
                     broadcastRefill();
                     return true;
@@ -370,12 +360,8 @@
             });
             if (document.body) obs.observe(document.body, { childList: true, subtree: true });
 
-            setTimeout(() => {
-                checkAndInit();
-            }, 1200);
-            setTimeout(() => {
-                checkAndInit();
-            }, 3000);
+            setTimeout(() => { checkAndInit(); }, 1200);
+            setTimeout(() => { checkAndInit(); }, 3000);
         }
     }
 

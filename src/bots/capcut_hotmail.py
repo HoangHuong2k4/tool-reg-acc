@@ -870,7 +870,18 @@ def save_account(uidname, email, password, join_link, msToken=""):
     log(f"Đã lưu tài khoản → {OUTPUT_FILE}", "OK")
 
 def update_account_payment_link(email, link):
-    pass # File handling for success_links.txt is already done in step_get_payment_link
+    try:
+        import sqlite3
+        db_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "database.db"))
+        if os.path.exists(db_path):
+            conn = sqlite3.connect(db_path)
+            cur = conn.cursor()
+            cur.execute("UPDATE accounts SET join_link = ? WHERE app = 'capcut' AND email = ?", (link, email))
+            conn.commit()
+            conn.close()
+            log(f"Đã lưu link thanh toán vào Database cho {email}", "OK")
+    except Exception as e:
+        log(f"Lỗi update DB payment link: {e}", "WARN")
 
 ACTIVE_DRIVERS = []
 
@@ -1224,9 +1235,12 @@ def _do_get_payment_link(driver, email, password, attempt=0):
                 with open("data/trial_7day.txt", "a", encoding="utf-8") as f:
                     f.write(f"{email}\t{password}\t{payment_url}\n")
                 log(f"🎉 Phát hiện và đã lưu account có TRIAL 7 NGÀY: {email}", "OK")
+            # Bước 6: Lưu theo đúng tài khoản vào file và database
+            try:
+                update_account_payment_link(email, payment_url)
+            except Exception as dbe:
+                log(f"Lỗi cập nhật database link: {dbe}", "WARN")
             return payment_url
-
-
 
         log("Không tìm thấy link thanh toán pipopay sau khi bấm Nâng cấp!", "WARN")
         return None
@@ -1234,6 +1248,200 @@ def _do_get_payment_link(driver, email, password, attempt=0):
     except Exception as e:
         log(f"Lỗi lấy link: {e}", "ERR")
         return None
+
+
+def step_logout_capcut(driver, timeout=20):
+    """
+    Bước 7 & 8:
+    - Tìm và click avatar / menu tài khoản CapCut trên Header
+    - Bấm 'Đăng xuất' trong menu dropdown
+    - Xác nhận đăng xuất trong modal xác nhận
+    - Chờ 3 giây
+    - Trả về True nếu xác nhận đăng xuất thành công, False nếu chưa
+    """
+    from selenium.webdriver.common.by import By
+    import time
+    log("Đang tiến hành đăng xuất khỏi CapCut...", "INFO")
+
+    # Đóng modal/popup che màn hình nếu có
+    try:
+        close_btns = driver.find_elements(By.CSS_SELECTOR, '.lv-modal-close-icon, svg.lv-icon-lv-close, button[aria-label="close"], .skip-mrkR37')
+        for cb in close_btns:
+            if cb.is_displayed():
+                try_click(driver, cb, "Đóng popup trước đăng xuất")
+                time.sleep(1)
+    except: pass
+
+    # 1. Tìm và bấm Avatar trên Header
+    avatar_clicked = False
+    start = time.time()
+    while time.time() - start < timeout:
+        avatar_selectors = [
+            '[data-id="TitleBarAvatar"]',
+            '[data-id*="Avatar"]',
+            '[data-id="TitleBarUserInfo"]',
+            '[data-id*="UserInfo"]',
+            '.LvHeaderAvatar',
+            '.lv-header-avatar',
+            '[class*="headerAvatar"]',
+            '[class*="HeaderAvatar"]',
+            '.lv-avatar',
+            'img.lv-avatar-img',
+            '.user-avatar',
+            'img[class*="avatar"]',
+            '[class*="user-profile"]',
+            '.detail-item.nickname'
+        ]
+        for sel in avatar_selectors:
+            try:
+                elements = driver.find_elements(By.CSS_SELECTOR, sel)
+                for el in elements:
+                    if el.is_displayed():
+                        try_click(driver, el, f"Avatar ({sel})")
+                        avatar_clicked = True
+                        time.sleep(1.5)
+                        break
+                if avatar_clicked:
+                    break
+            except: pass
+        if avatar_clicked:
+            break
+
+        # Fallback Javascript click
+        try:
+            clicked_js = driver.execute_script('''
+                var el = document.querySelector('[data-id*="Avatar"]') || 
+                         document.querySelector('.lv-avatar') || 
+                         document.querySelector('[class*="avatar"]') ||
+                         document.querySelector('header img') ||
+                         document.querySelector('.detail-item.nickname');
+                if (el) { el.click(); return true; }
+                return false;
+            ''')
+            if clicked_js:
+                avatar_clicked = True
+                time.sleep(1.5)
+                break
+        except: pass
+        time.sleep(1)
+
+    if not avatar_clicked:
+        log("Không tìm thấy nút Avatar / Tài khoản trên header!", "WARN")
+        return False
+
+    # 2. Bấm 'Đăng xuất' trong Dropdown Menu
+    logout_clicked = False
+    start = time.time()
+    while time.time() - start < 10:
+        try:
+            logout_elements = driver.find_elements(By.XPATH, "//*[contains(text(), 'Đăng xuất') or contains(text(), 'Log out') or contains(text(), 'Logout') or contains(text(), 'Sign out')]")
+            for el in logout_elements:
+                if el.is_displayed():
+                    try_click(driver, el, "Mục Đăng xuất")
+                    logout_clicked = True
+                    time.sleep(1.5)
+                    break
+            if logout_clicked:
+                break
+        except: pass
+
+        # Fallback CSS
+        try:
+            items = driver.find_elements(By.CSS_SELECTOR, '.lv-dropdown-menu-item, [class*="dropdown-item"], [class*="menu-item"]')
+            for it in items:
+                t = it.text.lower()
+                if "đăng xuất" in t or "log out" in t or "logout" in t or "sign out" in t:
+                    if it.is_displayed():
+                        try_click(driver, it, "Dropdown item Đăng xuất")
+                        logout_clicked = True
+                        time.sleep(1.5)
+                        break
+            if logout_clicked:
+                break
+        except: pass
+        time.sleep(1)
+
+    if not logout_clicked:
+        log("Không tìm thấy mục Đăng xuất trong menu tài khoản!", "WARN")
+        return False
+
+    # 3. Xác nhận đăng xuất trong modal xác nhận
+    confirm_clicked = False
+    start = time.time()
+    while time.time() - start < 10:
+        try:
+            confirm_btns = driver.find_elements(By.XPATH, "//div[contains(@class, 'lv-modal') or @role='dialog']//button[contains(., 'Đăng xuất') or contains(., 'Xác nhận') or contains(., 'Log out') or contains(., 'Confirm') or contains(., 'OK')]")
+            if not confirm_btns:
+                confirm_btns = driver.find_elements(By.CSS_SELECTOR, '.lv-modal button.lv-btn-primary, .lv-modal button.lv-btn-danger, [role="dialog"] button.lv-btn-primary')
+            for cb in confirm_btns:
+                if cb.is_displayed():
+                    try_click(driver, cb, "Xác nhận Đăng xuất (Modal)")
+                    confirm_clicked = True
+                    break
+            if confirm_clicked:
+                break
+        except: pass
+        time.sleep(1)
+
+    if not confirm_clicked:
+        log("Không thấy modal xác nhận đăng xuất hoặc không bấm được nút xác nhận!", "WARN")
+        return False
+
+    # Bước 8: Xác nhận đăng xuất -> chờ 3 giây -> đóng tab tài khoản
+    log("Đã bấm xác nhận đăng xuất thành công. Đang chờ 3 giây...", "OK")
+    time.sleep(3)
+    return True
+
+
+def close_checkout_and_logout(driver, email):
+    """
+    Bước 7 & 8:
+    7. Đóng checkout, về tab tài khoản và đăng xuất.
+    8. Xác nhận đăng xuất -> chờ 3 giây -> đóng tab tài khoản.
+    """
+    import time
+    log(f"[{email}] Bắt đầu Bước 7: Đóng checkout và chuyển về tab tài khoản...", "INFO")
+    try:
+        handles = driver.window_handles
+        capcut_handle = None
+        checkout_handles = []
+
+        for h in handles:
+            try:
+                driver.switch_to.window(h)
+                u = driver.current_url.lower()
+                if "pipopay.com" in u or "buy.stripe.com" in u or "cashier" in u:
+                    checkout_handles.append(h)
+                elif "capcut.com" in u:
+                    if not capcut_handle:
+                        capcut_handle = h
+            except: pass
+
+        # Đóng tab checkout
+        for ch in checkout_handles:
+            try:
+                driver.switch_to.window(ch)
+                driver.close()
+                log(f"[{email}] Đã đóng tab checkout PipoPay.", "INFO")
+            except: pass
+
+        # Về lại tab tài khoản Capcut
+        remaining = driver.window_handles
+        if capcut_handle and capcut_handle in remaining:
+            driver.switch_to.window(capcut_handle)
+        elif remaining:
+            driver.switch_to.window(remaining[0])
+
+        time.sleep(1.5)
+        if "capcut.com" not in driver.current_url.lower():
+            driver.get("https://www.capcut.com/my-edit")
+            time.sleep(3)
+
+        # Đăng xuất
+        return step_logout_capcut(driver)
+    except Exception as e:
+        log(f"[{email}] Lỗi khi đóng checkout và đăng xuất: {e}", "WARN")
+        return False
 
 
 # ─── Retry lấy link cho acc đã tạo nhưng chưa lấy được link ─────────────────
@@ -1394,14 +1602,7 @@ def register_one_account(index, join_link=None, keep_open=False, batch_size=3, p
             except Exception as e:
                 if "ERR_TUNNEL_CONNECTION_FAILED" in str(e) or "ERR_PROXY_CONNECTION_FAILED" in str(e) or "TimeoutException" in type(e).__name__:
                     if attempt < max_retries - 1:
-                        log(f"[{email}] Lỗi kết nối/proxy, đang đổi proxy và thử lại... ({type(e).__name__})", "WARN")
-                        try:
-                            import requests
-                            requests.post("http://127.0.0.1:5050/api/proxy/rotate", timeout=5)
-                            log("Đã yêu cầu API nội bộ xoay proxy mới!", "INFO")
-                        except Exception as re_err:
-                            log(f"Không thể gọi API xoay proxy: {re_err}", "WARN")
-
+                        log(f"[{email}] Lỗi kết nối/proxy ({type(e).__name__}). Đang thử lại lần {attempt+2}/{max_retries}... (Không xoay proxy chung giữa chừng)", "WARN")
                         try:
                             if hasattr(driver, '_proxy_relay') and driver._proxy_relay:
                                 driver._proxy_relay.stop()
@@ -1435,6 +1636,9 @@ def register_one_account(index, join_link=None, keep_open=False, batch_size=3, p
                     break
         except: pass
 
+        should_keep_open = keep_open
+        link = None
+
         if join_link:
             if bday_status != "ALREADY_LOGGED_IN":
                 step5_join_team(driver, join_link)
@@ -1455,16 +1659,29 @@ def register_one_account(index, join_link=None, keep_open=False, batch_size=3, p
             uidname = extract_uidname(driver)
             log(f"ĐĂNG NHẬP / ĐĂNG KÝ THÀNH CÔNG! {email} (UID: {uidname})", "OK")
 
-            # Lưu tài khoản NGAY sau khi tạo xong (không cần chờ link thanh toán)
+            # Bước 3: Lưu tài khoản ngay sau khi tạo xong (UID + thông tin)
             save_account(uidname, email, password, "", msToken)
 
-            # Xử lý các popup sau đăng ký (chỉ chạy cho chức năng 1)
+            # Bước 4: Đóng popup/hướng dẫn
             log("Đang xử lý các popup sau đăng ký...", "INFO")
             step_skip_role_survey(driver, timeout=10)
             step_close_whats_new(driver, timeout=15)
+
             if get_link:
+                # Bước 5 & 6: Bấm nâng cấp trong thẻ Pro, lấy URL checkout và lưu file + database
                 link = step_get_payment_link(driver, email, password)
-                if not link:
+                if link:
+                    # Bước 7 & 8: Đóng checkout, về tab tài khoản và đăng xuất -> xác nhận đăng xuất -> chờ 3s -> đóng tab
+                    logout_ok = close_checkout_and_logout(driver, email)
+                    if not logout_ok:
+                        log(f"[{email}] ⚠️ Chưa xác nhận đăng xuất được -> GIỮ TAB để xử lý tiếp!", "WARN")
+                        should_keep_open = True
+                    else:
+                        log(f"[{email}] ✅ Đã lưu link và đăng xuất thành công -> Đóng tab tài khoản.", "OK")
+                        should_keep_open = False
+                else:
+                    log(f"[{email}] ⚠️ Chưa lưu được link checkout -> GIỮ TAB để xử lý tiếp!", "WARN")
+                    should_keep_open = True
                     # Lưu cookie để retry sau
                     try:
                         cookies = driver.get_cookies()
@@ -1473,9 +1690,12 @@ def register_one_account(index, join_link=None, keep_open=False, batch_size=3, p
                     except Exception as ck_err:
                         log(f"Không lưu được cookie: {ck_err}", "WARN")
 
-        # Chỉ đánh dấu hotmail đã dùng (trừ khỏi hotmails.txt) khi mọi thứ đều thành công
-        mark_hotmail_used(acc)
-        return True
+        # Chỉ đánh dấu hotmail đã dùng khi mọi thứ đều thành công
+        if not get_link or link:
+            mark_hotmail_used(acc)
+            return True
+        else:
+            return False
 
     except Exception as e:
         log(f"LỖI KHÔNG MONG MUỐN: {type(e).__name__}: {e}", "ERR")
@@ -1486,7 +1706,7 @@ def register_one_account(index, join_link=None, keep_open=False, batch_size=3, p
             except: pass
         return False
     finally:
-        if driver and not keep_open:
+        if driver and not should_keep_open:
             try:
                 if hasattr(driver, '_proxy_relay') and driver._proxy_relay:
                     driver._proxy_relay.stop()
@@ -1494,6 +1714,8 @@ def register_one_account(index, join_link=None, keep_open=False, batch_size=3, p
                 driver.quit()
                 log("Đã đóng trình duyệt.", "INFO")
             except: pass
+        elif driver and should_keep_open:
+            log(f"[{email}] ℹ️ Giữ tab trình duyệt để xử lý tiếp theo quy định.", "INFO")
 
 
 def load_hotmails_to_queue(limit=None):
@@ -1530,37 +1752,54 @@ def load_hotmails_to_queue(limit=None):
     return count
 
 def register_multiple(count, threads, join_link, keep_open=False, get_link=False):
-
     import concurrent.futures
     results = {"ok": 0, "fail": 0}
     
-    shared_proxy = None
-    if join_link:
-        log("Chức năng 2: Đang lấy 1 proxy dùng chung cho tất cả các tab...", "INFO")
-        shared_proxy = get_rotated_proxy()
-        
-    def worker(i):
-        log(f"BẮT ĐẦU LUỒNG {i}/{threads}", "INFO")
-        # Stagger mở tab để tránh proxy bị quá tải (ERR_TUNNEL_CONNECTION_FAILED)
-        time.sleep((i % threads) * 2.5) 
-        local_ok = 0
-        local_fail = 0
-        while not HOTMAIL_QUEUE.empty():
-            res = register_one_account(i, join_link, keep_open, batch_size=threads, predefined_proxy=shared_proxy, get_link=get_link)
-            if res: local_ok += 1
-            else: local_fail += 1
-            if keep_open:
-                break
-        return local_ok, local_fail
+    batch_size = max(1, int(threads))
+    total_processed = 0
+    batch_num = 0
 
-    log(f"--- BẮT ĐẦU ĐỢT: Chạy tối đa {count} tài khoản với {threads} luồng liên tục ---", "WARN")
-    
-    with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
-        futures = [executor.submit(worker, i+1) for i in range(threads)]
-        for future in concurrent.futures.as_completed(futures):
-            ok, fail = future.result()
-            results["ok"] += ok
-            results["fail"] += fail
+    log(f"--- BẮT ĐẦU: Chạy tối đa {count} tài khoản theo từng lượt {batch_size} luồng ---", "WARN")
+
+    while total_processed < count and not HOTMAIL_QUEUE.empty():
+        batch_num += 1
+        curr_batch = min(batch_size, count - total_processed, HOTMAIL_QUEUE.qsize())
+        if curr_batch <= 0:
+            break
+
+        log(f"\n🔄 === BẮT ĐẦU LƯỢT {batch_num}: Chạy {curr_batch} tài khoản song song ===", "INFO")
+
+        def worker(slot_idx):
+            time.sleep((slot_idx % batch_size) * 2.5)
+            log(f"Luồng {slot_idx+1}/{curr_batch} bắt đầu xử lý tài khoản...", "INFO")
+            res = register_one_account(slot_idx + 1, join_link, keep_open, batch_size=batch_size, get_link=get_link)
+            return bool(res)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=curr_batch) as executor:
+            futures = [executor.submit(worker, i) for i in range(curr_batch)]
+            for future in concurrent.futures.as_completed(futures):
+                try:
+                    res = future.result()
+                    if res: results["ok"] += 1
+                    else: results["fail"] += 1
+                except:
+                    results["fail"] += 1
+
+        total_processed += curr_batch
+        log(f"✅ Hoàn thành lượt {batch_num}. Tổng tích luỹ: {results['ok']} OK / {results['fail']} Lỗi.", "OK")
+
+        if keep_open:
+            break
+
+        # Nếu còn tài khoản cần chạy tiếp -> Xoay proxy một lần và kiểm tra kết nối
+        if total_processed < count and not HOTMAIL_QUEUE.empty():
+            log("⏳ Đã kết thúc lượt, đang xoay proxy một lần cho lượt tiếp theo...", "INFO")
+            try:
+                new_p = get_rotated_proxy()
+                log(f"Kiểm tra kết nối proxy mới ({new_p.get('host')}:{new_p.get('port')})...", "INFO")
+                time.sleep(2)
+            except Exception as e:
+                log(f"Lỗi khi xoay proxy: {e}", "WARN")
 
     log(f"\n{'='*50}", "INFO")
     log(f"KẾT QUẢ TỔNG CỘNG: {results['ok']} thành công / {results['fail']} thất bại", "OK")

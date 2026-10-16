@@ -249,114 +249,139 @@ def proxy_status():
         settings = load_settings()
         return jsonify({"ip": None, "ok": False, "error": str(e), "type": settings.get("PROXY_TYPE", "proxyquick")})
 
-@app.route("/api/proxy/rotate", methods=["POST"])
-def proxy_rotate():
-    global PROXY_HOST, PROXY_PORT, PROXY_USER, PROXY_PASS
+def execute_proxy_rotate(logger_func=None):
+    """
+    Xoay proxy theo loại proxy đang cấu hình và kiểm tra kết nối.
+    Nếu đang trong cooldown (timeRemaining), tự động đợi và thử lại.
+    Trả về: (ok: bool, new_ip: str, err: str)
+    """
+    global PROXY_HOST, PROXY_PORT, PROXY_USER, PROXY_PASS, PROXY_V3_INDEX
+
+    def _log(msg, level="INFO"):
+        if logger_func:
+            logger_func(msg, level)
+        else:
+            print(f"[{level}] {msg}")
+
     settings = load_settings()
     proxy_type = settings.get('PROXY_TYPE', 'proxyquick')
-    
-    try:
-        if proxy_type == 'proxyxoay':
-            proxyxoay_key = settings.get('PROXYXOAY_KEY', '')
-            url = f"https://proxyxoay.shop/api/get.php?key={proxyxoay_key}&&nhamang=random&&tinhthanh=0&whitelist="
-            r = requests.get(url, timeout=15)
-            data = r.json()
-            if data.get("status") == 100:
-                proxy_str = data.get("proxyhttp", "")
-                parts = proxy_str.split(":")
-                PROXY_HOST = parts[0]
-                PROXY_PORT = int(parts[1])
-                PROXY_USER = parts[2] if len(parts) > 2 else ""
-                PROXY_PASS = parts[3] if len(parts) > 3 else ""
-                
+
+    max_wait = 120
+    waited = 0
+
+    while waited <= max_wait:
+        _log(f"Đang gọi API xoay proxy ({proxy_type})...", "INFO")
+        success = False
+        new_ip = ""
+        proxy_str = ""
+        err_msg = ""
+        time_rem = 0
+
+        try:
+            if proxy_type == 'proxyxoay':
+                proxyxoay_key = settings.get('PROXYXOAY_KEY', '')
+                url = f"https://proxyxoay.shop/api/get.php?key={proxyxoay_key}&&nhamang=random&&tinhthanh=0&whitelist="
+                r = requests.get(url, timeout=15)
+                data = r.json()
+                if data.get("status") == 100:
+                    proxy_str = data.get("proxyhttp", "")
+                    parts = proxy_str.split(":")
+                    PROXY_HOST = parts[0]
+                    PROXY_PORT = int(parts[1])
+                    PROXY_USER = parts[2] if len(parts) > 2 else ""
+                    PROXY_PASS = parts[3] if len(parts) > 3 else ""
+                    new_ip = data.get("ip", PROXY_HOST)
+                    success = True
+                else:
+                    err_msg = data.get("message", str(data))
+                    import re
+                    m = re.search(r'(\d+)\s*s', err_msg)
+                    time_rem = int(m.group(1)) if m else 10
+            elif proxy_type == 'proxyquick_v3':
+                proxy_list_str = settings.get('PROXY_V3_LIST', '')
+                proxies = [p.strip() for p in proxy_list_str.strip().split('\n') if p.strip()]
+                if not proxies:
+                    return False, "", "Danh sách ProxyQuick v3 trống!"
+                for _ in range(len(proxies)):
+                    PROXY_V3_INDEX = (PROXY_V3_INDEX + 1) % len(proxies)
+                    current_proxy_line = proxies[PROXY_V3_INDEX]
+                    p_str, url = current_proxy_line.split("|", 1) if "|" in current_proxy_line else ("", current_proxy_line)
+                    try:
+                        r = requests.get(url.strip(), timeout=15)
+                        data = r.json()
+                        if data.get("status") == "success" or data.get("message") == "Xoay proxy thành công":
+                            proxy_str = data.get("proxy", p_str.strip())
+                            new_ip = data.get("ip", proxy_str.split(':')[0] if proxy_str else "")
+                            parts = proxy_str.split(":")
+                            if len(parts) >= 4:
+                                PROXY_HOST, PROXY_PORT, PROXY_USER, PROXY_PASS = parts[0], int(parts[1]), parts[2], parts[3]
+                            success = True
+                            break
+                        else:
+                            err_msg = data.get("message", str(data))
+                            time_rem = data.get("timeRemaining", 0)
+                    except Exception as e:
+                        err_msg = str(e)
+            else:
+                headers = {
+                    "Authorization": f"Bearer {settings.get('PROXY_API_TOKEN', '')}",
+                    "x-merchant-id": settings.get('PROXY_MERCHANT', '')
+                }
+                url = f"https://proxyquick.click/api/v2/proxies/{settings.get('PROXY_ID', '')}/rotate"
+                r = requests.get(url, headers=headers, timeout=15)
+                data = r.json()
+                if data.get("status") == "success":
+                    proxy_str = data.get("proxy", "")
+                    new_ip = data.get("ip", "")
+                    parts = proxy_str.split(":")
+                    if len(parts) >= 4:
+                        PROXY_HOST, PROXY_PORT, PROXY_USER, PROXY_PASS = parts[0], int(parts[1]), parts[2], parts[3]
+                    success = True
+                else:
+                    err_msg = data.get("message", str(data))
+                    time_rem = data.get("timeRemaining") or 10
+
+            if success:
                 with get_db() as conn:
                     conn.execute("INSERT INTO settings (`key`, `value`) VALUES ('LAST_PROXY_HOST', ?) ON CONFLICT(`key`) DO UPDATE SET `value`=excluded.`value`", (PROXY_HOST,))
                     conn.execute("INSERT INTO settings (`key`, `value`) VALUES ('LAST_PROXY_PORT', ?) ON CONFLICT(`key`) DO UPDATE SET `value`=excluded.`value`", (str(PROXY_PORT),))
                     conn.execute("INSERT INTO settings (`key`, `value`) VALUES ('LAST_PROXY_USER', ?) ON CONFLICT(`key`) DO UPDATE SET `value`=excluded.`value`", (PROXY_USER,))
                     conn.execute("INSERT INTO settings (`key`, `value`) VALUES ('LAST_PROXY_PASS', ?) ON CONFLICT(`key`) DO UPDATE SET `value`=excluded.`value`", (PROXY_PASS,))
                     conn.commit()
-                
-                new_ip = data.get("ip", PROXY_HOST)
-                return jsonify({"success": True, "ip": new_ip, "proxy": proxy_str})
-            else:
-                msg = data.get("message", str(data))
-                # proxyxoay doesn't always provide timeRemaining explicitly, we can extract from message if needed
-                import re
-                m = re.search(r'(\d+)\s*s', msg)
-                time_rem = int(m.group(1)) if m else 0
-                return jsonify({"success": False, "error": msg, "timeRemaining": time_rem})
-        elif proxy_type == 'proxyquick_v3':
-            proxy_list_str = settings.get('PROXY_V3_LIST', '')
-            proxies = [p.strip() for p in proxy_list_str.strip().split('\n') if p.strip()]
-            if not proxies:
-                return jsonify({"success": False, "error": "Danh sách ProxyQuick v3 trống!"})
-            
-            global PROXY_V3_INDEX
-            last_error_msg = "Tất cả proxy v3 đều lỗi xoay."
-            last_time_rem = 0
-            
-            for _ in range(len(proxies)):
-                PROXY_V3_INDEX = (PROXY_V3_INDEX + 1) % len(proxies)
-                current_proxy_line = proxies[PROXY_V3_INDEX]
-                
-                if "|" in current_proxy_line:
-                    p_str, url = current_proxy_line.split("|", 1)
+
+                # Kiểm tra kết nối proxy thực tế
+                _log("Đang kiểm tra kết nối qua proxy mới...", "INFO")
+                if PROXY_USER and PROXY_PASS:
+                    proxy_url = f"http://{PROXY_USER}:{PROXY_PASS}@{PROXY_HOST}:{PROXY_PORT}"
                 else:
-                    p_str, url = "", current_proxy_line
-                
+                    proxy_url = f"http://{PROXY_HOST}:{PROXY_PORT}"
                 try:
-                    r = requests.get(url.strip(), timeout=15)
-                    data = r.json()
-                except Exception as e:
-                    last_error_msg = str(e)
-                    continue
-                    
-                if data.get("status") == "success" or data.get("message") == "Xoay proxy thành công":
-                    proxy_str = data.get("proxy", p_str.strip())
-                    new_ip = data.get("ip", proxy_str.split(':')[0] if proxy_str else "")
-                    parts = proxy_str.split(":")
-                    if len(parts) >= 4:
-                        PROXY_HOST, PROXY_PORT, PROXY_USER, PROXY_PASS = parts[0], int(parts[1]), parts[2], parts[3]
-                        with get_db() as conn:
-                            conn.execute("INSERT INTO settings (`key`, `value`) VALUES ('LAST_PROXY_HOST', ?) ON CONFLICT(`key`) DO UPDATE SET `value`=excluded.`value`", (PROXY_HOST,))
-                            conn.execute("INSERT INTO settings (`key`, `value`) VALUES ('LAST_PROXY_PORT', ?) ON CONFLICT(`key`) DO UPDATE SET `value`=excluded.`value`", (str(PROXY_PORT),))
-                            conn.execute("INSERT INTO settings (`key`, `value`) VALUES ('LAST_PROXY_USER', ?) ON CONFLICT(`key`) DO UPDATE SET `value`=excluded.`value`", (PROXY_USER,))
-                            conn.execute("INSERT INTO settings (`key`, `value`) VALUES ('LAST_PROXY_PASS', ?) ON CONFLICT(`key`) DO UPDATE SET `value`=excluded.`value`", (PROXY_PASS,))
-                            conn.commit()
-                    return jsonify({"success": True, "ip": new_ip, "proxy": proxy_str})
-                else:
-                    last_error_msg = data.get("message", str(data))
-                    last_time_rem = data.get("timeRemaining", 0)
-                    
-            return jsonify({"success": False, "error": f"Lỗi tất cả Proxy v3. Lỗi cuối: {last_error_msg}", "timeRemaining": last_time_rem})
-        else:
-            headers = {
-                "Authorization": f"Bearer {settings.get('PROXY_API_TOKEN', '')}",
-                "x-merchant-id": settings.get('PROXY_MERCHANT', '')
-            }
-            url = f"https://proxyquick.click/api/v2/proxies/{settings.get('PROXY_ID', '')}/rotate"
-            r = requests.get(url, headers=headers, timeout=15)
-            data = r.json()
-            if data.get("status") == "success":
-                proxy_str = data.get("proxy", "")
-                new_ip = data.get("ip", "")
-                parts = proxy_str.split(":")
-                if len(parts) >= 4:
-                    PROXY_HOST, PROXY_PORT, PROXY_USER, PROXY_PASS = parts[0], int(parts[1]), parts[2], parts[3]
-                    with get_db() as conn:
-                        conn.execute("INSERT INTO settings (`key`, `value`) VALUES ('LAST_PROXY_HOST', ?) ON CONFLICT(`key`) DO UPDATE SET `value`=excluded.`value`", (PROXY_HOST,))
-                        conn.execute("INSERT INTO settings (`key`, `value`) VALUES ('LAST_PROXY_PORT', ?) ON CONFLICT(`key`) DO UPDATE SET `value`=excluded.`value`", (str(PROXY_PORT),))
-                        conn.execute("INSERT INTO settings (`key`, `value`) VALUES ('LAST_PROXY_USER', ?) ON CONFLICT(`key`) DO UPDATE SET `value`=excluded.`value`", (PROXY_USER,))
-                        conn.execute("INSERT INTO settings (`key`, `value`) VALUES ('LAST_PROXY_PASS', ?) ON CONFLICT(`key`) DO UPDATE SET `value`=excluded.`value`", (PROXY_PASS,))
-                        conn.commit()
-                return jsonify({"success": True, "ip": new_ip, "proxy": proxy_str})
-            
-            # Nếu lỗi (ví dụ: chưa tới thời gian xoay)
-            msg = data.get("message", str(data))
-            time_rem = data.get("timeRemaining")
-            return jsonify({"success": False, "error": msg, "timeRemaining": time_rem})
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)})
+                    r_check = requests.get("https://ipinfo.io/ip", proxies={"http": proxy_url, "https": proxy_url}, timeout=10)
+                    verified_ip = r_check.text.strip()
+                    _log(f"Kết nối proxy thành công! IP mới: {verified_ip}", "OK")
+                    return True, verified_ip, ""
+                except Exception as ce:
+                    _log(f"Proxy đã xoay (IP: {new_ip}), kết nối kiểm tra cảnh báo: {ce}", "WARN")
+                    return True, new_ip or PROXY_HOST, ""
+
+            wait_s = max(5, int(time_rem)) if time_rem else 10
+            _log(f"Chưa xoay được proxy ({err_msg}). Đang chờ {wait_s}s để thử lại...", "WARN")
+            time.sleep(wait_s)
+            waited += wait_s
+
+        except Exception as ex:
+            _log(f"Lỗi gọi API xoay proxy: {ex}", "ERR")
+            time.sleep(5)
+            waited += 5
+
+    return False, "", err_msg or "Hết thời gian chờ xoay proxy"
+
+@app.route("/api/proxy/rotate", methods=["POST"])
+def proxy_rotate():
+    ok, ip, err = execute_proxy_rotate()
+    if ok:
+        return jsonify({"success": True, "ip": ip, "proxy": f"{PROXY_HOST}:{PROXY_PORT}"})
+    return jsonify({"success": False, "error": err})
 
 # ─── CAPCUT API ───────────────────────────────────────────────────────────────
 @app.route("/api/capcut/hotmail/count")
@@ -843,48 +868,129 @@ def _run_capcut_task(mode, count, threads, join_link, mail_type, mail_api_source
         bot = state_capcut.module
         
         done = {"ok": 0, "fail": 0}
+        batch_size = max(1, int(threads))
+        batch_num = 0
+        total_started = 0
         
         if mail_type == "hotmail":
             bot.load_hotmails_to_queue(limit=count)
-            def worker(i):
-                try:
-                    time.sleep((i % threads) * 2.5)
-                    while not bot.HOTMAIL_QUEUE.empty() and not state_capcut.task_stop.is_set():
-                        res = bot.register_one_account(i, join_link if mode == 2 else None, keep_open=(mode == 1), batch_size=threads, headless=headless, browser_type=browser_type, get_link=(mode == 3), mail_api_source=mail_api_source, incognito=incognito)
-                        state_capcut.log_queue.put(json.dumps({"type": "result", "success": bool(res)}))
-                        if res: done["ok"] += 1
-                        else: done["fail"] += 1
-                except Exception as e:
-                    import traceback
-                    err_msg = "".join(traceback.format_exception(type(e), e, e.__traceback__))
-                    state_capcut.log(f"Worker Error: {err_msg}", "ERR")
-
             import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as ex:
-                futures = [ex.submit(worker, i+1) for i in range(threads)]
-                concurrent.futures.wait(futures)
-        elif mode != 4:
-            def worker(i):
-                try:
-                    time.sleep((i % threads) * 2.5)
-                    if state_capcut.task_stop.is_set(): return
-                    res = bot.register_one_account(i, join_link if mode == 2 else None, keep_open=(mode == 1), batch_size=threads, headless=headless, browser_type=browser_type, get_link=(mode == 3), mail_api_source=mail_api_source, incognito=incognito)
-                    state_capcut.log_queue.put(json.dumps({"type": "result", "success": bool(res)}))
-                    if res: done["ok"] += 1
-                    else: done["fail"] += 1
-                except Exception as e:
-                    state_capcut.log(f"Worker Error: {e}", "ERR")
-                    raise e
 
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as ex:
-                futures = [ex.submit(worker, idx+1) for idx in range(count)]
-                for future in concurrent.futures.as_completed(futures):
+            while total_started < count and not bot.HOTMAIL_QUEUE.empty() and not state_capcut.task_stop.is_set():
+                batch_num += 1
+                curr_batch = min(batch_size, count - total_started, bot.HOTMAIL_QUEUE.qsize())
+                if curr_batch <= 0:
+                    break
+
+                state_capcut.log(f"🔄 === BẮT ĐẦU LƯỢT {batch_num}: Chạy song song {curr_batch} tài khoản (tối đa {batch_size} luồng) ===", "INFO")
+
+                def batch_worker(slot_idx):
+                    if state_capcut.task_stop.is_set():
+                        return False
+                    stagger = (slot_idx % batch_size) * 2.5
+                    if stagger > 0:
+                        time.sleep(stagger)
                     try:
-                        future.result()
+                        res = bot.register_one_account(
+                            slot_idx + 1,
+                            join_link if mode == 2 else None,
+                            keep_open=(mode == 1),
+                            batch_size=batch_size,
+                            headless=headless,
+                            browser_type=browser_type,
+                            get_link=(mode == 3),
+                            mail_api_source=mail_api_source,
+                            incognito=incognito
+                        )
+                        state_capcut.log_queue.put(json.dumps({"type": "result", "success": bool(res)}))
+                        return bool(res)
                     except Exception as e:
-                        print("Exception in domain mail worker:", e)
-                    if state_capcut.task_stop.is_set(): break
+                        import traceback
+                        err_msg = "".join(traceback.format_exception(type(e), e, e.__traceback__))
+                        state_capcut.log(f"Worker Error [Slot {slot_idx+1}]: {err_msg}", "ERR")
+                        return False
+
+                with concurrent.futures.ThreadPoolExecutor(max_workers=curr_batch) as ex:
+                    futures = [ex.submit(batch_worker, s) for s in range(curr_batch)]
+                    for f in concurrent.futures.as_completed(futures):
+                        try:
+                            ok = f.result()
+                            if ok: done["ok"] += 1
+                            else: done["fail"] += 1
+                        except:
+                            done["fail"] += 1
+
+                total_started += curr_batch
+                state_capcut.log(f"🏁 ĐÃ HOÀN THÀNH LƯỢT {batch_num} (Tổng kết: {done['ok']} OK, {done['fail']} lỗi).", "OK")
+
+                # Kiểm tra xem có cần chạy tiếp lượt sau không
+                has_next = (total_started < count) and (not bot.HOTMAIL_QUEUE.empty()) and not state_capcut.task_stop.is_set()
+                if has_next:
+                    state_capcut.log("🔄 Lượt kết thúc. Bắt đầu xoay proxy và kiểm tra kết nối trước lượt tiếp theo...", "INFO")
+                    rot_ok, new_ip, rot_err = execute_proxy_rotate(logger_func=state_capcut.log)
+                    if rot_ok:
+                        state_capcut.log(f"🌐 Proxy đã sẵn sàng (IP: {new_ip}). Chuẩn bị chạy lượt tiếp theo...", "OK")
+                    else:
+                        state_capcut.log(f"⚠️ Cảnh báo xoay proxy: {rot_err}. Tiếp tục chạy lượt tiếp theo...", "WARN")
+                    time.sleep(2)
+
+        elif mode != 4:
+            import concurrent.futures
+
+            while total_started < count and not state_capcut.task_stop.is_set():
+                batch_num += 1
+                curr_batch = min(batch_size, count - total_started)
+                if curr_batch <= 0:
+                    break
+
+                state_capcut.log(f"🔄 === BẮT ĐẦU LƯỢT {batch_num}: Chạy song song {curr_batch} tài khoản Domain Mail ===", "INFO")
+
+                def batch_worker(slot_idx):
+                    if state_capcut.task_stop.is_set():
+                        return False
+                    stagger = (slot_idx % batch_size) * 2.5
+                    if stagger > 0:
+                        time.sleep(stagger)
+                    try:
+                        res = bot.register_one_account(
+                            slot_idx + 1,
+                            join_link if mode == 2 else None,
+                            keep_open=(mode == 1),
+                            batch_size=batch_size,
+                            headless=headless,
+                            browser_type=browser_type,
+                            get_link=(mode == 3),
+                            mail_api_source=mail_api_source,
+                            incognito=incognito
+                        )
+                        state_capcut.log_queue.put(json.dumps({"type": "result", "success": bool(res)}))
+                        return bool(res)
+                    except Exception as e:
+                        state_capcut.log(f"Worker Error [Slot {slot_idx+1}]: {e}", "ERR")
+                        return False
+
+                with concurrent.futures.ThreadPoolExecutor(max_workers=curr_batch) as ex:
+                    futures = [ex.submit(batch_worker, s) for s in range(curr_batch)]
+                    for f in concurrent.futures.as_completed(futures):
+                        try:
+                            ok = f.result()
+                            if ok: done["ok"] += 1
+                            else: done["fail"] += 1
+                        except:
+                            done["fail"] += 1
+
+                total_started += curr_batch
+                state_capcut.log(f"🏁 ĐÃ HOÀN THÀNH LƯỢT {batch_num} (Tổng kết: {done['ok']} OK, {done['fail']} lỗi).", "OK")
+
+                has_next = (total_started < count) and not state_capcut.task_stop.is_set()
+                if has_next:
+                    state_capcut.log("🔄 Lượt kết thúc. Bắt đầu xoay proxy và kiểm tra kết nối trước lượt tiếp theo...", "INFO")
+                    rot_ok, new_ip, rot_err = execute_proxy_rotate(logger_func=state_capcut.log)
+                    if rot_ok:
+                        state_capcut.log(f"🌐 Proxy đã sẵn sàng (IP: {new_ip}). Chuẩn bị chạy lượt tiếp theo...", "OK")
+                    else:
+                        state_capcut.log(f"⚠️ Cảnh báo xoay proxy: {rot_err}. Tiếp tục chạy lượt tiếp theo...", "WARN")
+                    time.sleep(2)
 
         # ==== MODE 4: API Mode (Không mở Chrome để đăng ký, chỉ join team) ====
         if mode == 4:
@@ -2587,6 +2693,10 @@ def _auto_proxy_rotator():
     while True:
         time.sleep(180)
         try:
+            # Chặn xoay tự động khi đang có bất kỳ tác vụ bot nào chạy
+            if (state_capcut.is_running or state_gpt.is_running or state_higgsfield.is_running or 
+                state_dreamina.is_running or state_grok.is_running or state_gpm.is_running):
+                continue
             requests.post("http://127.0.0.1:5050/api/proxy/rotate", timeout=20)
         except:
             pass
