@@ -4,48 +4,99 @@
     const isCheckout = window.location.hostname === 'chatgpt.com';
     if (!isStripe && !isCheckout) return;
 
-    // ─── Random data helpers ──────────────────────────────────────────────────
-    function getRandomName() {
+    // ─── Danh sách địa chỉ Việt Nam chuẩn và đồng bộ ───────────────────────────
+    const VN_LOCATIONS = [
+        { city: "Ha Noi", state: "Ha Noi", zip: "100000" },
+        { city: "Ho Chi Minh", state: "Ho Chi Minh", zip: "700000" },
+        { city: "Da Nang", state: "Da Nang", zip: "550000" },
+        { city: "Hai Phong", state: "Hai Phong", zip: "180000" },
+        { city: "Can Tho", state: "Can Tho", zip: "900000" },
+        { city: "Nha Trang", state: "Khanh Hoa", zip: "650000" },
+        { city: "Hue", state: "Thua Thien Hue", zip: "530000" },
+        { city: "Vung Tau", state: "Ba Ria - Vung Tau", zip: "790000" },
+        { city: "Bien Hoa", state: "Dong Nai", zip: "810000" },
+        { city: "Da Lat", state: "Lam Dong", zip: "670000" },
+        { city: "Buon Ma Thuot", state: "Dak Lak", zip: "630000" },
+        { city: "Vinh", state: "Nghe An", zip: "460000" },
+        { city: "Thanh Hoa", state: "Thanh Hoa", zip: "440000" },
+        { city: "Ha Long", state: "Quang Ninh", zip: "200000" },
+        { city: "Thai Nguyen", state: "Thai Nguyen", zip: "250000" },
+        { city: "Quy Nhon", state: "Binh Dinh", zip: "590000" },
+        { city: "Phan Thiet", state: "Binh Thuan", zip: "800000" },
+        { city: "Bac Ninh", state: "Bac Ninh", zip: "220000" }
+    ];
+
+    const STREETS = [
+        "Nguyễn Huệ", "Lê Lợi", "Trần Hưng Đạo", "Hai Bà Trưng", "Đồng Khởi",
+        "Lý Tự Trọng", "Nguyễn Đình Chiểu", "Pasteur", "Lê Duẩn", "Nguyễn Thị Minh Khai",
+        "Điện Biên Phủ", "Cách Mạng Tháng Tám", "Nguyễn Trãi", "Võ Văn Tần", "Trương Định",
+        "Bà Huyện Thanh Quan", "Nguyễn Bỉnh Khiêm", "Lê Thánh Tôn", "Tôn Đức Thắng", "Hàm Nghi",
+        "Võ Thị Sáu", "Nam Kỳ Khởi Nghĩa", "Phan Đăng Lưu", "Bạch Đằng", "Đinh Tiên Hoàng",
+        "Hoàng Hoa Thám", "Quang Trung", "Nguyễn Oanh", "Phạm Văn Đồng", "Mai Chí Thọ",
+        "Trần Phú", "Kim Mã", "Cầu Giấy", "Hoàng Diệu", "Phan Đình Phùng", "Xã Đàn"
+    ];
+
+    function generateRandomAddress() {
         const firstNames = ["Nguyễn", "Trần", "Lê", "Phạm", "Hoàng", "Huỳnh", "Phan", "Vũ", "Võ", "Đặng", "Bùi", "Đỗ", "Hồ", "Ngô", "Dương", "Lý", "Đinh", "Đoàn", "Lâm", "Trịnh", "Mai", "Đào"];
         const middleNames = ["Văn", "Thị", "Thanh", "Minh", "Hữu", "Đức", "Ngọc", "Gia", "Bảo", "Thu", "Hồng", "Hoàng", "Thành", "Đình", "Quang", "Trọng", "Tuấn", "Lan", "Phương", "Khánh", "Xuân"];
         const lastNames = ["Anh", "Bình", "Châu", "Dương", "Giang", "Hải", "Khang", "Linh", "Nhung", "Phương", "Quân", "Sơn", "Trang", "Vy", "Tuấn", "Long", "Cường", "Hùng", "Tùng", "Khoa", "Kiên", "Hiếu", "Nam", "Phúc", "Tâm", "Hương", "Hà", "Yến", "Thảo", "My", "Nhi", "Đạt", "Huy", "Tiến"];
         const r = a => a[Math.floor(Math.random() * a.length)];
-        return r(firstNames) + ' ' + r(middleNames) + ' ' + r(lastNames);
+        const fullName = r(firstNames) + ' ' + r(middleNames) + ' ' + r(lastNames);
+
+        const number = Math.floor(Math.random() * 888) + 12;
+        const street = STREETS[Math.floor(Math.random() * STREETS.length)];
+        const address1 = 'So ' + number + ' ' + street;
+
+        const loc = VN_LOCATIONS[Math.floor(Math.random() * VN_LOCATIONS.length)];
+        return {
+            name: fullName,
+            address1: address1,
+            city: loc.city,
+            state: loc.state,
+            zip: loc.zip
+        };
     }
 
-    function getRandomAddress1() {
-        const streets = [
-            "Nguyễn Huệ", "Lê Lợi", "Trần Hưng Đạo", "Hai Bà Trưng", "Đồng Khởi",
-            "Lý Tự Trọng", "Nguyễn Đình Chiểu", "Pasteur", "Lê Duẩn", "Nguyễn Thị Minh Khai",
-            "Điện Biên Phủ", "Cách Mạng Tháng Tám", "Nguyễn Trãi", "Võ Văn Tần", "Trương Định",
-            "Bà Huyện Thanh Quan", "Nguyễn Bỉnh Khiêm", "Lê Thánh Tôn", "Tôn Đức Thắng", "Hàm Nghi",
-            "Võ Thị Sáu", "Nam Kỳ Khởi Nghĩa", "Phan Đăng Lưu", "Bạch Đằng", "Đinh Tiên Hoàng",
-            "Hoàng Hoa Thám", "Quang Trung", "Nguyễn Oanh", "Phạm Văn Đồng", "Mai Chí Thọ",
-            "Trần Phú", "Kim Mã", "Cầu Giấy", "Hoàng Diệu", "Phan Đình Phùng", "Xã Đàn"
-        ];
-        const number = Math.floor(Math.random() * 999) + 1;
-        return 'So ' + number + ' ' + streets[Math.floor(Math.random() * streets.length)];
+    // ─── Clipboard Helper an toàn ──────────────────────────────────────────────
+    async function copyToClipboard(text) {
+        if (!text) return false;
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            try {
+                await navigator.clipboard.writeText(text);
+                return true;
+            } catch (err) {
+                console.warn('[AutoFill] navigator.clipboard failed, using fallback', err);
+            }
+        }
+        return fallbackCopy(text);
     }
 
-    function getRandomCity() {
-        const cities = [
-            "Ha Noi", "Ho Chi Minh", "Da Nang", "Hai Phong", "Can Tho",
-            "Nha Trang", "Hue", "Vung Tau", "Bien Hoa", "Da Lat",
-            "Buon Ma Thuot", "Vinh", "Thanh Hoa", "Ha Long", "Thai Nguyen",
-            "Viet Tri", "Quy Nhon", "Phan Thiet", "Ca Mau", "Long Xuyen",
-            "Rach Gia", "My Tho", "Tan An", "Pleiku", "Bac Ninh", "Hai Duong"
-        ];
-        return cities[Math.floor(Math.random() * cities.length)];
+    function fallbackCopy(text) {
+        try {
+            const ta = document.createElement('textarea');
+            ta.value = text;
+            ta.setAttribute('readonly', '');
+            ta.style.position = 'fixed';
+            ta.style.top = '0';
+            ta.style.left = '0';
+            ta.style.opacity = '0';
+            ta.style.pointerEvents = 'none';
+            document.body.appendChild(ta);
+            ta.focus();
+            ta.select();
+            ta.setSelectionRange(0, text.length);
+            const ok = document.execCommand('copy');
+            document.body.removeChild(ta);
+            return ok;
+        } catch (e) {
+            console.error('[AutoFill] Fallback copy error:', e);
+            return false;
+        }
     }
 
-    function getRandomZip() {
-        const zips = ["100000", "700000", "550000", "180000", "900000", "650000", "530000", "790000", "810000", "670000", "260000", "430000", "400000", "200000", "250000"];
-        return zips[Math.floor(Math.random() * zips.length)];
-    }
-
-    // ─── Simulate human typing (triggers React/Stripe events) ─────────────────
+    // ─── Simulate human typing (chỉ kích hoạt khi bấm nút "Điền vào form") ──────
     async function simulateTyping(element, text) {
-        if (!element) return;
+        if (!element || !text) return;
         const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
         element.focus();
         if (setter) setter.call(element, '');
@@ -57,32 +108,28 @@
             if (setter) setter.call(element, val);
             else element.value = val;
             element.dispatchEvent(new Event('input', { bubbles: true }));
-            await new Promise(r => setTimeout(r, Math.random() * 30 + 15));
+            await new Promise(r => setTimeout(r, Math.random() * 25 + 15));
         }
         element.dispatchEvent(new Event('change', { bubbles: true }));
         element.blur();
     }
 
-    // ─── Core fill logic — KHONG click / KHONG submit bat ky nut nao ──────────
+    // ─── Core fill logic (CHỈ CHẠY KHI NGƯỜI DÙNG BẤM NÚT "ĐIỀN VÀO FORM") ──────
     let isFilling = false;
-    let floatStatusEl = null;
 
-    function updateFloatingStatus(msg) {
-        if (floatStatusEl) floatStatusEl.textContent = msg;
-    }
-
-    async function autoFillForm(forceRefill) {
+    async function autoFillForm(forceRefill, targetAddr) {
         if (isFilling) return;
 
-        // Nếu đang ở frame chính chatgpt.com -> Broadcast lệnh fill xuống tất cả các iframe Stripe
-        if (isCheckout && !isStripe) {
-            updateFloatingStatus('Đang gửi lệnh điền...');
-            broadcastRefill();
-            return;
+        // Nếu không có địa chỉ truyền vào, lấy từ storage hoặc tạo mới
+        let addr = targetAddr;
+        if (!addr && typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+            try {
+                const res = await chrome.storage.local.get(['current_checkout_address']);
+                addr = res.current_checkout_address;
+            } catch (e) { }
         }
+        if (!addr) addr = generateRandomAddress();
 
-        // Đang ở iframe Stripe (js.stripe.com)
-        // Helper nhận diện các trường input chính xác, tránh nhầm lẫn giữa Tên và Địa chỉ
         function isNameInput(el) {
             if (!el || el.tagName !== 'INPUT' || el.type === 'hidden' || el.type === 'checkbox' || el.type === 'radio') return false;
             const id = (el.id || '').toLowerCase();
@@ -91,7 +138,6 @@
             const ph = (el.getAttribute('placeholder') || '').toLowerCase();
             const stable = (el.getAttribute('data-elements-stable-field-name') || '').toLowerCase();
 
-            // Nếu trường chứa các từ khóa địa chỉ/city/zip thì chắc chắn không phải Tên
             if (id.includes('line1') || id.includes('line2') || id.includes('city') || id.includes('locality') || id.includes('postal') || id.includes('zip')) return false;
             if (name.includes('line1') || name.includes('line2') || name.includes('city') || name.includes('locality') || name.includes('postal') || name.includes('zip')) return false;
 
@@ -106,8 +152,8 @@
 
         function isAddress1Input(el, nameEl) {
             if (!el || el.tagName !== 'INPUT' || el.type === 'hidden' || el.type === 'checkbox' || el.type === 'radio') return false;
-            if (nameEl && el === nameEl) return false; // Tuyệt đối không trùng ô Tên
-            if (isNameInput(el)) return false; // Không lấy ô Tên làm Địa chỉ
+            if (nameEl && el === nameEl) return false;
+            if (isNameInput(el)) return false;
 
             const id = (el.id || '').toLowerCase();
             const name = (el.name || '').toLowerCase();
@@ -115,7 +161,6 @@
             const ph = (el.getAttribute('placeholder') || '').toLowerCase();
             const stable = (el.getAttribute('data-elements-stable-field-name') || '').toLowerCase();
 
-            // Loại trừ dòng 2, city, zip, state
             if (id.includes('line2') || id.includes('address2') || name.includes('line2') || name.includes('address2')) return false;
             if (id.includes('locality') || id.includes('city') || id.includes('postal') || id.includes('zip') || id.includes('state')) return false;
             if (name.includes('locality') || name.includes('city') || name.includes('postal') || name.includes('zip')) return false;
@@ -125,7 +170,6 @@
             if (id.includes('addressline1') || id.includes('address-line1') || id.includes('billingaddressline1') || id.includes('billingaddress-addressline1') || id.includes('line1') || id.includes('address1')) return true;
             if (name.includes('addressline1') || name.includes('address-line1') || name.includes('address1') || name.includes('line1') || name === 'address') return true;
             if (ph.includes('address line 1') || ph.includes('địa chỉ dòng 1') || ph.includes('địa chỉ 1') || ph.includes('street address')) return true;
-            // Stripe Address autocomplete / fallback
             if (id.includes('billingaddress') && !id.includes('name') && !id.includes('line2')) return true;
             if ((ph.includes('address') || ph.includes('địa chỉ')) && !ph.includes('name') && !ph.includes('tên') && !ph.includes('line 2') && !ph.includes('dòng 2')) return true;
 
@@ -148,7 +192,6 @@
             return false;
         }
 
-        // 1. Kiểm tra xem ô địa chỉ đã có chưa, nếu chưa có và có nút "Enter address manually" thì click mở
         const inputs = Array.from(document.querySelectorAll('input'));
         let nameInput = inputs.find(isNameInput);
         let addrInput = inputs.find(el => isAddress1Input(el, nameInput));
@@ -167,7 +210,6 @@
             }
         }
 
-        // Lấy lại danh sách inputs sau khi mở thủ công (nếu có)
         const updatedInputs = Array.from(document.querySelectorAll('input'));
         nameInput = updatedInputs.find(isNameInput);
         addrInput = updatedInputs.find(el => isAddress1Input(el, nameInput));
@@ -177,55 +219,46 @@
             'select[name="administrativeArea"], select[name="state"], select[autocomplete*="address-level1"], select[id*="administrativeArea" i], select[id*="state" i]'
         );
 
-        if (!nameInput && !addrInput && !cityInput) {
-            return;
-        }
+        if (!nameInput && !addrInput && !cityInput) return;
 
         isFilling = true;
         try {
-            console.log('[AutoFill] Tìm thấy ô nhập liệu Stripe trên frame (' + window.location.pathname + '), bắt đầu điền...');
+            console.log('[AutoFill] Đang điền theo lệnh thủ công với dữ liệu:', addr);
 
-            // 1. Họ và tên (Chỉ nhập vào ô Tên)
+            // 1. Họ và tên
             if (nameInput && (!nameInput.value || forceRefill)) {
-                console.log('[AutoFill] Điền Tên vào ô:', nameInput.id || nameInput.name);
-                await simulateTyping(nameInput, getRandomName());
+                await simulateTyping(nameInput, addr.name);
+                await new Promise(r => setTimeout(r, 200));
+            }
+
+            // 2. Địa chỉ dòng 1
+            if (addrInput && (!addrInput.value || forceRefill)) {
+                await simulateTyping(addrInput, addr.address1);
                 await new Promise(r => setTimeout(r, 250));
             }
 
-            // 2. Địa chỉ dòng 1 (Chỉ nhập vào ô Address Line 1)
-            if (addrInput && (!addrInput.value || forceRefill)) {
-                console.log('[AutoFill] Điền Địa chỉ dòng 1 vào ô:', addrInput.id || addrInput.name);
-                await simulateTyping(addrInput, getRandomAddress1());
-                await new Promise(r => setTimeout(r, 350));
-            }
-
-            // 3. Thành phố (Chỉ nhập vào ô City)
+            // 3. Thành phố
             const cInput = cityInput || Array.from(document.querySelectorAll('input')).find(el => isCityInput(el, [nameInput, addrInput]));
             if (cInput && (!cInput.value || forceRefill)) {
-                console.log('[AutoFill] Điền Thành phố vào ô:', cInput.id || cInput.name);
-                await simulateTyping(cInput, getRandomCity());
-                await new Promise(r => setTimeout(r, 250));
+                await simulateTyping(cInput, addr.city);
+                await new Promise(r => setTimeout(r, 200));
             }
 
-            // 4. BỎ HẲN ĐIỀN Ô ZIP CODE THEO YÊU CẦU:
-            // Tránh việc Stripe/ChatGPT nhận diện form hoàn tất 100% rồi tự động kích hoạt thanh toán.
-            // Ô Zip code để người dùng tự gõ hoặc kiểm soát khi thanh toán.
-
-            // 5. State dropdown (nếu có)
+            // 4. Bang / Tỉnh (nếu có dropdown)
             const curStateSelect = stateSelect || document.querySelector(
                 'select[name="administrativeArea"], select[name="state"], select[autocomplete*="address-level1"], select[id*="administrativeArea" i], select[id*="state" i]'
             );
             if (curStateSelect && (!curStateSelect.value || forceRefill)) {
                 const opts = Array.from(curStateSelect.options).filter(o => o.value && !o.disabled);
-                if (opts.length) {
-                    const opt = opts[Math.floor(Math.random() * opts.length)];
-                    curStateSelect.value = opt.value;
+                const matchedOpt = opts.find(o => o.text.toLowerCase().includes(addr.state.toLowerCase()) || o.value.toLowerCase().includes(addr.state.toLowerCase()));
+                const chosen = matchedOpt || opts[0];
+                if (chosen) {
+                    curStateSelect.value = chosen.value;
                     curStateSelect.dispatchEvent(new Event('change', { bubbles: true }));
                     curStateSelect.dispatchEvent(new Event('input', { bubbles: true }));
                 }
             }
 
-            console.log('[AutoFill] Đã điền xong thông tin (Tên, Địa chỉ 1, Thành phố). Đã bỏ qua ô Zip. Dừng lại, không bấm nút thanh toán.');
             try {
                 window.top.postMessage({ type: 'CHATGPT_AUTOFILL_DONE' }, '*');
             } catch (e) { }
@@ -234,79 +267,561 @@
         }
     }
 
-    // ─── Broadcast helper (dành cho frame chính) ──────────────────────────────
-    function broadcastRefill() {
-        console.log('[AutoFill] Gửi lệnh refill tới tất cả iframe Stripe...');
+    // ─── Broadcast helper (chỉ kích hoạt khi bấm nút "Điền vào form") ──────────
+    function broadcastRefill(addr) {
+        console.log('[AutoFill] Gửi lệnh refill thủ công tới Stripe iframe...');
         try {
-            window.postMessage({ type: 'CHATGPT_AUTOFILL_REFILL' }, '*');
+            window.postMessage({ type: 'CHATGPT_AUTOFILL_REFILL', address: addr }, '*');
             document.querySelectorAll('iframe').forEach(f => {
-                try { f.contentWindow.postMessage({ type: 'CHATGPT_AUTOFILL_REFILL' }, '*'); } catch (e) { }
+                try { f.contentWindow.postMessage({ type: 'CHATGPT_AUTOFILL_REFILL', address: addr }, '*'); } catch (e) { }
             });
         } catch (e) { }
         if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-            chrome.storage.local.set({ trigger_refill: Date.now() });
+            chrome.storage.local.set({ trigger_refill: Date.now(), current_checkout_address: addr });
         }
     }
 
-    // ─── Floating button "Doi dia chi" (chi inject o chatgpt.com) ─────────────
-    function injectFloatingButton() {
-        if (!isCheckout || document.getElementById('__af_float__')) return;
+    // ─── Floating Address Card (CHỈ HIỂN THỊ ĐỂ COPY DÁN BẰNG TAY) ────────────
+    let currentAddress = null;
 
+    async function injectAddressCard() {
+        if (!isCheckout || window.top !== window) return;
+        if (document.getElementById('__af_address_card__')) return;
+
+        // Lấy hoặc tạo địa chỉ hiện tại
+        if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+            try {
+                const res = await chrome.storage.local.get(['current_checkout_address']);
+                if (res && res.current_checkout_address && res.current_checkout_address.name) {
+                    currentAddress = res.current_checkout_address;
+                }
+            } catch (e) { }
+        }
+        if (!currentAddress) {
+            currentAddress = generateRandomAddress();
+            if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+                chrome.storage.local.set({ current_checkout_address: currentAddress });
+            }
+        }
+
+        // CSS cho Card và Mini Badge
         const style = document.createElement('style');
-        style.textContent = [
-            '#__af_float__{position:fixed;bottom:18px;right:18px;z-index:2147483647;display:flex;flex-direction:column;align-items:flex-end;gap:7px;font-family:-apple-system,BlinkMacSystemFont,Inter,sans-serif}',
-            '#__af_status__{background:rgba(15,25,45,0.92);border:1px solid #2a4a7a;color:#7ab8e8;font-size:11px;padding:5px 12px;border-radius:20px;max-width:240px;text-align:right;line-height:1.5;backdrop-filter:blur(6px)}',
-            '#__af_btn__{background:linear-gradient(135deg,#1a4a8a,#4a3a8a);border:none;color:#fff;font-size:13px;font-weight:700;padding:11px 20px;border-radius:24px;cursor:pointer;box-shadow:0 4px 18px rgba(74,58,138,0.55);transition:transform .15s,box-shadow .15s,opacity .15s;letter-spacing:.3px;font-family:inherit}',
-            '#__af_btn__:hover{transform:translateY(-2px);box-shadow:0 6px 24px rgba(74,58,138,0.75)}',
-            '#__af_btn__:active{transform:translateY(0);opacity:.8}',
-            '#__af_btn__:disabled{opacity:.5;cursor:not-allowed;transform:none}'
-        ].join('');
+        style.textContent = `
+            #__af_address_card__ {
+                position: fixed;
+                bottom: 20px;
+                right: 20px;
+                z-index: 2147483647;
+                width: 320px;
+                background: linear-gradient(145deg, #121422, #181d33);
+                border: 1.5px solid #2d3f66;
+                border-radius: 14px;
+                box-shadow: 0 12px 36px rgba(0,0,0,0.7), 0 0 15px rgba(58,130,246,0.18);
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                color: #e2e8f0;
+                user-select: none;
+                overflow: hidden;
+                transition: transform 0.2s, opacity 0.2s;
+            }
+            #__af_card_header__ {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                padding: 10px 14px 8px;
+                background: rgba(15, 20, 35, 0.7);
+                border-bottom: 1px solid #23304a;
+                cursor: grab;
+            }
+            #__af_card_header__:active { cursor: grabbing; }
+            .af-card-title {
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                font-size: 13px;
+                font-weight: 700;
+                color: #fff;
+            }
+            .af-badge-off {
+                font-size: 9px;
+                font-weight: 700;
+                padding: 2px 6px;
+                background: rgba(239, 68, 68, 0.15);
+                border: 1px solid rgba(239, 68, 68, 0.4);
+                color: #fca5a5;
+                border-radius: 10px;
+                letter-spacing: 0.5px;
+            }
+            .af-header-btns {
+                display: flex;
+                align-items: center;
+                gap: 4px;
+            }
+            .af-icon-btn {
+                background: none;
+                border: none;
+                color: #8899bb;
+                cursor: pointer;
+                font-size: 16px;
+                line-height: 1;
+                padding: 2px 6px;
+                border-radius: 4px;
+                transition: color 0.15s, background 0.15s;
+            }
+            .af-icon-btn:hover { color: #fff; background: rgba(255,255,255,0.08); }
+            #__af_card_body__ {
+                padding: 10px 14px 12px;
+                display: flex;
+                flex-direction: column;
+                gap: 7px;
+            }
+            .af-notice {
+                font-size: 10px;
+                color: #94a3b8;
+                background: rgba(30, 41, 65, 0.6);
+                border-left: 3px solid #38bdf8;
+                padding: 5px 8px;
+                border-radius: 4px;
+                line-height: 1.4;
+            }
+            .af-field-row {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                background: #0d101d;
+                border: 1px solid #1e2840;
+                border-radius: 8px;
+                padding: 5px 8px;
+                gap: 6px;
+                transition: border-color 0.15s;
+            }
+            .af-field-row:hover {
+                border-color: #3b82f6;
+            }
+            .af-field-meta {
+                display: flex;
+                flex-direction: column;
+                overflow: hidden;
+                flex: 1;
+                cursor: pointer;
+            }
+            .af-field-label {
+                font-size: 9.5px;
+                font-weight: 600;
+                color: #64748b;
+                text-transform: uppercase;
+                letter-spacing: 0.4px;
+            }
+            .af-field-val {
+                font-size: 12px;
+                font-weight: 600;
+                color: #38bdf8;
+                font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+            .af-copy-btn {
+                background: #1a2744;
+                border: 1px solid #2b4170;
+                color: #7dd3fc;
+                font-size: 10.5px;
+                font-weight: 600;
+                padding: 4px 8px;
+                border-radius: 6px;
+                cursor: pointer;
+                white-space: nowrap;
+                transition: all 0.15s;
+                font-family: inherit;
+            }
+            .af-copy-btn:hover {
+                background: #233760;
+                color: #fff;
+                border-color: #38bdf8;
+            }
+            .af-copy-btn.copied {
+                background: #14532d !important;
+                border-color: #22c55e !important;
+                color: #86efac !important;
+            }
+            .af-btn-group {
+                display: flex;
+                gap: 6px;
+                margin-top: 4px;
+            }
+            .af-action-btn {
+                flex: 1;
+                padding: 7px 10px;
+                border-radius: 8px;
+                font-size: 11.5px;
+                font-weight: 600;
+                cursor: pointer;
+                font-family: inherit;
+                border: none;
+                transition: transform 0.12s, opacity 0.15s, background 0.15s;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 4px;
+            }
+            .af-action-btn:hover { transform: translateY(-1px); }
+            .af-action-btn:active { transform: translateY(0); }
+            .af-btn-refresh {
+                background: linear-gradient(135deg, #1e3a8a, #3b82f6);
+                color: #fff;
+            }
+            .af-btn-copyall {
+                background: #1e293b;
+                border: 1px solid #334155;
+                color: #cbd5e1;
+            }
+            .af-btn-copyall:hover {
+                background: #273549;
+                color: #fff;
+            }
+            .af-btn-fill {
+                background: #281a1a;
+                border: 1px solid #552727;
+                color: #fca5a5;
+                padding: 5px 8px;
+                font-size: 10.5px;
+                opacity: 0.8;
+            }
+            .af-btn-fill:hover {
+                opacity: 1;
+                background: #3b2020;
+            }
+            #__af_card_mini__ {
+                position: fixed;
+                bottom: 20px;
+                right: 20px;
+                z-index: 2147483647;
+                display: none;
+                align-items: center;
+                gap: 7px;
+                background: linear-gradient(135deg, #111827, #1e293b);
+                border: 1.5px solid #3b82f6;
+                border-radius: 24px;
+                padding: 7px 14px;
+                cursor: pointer;
+                box-shadow: 0 4px 18px rgba(0,0,0,0.6);
+                font-family: inherit;
+                font-size: 12px;
+                font-weight: 700;
+                color: #38bdf8;
+                user-select: none;
+                transition: transform 0.15s, box-shadow 0.15s;
+            }
+            #__af_card_mini__:hover {
+                transform: scale(1.05);
+                box-shadow: 0 6px 24px rgba(59,130,246,0.35);
+            }
+            #__af_toast__ {
+                position: fixed;
+                bottom: 20px;
+                left: 50%;
+                transform: translateX(-50%) translateY(40px);
+                background: #0f172a;
+                border: 1px solid #22c55e;
+                color: #86efac;
+                font-size: 12px;
+                font-weight: 600;
+                padding: 7px 18px;
+                border-radius: 20px;
+                box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+                pointer-events: none;
+                transition: transform 0.25s, opacity 0.25s;
+                opacity: 0;
+                z-index: 2147483647;
+            }
+            #__af_toast__.show {
+                transform: translateX(-50%) translateY(0);
+                opacity: 1;
+            }
+        `;
         document.head.appendChild(style);
 
-        const wrap = document.createElement('div');
-        wrap.id = '__af_float__';
+        // Toast element
+        let toastEl = document.getElementById('__af_toast__');
+        if (!toastEl) {
+            toastEl = document.createElement('div');
+            toastEl.id = '__af_toast__';
+            document.body.appendChild(toastEl);
+        }
 
-        const statusDiv = document.createElement('div');
-        statusDiv.id = '__af_status__';
-        statusDiv.textContent = 'Sẵn sàng điền địa chỉ';
-        floatStatusEl = statusDiv;
+        function showToast(msg) {
+            toastEl.textContent = msg;
+            toastEl.classList.add('show');
+            setTimeout(() => { toastEl.classList.remove('show'); }, 1800);
+        }
 
-        const btn = document.createElement('button');
-        btn.id = '__af_btn__';
-        btn.textContent = '\uD83D\uDD04 Đổi địa chỉ';
-        btn.title = 'Điền ngẫu nhiên địa chỉ mới vào form Stripe Checkout (không tự bấm nút thanh toán)';
+        // Mini pill
+        const mini = document.createElement('div');
+        mini.id = '__af_card_mini__';
+        mini.innerHTML = `<span>📍</span><span>Địa chỉ (Copy tay)</span><span style="font-size:10px;color:#94a3b8;background:#1e293b;padding:2px 6px;border-radius:10px;">Mở</span>`;
+        document.body.appendChild(mini);
 
-        btn.onclick = () => {
-            btn.disabled = true;
-            broadcastRefill();
-            updateFloatingStatus('Đang gửi lệnh điền...');
-            setTimeout(() => { btn.disabled = false; }, 1500);
+        // Main card
+        const card = document.createElement('div');
+        card.id = '__af_address_card__';
+        card.innerHTML = `
+            <div id="__af_card_header__">
+                <div class="af-card-title">
+                    <span>📍</span>
+                    <span>Địa chỉ thanh toán</span>
+                    <span class="af-badge-off" title="Tự động fill đã được tắt theo yêu cầu. Vui lòng bấm Copy để dán tay!">TỰ ĐIỀN: TẮT</span>
+                </div>
+                <div class="af-header-btns">
+                    <button class="af-icon-btn" id="__af_btn_minimize__" title="Thu nhỏ">−</button>
+                </div>
+            </div>
+            <div id="__af_card_body__">
+                <div class="af-notice">
+                    ✍️ <b>Tự động điền đã tắt</b> để tránh Stripe phát hiện. Bấm <b>Copy</b> hoặc bấm trực tiếp vào chữ để dán vào form:
+                </div>
+                
+                <div class="af-field-row" data-field="name">
+                    <div class="af-field-meta" title="Click để copy">
+                        <span class="af-field-label">Tên trên thẻ</span>
+                        <span class="af-field-val" id="__af_val_name__">${currentAddress.name}</span>
+                    </div>
+                    <button class="af-copy-btn" id="__af_cp_name__">📋 Copy</button>
+                </div>
+
+                <div class="af-field-row" data-field="address1">
+                    <div class="af-field-meta" title="Click để copy">
+                        <span class="af-field-label">Địa chỉ dòng 1</span>
+                        <span class="af-field-val" id="__af_val_addr__">${currentAddress.address1}</span>
+                    </div>
+                    <button class="af-copy-btn" id="__af_cp_addr__">📋 Copy</button>
+                </div>
+
+                <div class="af-field-row" data-field="city">
+                    <div class="af-field-meta" title="Click để copy">
+                        <span class="af-field-label">Thành phố</span>
+                        <span class="af-field-val" id="__af_val_city__">${currentAddress.city}</span>
+                    </div>
+                    <button class="af-copy-btn" id="__af_cp_city__">📋 Copy</button>
+                </div>
+
+                <div class="af-field-row" data-field="zip">
+                    <div class="af-field-meta" title="Click để copy">
+                        <span class="af-field-label">Mã bưu điện (Zip)</span>
+                        <span class="af-field-val" id="__af_val_zip__">${currentAddress.zip}</span>
+                    </div>
+                    <button class="af-copy-btn" id="__af_cp_zip__">📋 Copy</button>
+                </div>
+
+                <div class="af-field-row" data-field="state">
+                    <div class="af-field-meta" title="Click để copy">
+                        <span class="af-field-label">Tỉnh / Thành</span>
+                        <span class="af-field-val" id="__af_val_state__">${currentAddress.state}</span>
+                    </div>
+                    <button class="af-copy-btn" id="__af_cp_state__">📋 Copy</button>
+                </div>
+
+                <div class="af-btn-group">
+                    <button class="af-action-btn af-btn-refresh" id="__af_btn_refresh__" title="Tạo ngẫu nhiên một địa chỉ mới">
+                        🔄 Đổi địa chỉ
+                    </button>
+                    <button class="af-action-btn af-btn-copyall" id="__af_btn_copyall__" title="Copy toàn bộ thông tin địa chỉ">
+                        📋 Copy tất cả
+                    </button>
+                </div>
+
+                <div style="margin-top:2px; display:flex; justify-content:center;">
+                    <button class="af-action-btn af-btn-fill" id="__af_btn_fill__" title="Nếu bạn vẫn muốn tiện lợi tự điền tự động vào form thì bấm nút này">
+                        ⚡ Điền tự động vào form (Tùy chọn)
+                    </button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(card);
+
+        // Update card contents
+        function updateCardUI(addr) {
+            currentAddress = addr;
+            document.getElementById('__af_val_name__').textContent = addr.name;
+            document.getElementById('__af_val_addr__').textContent = addr.address1;
+            document.getElementById('__af_val_city__').textContent = addr.city;
+            document.getElementById('__af_val_zip__').textContent = addr.zip;
+            document.getElementById('__af_val_state__').textContent = addr.state;
+        }
+
+        // Copy button handler
+        function attachCopyHandler(btnId, textGetter, label) {
+            const btn = document.getElementById(btnId);
+            if (!btn) return;
+            btn.onclick = async (e) => {
+                e.stopPropagation();
+                let text = textGetter();
+                if (!text && currentAddress) {
+                    text = currentAddress.address1 || currentAddress.name || '';
+                }
+                if (!text) return;
+                const ok = await copyToClipboard(text);
+                if (ok) {
+                    btn.textContent = '✓ Đã copy';
+                    btn.classList.add('copied');
+                    showToast(`✓ Đã copy ${label}: ${text}`);
+                    setTimeout(() => {
+                        btn.textContent = '📋 Copy';
+                        btn.classList.remove('copied');
+                    }, 1400);
+                } else {
+                    showToast(`⚠️ Lỗi copy ${label}`);
+                }
+            };
+        }
+
+        attachCopyHandler('__af_cp_name__', () => currentAddress?.name || document.getElementById('__af_val_name__')?.textContent, 'Tên');
+        attachCopyHandler('__af_cp_addr__', () => currentAddress?.address1 || document.getElementById('__af_val_addr__')?.textContent, 'Địa chỉ');
+        attachCopyHandler('__af_cp_city__', () => currentAddress?.city || document.getElementById('__af_val_city__')?.textContent, 'Thành phố');
+        attachCopyHandler('__af_cp_zip__', () => currentAddress?.zip || document.getElementById('__af_val_zip__')?.textContent, 'Mã Zip');
+        attachCopyHandler('__af_cp_state__', () => currentAddress?.state || document.getElementById('__af_val_state__')?.textContent, 'Tỉnh / Thành');
+
+        // Click trực tiếp vào dòng chữ cũng copy
+        card.querySelectorAll('.af-field-meta').forEach(meta => {
+            meta.onclick = async () => {
+                const valEl = meta.querySelector('.af-field-val');
+                const labelEl = meta.querySelector('.af-field-label');
+                if (valEl && valEl.textContent) {
+                    const text = valEl.textContent.trim();
+                    const ok = await copyToClipboard(text);
+                    if (ok) {
+                        showToast(`✓ Đã copy ${labelEl?.textContent || ''}: ${text}`);
+                    }
+                }
+            };
+        });
+
+        // Nút Đổi địa chỉ
+        const refreshBtn = document.getElementById('__af_btn_refresh__');
+        refreshBtn.onclick = () => {
+            const newAddr = generateRandomAddress();
+            updateCardUI(newAddr);
+            if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+                chrome.storage.local.set({ current_checkout_address: newAddr });
+            }
+            showToast('🔄 Đã tạo địa chỉ mới!');
         };
 
-        wrap.appendChild(statusDiv);
-        wrap.appendChild(btn);
-        document.body.appendChild(wrap);
-        console.log('[AutoFill] Đã inject nút "Đổi địa chỉ" vào trang checkout.');
+        // Nút Copy tất cả
+        const copyAllBtn = document.getElementById('__af_btn_copyall__');
+        copyAllBtn.onclick = async () => {
+            const cName = currentAddress?.name || document.getElementById('__af_val_name__')?.textContent || '';
+            const cAddr = currentAddress?.address1 || document.getElementById('__af_val_addr__')?.textContent || '';
+            const cCity = currentAddress?.city || document.getElementById('__af_val_city__')?.textContent || '';
+            const cZip = currentAddress?.zip || document.getElementById('__af_val_zip__')?.textContent || '';
+            const cState = currentAddress?.state || document.getElementById('__af_val_state__')?.textContent || '';
+            const text = [
+                `Tên: ${cName}`,
+                `Địa chỉ: ${cAddr}`,
+                `Thành phố: ${cCity}`,
+                `Zip: ${cZip}`,
+                `Bang: ${cState}`
+            ].join('\n');
+            const ok = await copyToClipboard(text);
+            if (ok) {
+                showToast('✓ Đã copy tất cả thông tin địa chỉ!');
+            }
+        };
+
+        // Nút Điền tự động (Chỉ chạy khi người dùng chủ động bấm)
+        const fillBtn = document.getElementById('__af_btn_fill__');
+        fillBtn.onclick = () => {
+            fillBtn.disabled = true;
+            fillBtn.textContent = '⏳ Đang gửi lệnh điền...';
+            broadcastRefill(currentAddress);
+            showToast('⚡ Đang điền vào form thanh toán...');
+            setTimeout(() => {
+                fillBtn.disabled = false;
+                fillBtn.textContent = '⚡ Điền tự động vào form (Tùy chọn)';
+            }, 2000);
+        };
+
+        // Thu nhỏ / Mở rộng
+        const minBtn = document.getElementById('__af_btn_minimize__');
+        minBtn.onclick = () => {
+            card.style.display = 'none';
+            mini.style.display = 'flex';
+        };
+        mini.onclick = () => {
+            card.style.display = '';
+            mini.style.display = 'none';
+        };
+
+        // Kéo thả Draggable
+        (function makeDraggable(panel, handle) {
+            let isDragging = false, startX, startY, origLeft, origTop;
+            handle.addEventListener('mousedown', (e) => {
+                if (e.button !== 0 || e.target.tagName === 'BUTTON') return;
+                isDragging = true;
+                const rect = panel.getBoundingClientRect();
+                panel.style.left = rect.left + 'px';
+                panel.style.top = rect.top + 'px';
+                panel.style.bottom = 'auto';
+                panel.style.right = 'auto';
+                startX = e.clientX;
+                startY = e.clientY;
+                origLeft = rect.left;
+                origTop = rect.top;
+                e.preventDefault();
+            });
+            document.addEventListener('mousemove', (e) => {
+                if (!isDragging) return;
+                panel.style.left = (origLeft + e.clientX - startX) + 'px';
+                panel.style.top = (origTop + e.clientY - startY) + 'px';
+            });
+            document.addEventListener('mouseup', () => { isDragging = false; });
+        })(card, document.getElementById('__af_card_header__'));
+
+        console.log('[AutoFill] Đã hiển thị Card địa chỉ (chế độ copy tay, tự động điền: ĐÃ TẮT).');
     }
 
-    // ─── Listeners cho lệnh đổi địa chỉ từ login.js / popup.js ──────────────────
-    window.addEventListener('message', (e) => {
-        if (e.data && e.data.type === 'CHATGPT_AUTOFILL_REFILL') {
+    // ─── Listeners cho lệnh đổi địa chỉ từ popup hoặc login.js ─────────────────
+    window.addEventListener('message', async (e) => {
+        if (!e.data) return;
+        if (e.data.type === 'CHATGPT_AUTOFILL_REFILL') {
             if (isStripe) {
-                console.log('[AutoFill] Nhận lệnh refill qua postMessage (Stripe frame)');
-                autoFillForm(true);
+                console.log('[AutoFill] Nhận lệnh refill thủ công qua postMessage (Stripe frame)');
+                let addr = e.data.address;
+                if (!addr && typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+                    try {
+                        const res = await chrome.storage.local.get(['current_checkout_address']);
+                        addr = res.current_checkout_address;
+                    } catch (err) { }
+                }
+                autoFillForm(true, addr);
             }
-        } else if (e.data && e.data.type === 'CHATGPT_AUTOFILL_DONE') {
-            updateFloatingStatus('Đã điền xong địa chỉ!');
+        } else if (e.data.type === 'CHATGPT_UPDATE_ADDRESS_CARD') {
+            if (isCheckout && e.data.address) {
+                currentAddress = e.data.address;
+                const nameEl = document.getElementById('__af_val_name__');
+                if (nameEl) {
+                    document.getElementById('__af_val_name__').textContent = currentAddress.name;
+                    document.getElementById('__af_val_addr__').textContent = currentAddress.address1;
+                    document.getElementById('__af_val_city__').textContent = currentAddress.city;
+                    document.getElementById('__af_val_zip__').textContent = currentAddress.zip;
+                    document.getElementById('__af_val_state__').textContent = currentAddress.state;
+                }
+            }
         }
     });
 
     if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.onChanged) {
         chrome.storage.onChanged.addListener((changes, area) => {
-            if (area === 'local' && changes.trigger_refill) {
-                if (isStripe) {
-                    console.log('[AutoFill] Nhận lệnh refill qua storage (Stripe frame)');
-                    autoFillForm(true);
+            if (area === 'local' && changes.current_checkout_address && isCheckout) {
+                const addr = changes.current_checkout_address.newValue;
+                if (addr) {
+                    currentAddress = addr;
+                    const nameEl = document.getElementById('__af_val_name__');
+                    if (nameEl) {
+                        document.getElementById('__af_val_name__').textContent = addr.name;
+                        document.getElementById('__af_val_addr__').textContent = addr.address1;
+                        document.getElementById('__af_val_city__').textContent = addr.city;
+                        document.getElementById('__af_val_zip__').textContent = addr.zip;
+                        document.getElementById('__af_val_state__').textContent = addr.state;
+                    }
                 }
             }
         });
@@ -315,53 +830,29 @@
     // ─── Khởi động ─────────────────────────────────────────────────────────────
     function startObserver() {
         if (isStripe) {
-            // Trong iframe Stripe: Kiểm tra và điền ngay khi form render
-            const checkAndFill = () => {
-                const SEL_CHECK = 'input[name="addressLine1"], input[name="address"], input[name="name"], input[id*="address"], input[id*="billing"]';
-                if (document.querySelector(SEL_CHECK)) {
-                    autoFillForm(false);
-                    return true;
-                }
-                return false;
-            };
-
-            const obs = new MutationObserver(() => {
-                if (checkAndFill()) obs.disconnect();
-            });
-            if (document.body) obs.observe(document.body, { childList: true, subtree: true });
-
-            // Kiểm tra định kỳ 400ms trong 6 giây đầu
-            let attempts = 0;
-            const timer = setInterval(() => {
-                attempts++;
-                if (checkAndFill() || attempts >= 15) {
-                    clearInterval(timer);
-                    obs.disconnect();
-                }
-            }, 400);
-
+            // Trong iframe Stripe: TUYỆT ĐỐI KHÔNG TỰ ĐỘNG ĐIỀN!
+            // Chỉ lắng nghe lệnh điền thủ công khi người dùng bấm nút "⚡ Điền tự động vào form"
+            console.log('[AutoFill] Stripe iframe sẵn sàng. Tự động fill: ĐÃ TẮT (Chỉ chờ lệnh thủ công hoặc copy tay).');
         } else if (isCheckout) {
-            // Trên trang chính chatgpt.com
-            let hasInitCheckout = false;
-            const checkAndInit = () => {
-                if (hasInitCheckout) return true;
-                const hasStripe = document.querySelector('iframe[src*="stripe.com"], .StripeElement');
-                if (hasStripe) {
-                    hasInitCheckout = true;
-                    injectFloatingButton();
-                    broadcastRefill();
-                    return true;
+            // Trên trang chính chatgpt.com: Kiểm tra xem có đang ở trang checkout không
+            const checkAndShowCard = () => {
+                const isCheckoutUrl = window.location.pathname.includes('/checkout') ||
+                    window.location.search.includes('promo_campaign') ||
+                    document.querySelector('iframe[src*="stripe.com"], .StripeElement') !== null;
+
+                if (isCheckoutUrl) {
+                    injectAddressCard();
                 }
-                return false;
             };
 
             const obs = new MutationObserver(() => {
-                if (checkAndInit()) obs.disconnect();
+                checkAndShowCard();
             });
             if (document.body) obs.observe(document.body, { childList: true, subtree: true });
 
-            setTimeout(() => { checkAndInit(); }, 1200);
-            setTimeout(() => { checkAndInit(); }, 3000);
+            checkAndShowCard();
+            setTimeout(checkAndShowCard, 1000);
+            setTimeout(checkAndShowCard, 2500);
         }
     }
 

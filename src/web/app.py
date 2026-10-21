@@ -407,9 +407,9 @@ def capcut_accounts():
         with get_db() as conn:
             cursor = conn.cursor()
             if session_only:
-                cursor.execute("SELECT id, uid, email, password, join_link FROM accounts WHERE app='capcut' AND id > ? ORDER BY id ASC", (state_capcut.last_start_id,))
+                cursor.execute("SELECT id, uid, email, password, join_link, uudai FROM accounts WHERE app='capcut' AND id > ? ORDER BY id ASC", (state_capcut.last_start_id,))
             else:
-                cursor.execute("SELECT id, uid, email, password, join_link FROM accounts WHERE app='capcut' ORDER BY id ASC")
+                cursor.execute("SELECT id, uid, email, password, join_link, uudai FROM accounts WHERE app='capcut' ORDER BY id ASC")
             accounts = cursor.fetchall()
     except Exception as e:
         print("Lỗi get accounts:", e)
@@ -469,6 +469,33 @@ def capcut_accounts_raw_epl():
         pass
     return text, 200, {"Content-Type": "text/plain; charset=utf-8"}
 
+@app.route("/api/capcut/accounts/raw_trial_7day")
+def capcut_accounts_raw_trial_7day():
+    text = ""
+    session_only = request.args.get('session', 'false').lower() == 'true'
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            if session_only:
+                cursor.execute("SELECT email, password, join_link FROM accounts WHERE app='capcut' AND uudai='trial_7day' AND id > ? ORDER BY id ASC", (state_capcut.last_start_id,))
+            else:
+                cursor.execute("SELECT email, password, join_link FROM accounts WHERE app='capcut' AND uudai='trial_7day' ORDER BY id ASC")
+            for row in cursor.fetchall():
+                jl = row.get('join_link', '') or ''
+                text += f"{row['email']}\t{row['password']}\t{jl}\n"
+    except Exception:
+        pass
+    # Nếu DB không có kết quả và không lọc theo session, fallback đọc từ file data/trial_7day.txt
+    if not text.strip() and not session_only:
+        trial_file = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "trial_7day.txt"))
+        if os.path.exists(trial_file):
+            try:
+                with open(trial_file, "r", encoding="utf-8") as f:
+                    text = f.read()
+            except:
+                pass
+    return text, 200, {"Content-Type": "text/plain; charset=utf-8"}
+
 @app.route("/api/capcut/accounts/clear", methods=["POST"])
 def capcut_accounts_clear():
     try:
@@ -499,6 +526,7 @@ def capcut_task_start():
     browser_type = data.get("browser_type", "chrome")
     headless = bool(data.get("headless", False))
     incognito = bool(data.get("incognito", False))
+    save_trial_7day = bool(data.get("save_trial_7day", False))
 
     state_capcut.task_stop.clear()
     while not state_capcut.log_queue.empty():
@@ -516,7 +544,7 @@ def capcut_task_start():
         print("Lỗi get max id:", e)
 
     state_capcut.is_running = True
-    state_capcut.task_thread = threading.Thread(target=_run_capcut_task, args=(mode, count, threads, join_link, mail_type, mail_api_source, browser_type, headless, incognito, mail_domain_source), daemon=True)
+    state_capcut.task_thread = threading.Thread(target=_run_capcut_task, args=(mode, count, threads, join_link, mail_type, mail_api_source, browser_type, headless, incognito, mail_domain_source, save_trial_7day), daemon=True)
     state_capcut.task_thread.start()
     return jsonify({"success": True})
 
@@ -803,7 +831,7 @@ def capcut_task_stream():
                 yield f"data: {json.dumps({'type':'ping'})}\n\n"
     return Response(stream_with_context(generate()), mimetype="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
-def _run_capcut_task(mode, count, threads, join_link, mail_type, mail_api_source, browser_type, headless, incognito=False, mail_domain_source="phhinfi"):
+def _run_capcut_task(mode, count, threads, join_link, mail_type, mail_api_source, browser_type, headless, incognito=False, mail_domain_source="phhinfi", save_trial_7day=False):
     import importlib
     try:
         mod_name = "src.bots.capcut_hotmail" if mail_type == "hotmail" else "src.bots.capcut_domain"
@@ -853,11 +881,12 @@ def _run_capcut_task(mode, count, threads, join_link, mail_type, mail_api_source
             except Exception as e:
                 state_capcut.log(f"Lỗi lưu DB: {e}", "ERR")
                 
-        def capcut_update_link(email, link):
+        def capcut_update_link(email, link, has_trial=False):
             try:
                 with get_db() as conn:
                     cursor = conn.cursor()
-                    cursor.execute("UPDATE accounts SET join_link = ? WHERE app = 'capcut' AND email = ?", (link, email))
+                    uudai_val = "trial_7day" if has_trial else ""
+                    cursor.execute("UPDATE accounts SET join_link = ?, uudai = ? WHERE app = 'capcut' AND email = ?", (link, uudai_val, email))
                     conn.commit()
             except Exception as e:
                 state_capcut.log(f"Lỗi update DB link: {e}", "ERR")
@@ -894,13 +923,14 @@ def _run_capcut_task(mode, count, threads, join_link, mail_type, mail_api_source
                         res = bot.register_one_account(
                             slot_idx + 1,
                             join_link if mode == 2 else None,
-                            keep_open=(mode == 1),
+                            keep_open=(mode == 1 and not save_trial_7day),
                             batch_size=batch_size,
                             headless=headless,
                             browser_type=browser_type,
-                            get_link=(mode == 3),
+                            get_link=(mode == 3 or save_trial_7day),
                             mail_api_source=mail_api_source,
-                            incognito=incognito
+                            incognito=incognito,
+                            save_trial_7day=save_trial_7day
                         )
                         state_capcut.log_queue.put(json.dumps({"type": "result", "success": bool(res)}))
                         return bool(res)
@@ -922,6 +952,16 @@ def _run_capcut_task(mode, count, threads, join_link, mail_type, mail_api_source
 
                 total_started += curr_batch
                 state_capcut.log(f"🏁 ĐÃ HOÀN THÀNH LƯỢT {batch_num} (Tổng kết: {done['ok']} OK, {done['fail']} lỗi).", "OK")
+
+                # Đảm bảo đóng toàn bộ trình duyệt còn sót lại của lượt này để giải phóng RAM & CPU
+                if mode != 1 and hasattr(bot, 'ACTIVE_DRIVERS') and bot.ACTIVE_DRIVERS:
+                    for d in list(bot.ACTIVE_DRIVERS):
+                        try:
+                            if hasattr(d, '_proxy_relay') and d._proxy_relay:
+                                d._proxy_relay.stop()
+                            d.quit()
+                        except: pass
+                    bot.ACTIVE_DRIVERS.clear()
 
                 # Kiểm tra xem có cần chạy tiếp lượt sau không
                 has_next = (total_started < count) and (not bot.HOTMAIL_QUEUE.empty()) and not state_capcut.task_stop.is_set()
@@ -955,13 +995,14 @@ def _run_capcut_task(mode, count, threads, join_link, mail_type, mail_api_source
                         res = bot.register_one_account(
                             slot_idx + 1,
                             join_link if mode == 2 else None,
-                            keep_open=(mode == 1),
+                            keep_open=(mode == 1 and not save_trial_7day),
                             batch_size=batch_size,
                             headless=headless,
                             browser_type=browser_type,
-                            get_link=(mode == 3),
+                            get_link=(mode == 3 or save_trial_7day),
                             mail_api_source=mail_api_source,
-                            incognito=incognito
+                            incognito=incognito,
+                            save_trial_7day=save_trial_7day
                         )
                         state_capcut.log_queue.put(json.dumps({"type": "result", "success": bool(res)}))
                         return bool(res)
@@ -981,6 +1022,16 @@ def _run_capcut_task(mode, count, threads, join_link, mail_type, mail_api_source
 
                 total_started += curr_batch
                 state_capcut.log(f"🏁 ĐÃ HOÀN THÀNH LƯỢT {batch_num} (Tổng kết: {done['ok']} OK, {done['fail']} lỗi).", "OK")
+
+                # Đảm bảo đóng toàn bộ trình duyệt còn sót lại của lượt này để giải phóng RAM & CPU
+                if mode != 1 and hasattr(bot, 'ACTIVE_DRIVERS') and bot.ACTIVE_DRIVERS:
+                    for d in list(bot.ACTIVE_DRIVERS):
+                        try:
+                            if hasattr(d, '_proxy_relay') and d._proxy_relay:
+                                d._proxy_relay.stop()
+                            d.quit()
+                        except: pass
+                    bot.ACTIVE_DRIVERS.clear()
 
                 has_next = (total_started < count) and not state_capcut.task_stop.is_set()
                 if has_next:
@@ -1023,6 +1074,14 @@ def _run_capcut_task(mode, count, threads, join_link, mail_type, mail_api_source
         state_capcut.log(f"Lỗi task: {type(e).__name__}: {e}", "ERR")
         state_capcut.log_queue.put(json.dumps({"type": "done", "ok": 0, "fail": 0}))
     finally:
+        if mode != 1 and 'bot' in locals() and hasattr(bot, 'ACTIVE_DRIVERS') and bot.ACTIVE_DRIVERS:
+            for d in list(bot.ACTIVE_DRIVERS):
+                try:
+                    if hasattr(d, '_proxy_relay') and d._proxy_relay:
+                        d._proxy_relay.stop()
+                    d.quit()
+                except: pass
+            bot.ACTIVE_DRIVERS.clear()
         state_capcut.is_running = False
 
 

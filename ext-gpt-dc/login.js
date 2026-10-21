@@ -306,7 +306,7 @@
                     <button id="__alp_home__" class="alp-icon-btn" title="Về trang chủ ChatGPT">🏠</button>
                     <button id="__alp_btn__"  class="alp-icon-btn" title="Bắt đầu đăng nhập">▶️</button>
                     <button id="__alp_promo__" class="alp-icon-btn" title="Trang ưu đãi Plus miễn phí">🎁</button>
-                    <button id="__alp_addr__"  class="alp-icon-btn" title="Đổi địa chỉ thanh toán (Stripe)">📍</button>
+                    <button id="__alp_addr__"  class="alp-icon-btn" title="Tạo địa chỉ thanh toán mới (Copy bằng tay)">📍</button>
                 </div>
             </div>
         `;
@@ -387,31 +387,52 @@
             window.location.href = 'https://chatgpt.com/?promo_campaign=plus-1-month-free#pricing';
         };
 
-        // ── Nút Đổi địa chỉ thanh toán ──
+        // ── Nút Đổi địa chỉ thanh toán (Tạo địa chỉ mới để copy tay) ──
         addrBtn.onclick = async () => {
             addrBtn.disabled = true;
             addrBtn.innerHTML = '⏳';
-            updateMainStatus('<span style="color:#f59e0b;">🔄 Đang đổi địa chỉ thanh toán...</span>');
+            updateMainStatus('<span style="color:#f59e0b;">🔄 Đang tạo địa chỉ mới...</span>');
 
-            // Gửi signal tới tất cả frame (kể cả iframe Stripe)
-            try {
-                window.postMessage({ type: 'CHATGPT_AUTOFILL_REFILL' }, '*');
-                document.querySelectorAll('iframe').forEach(f => {
-                    try { f.contentWindow.postMessage({ type: 'CHATGPT_AUTOFILL_REFILL' }, '*'); } catch (e) {}
-                });
-            } catch (e) {}
-            await chrome.storage.local.set({ trigger_refill: Date.now() });
+            const VN_LOCATIONS = [
+                { city: "Ha Noi", state: "Ha Noi", zip: "100000" },
+                { city: "Ho Chi Minh", state: "Ho Chi Minh", zip: "700000" },
+                { city: "Da Nang", state: "Da Nang", zip: "550000" },
+                { city: "Hai Phong", state: "Hai Phong", zip: "180000" },
+                { city: "Can Tho", state: "Can Tho", zip: "900000" },
+                { city: "Nha Trang", state: "Khanh Hoa", zip: "650000" },
+                { city: "Hue", state: "Thua Thien Hue", zip: "530000" },
+                { city: "Vung Tau", state: "Ba Ria - Vung Tau", zip: "790000" },
+                { city: "Bien Hoa", state: "Dong Nai", zip: "810000" },
+                { city: "Da Lat", state: "Lam Dong", zip: "670000" }
+            ];
+            const STREETS = ["Nguyễn Huệ", "Lê Lợi", "Trần Hưng Đạo", "Hai Bà Trưng", "Đồng Khởi", "Lý Tự Trọng", "Nguyễn Đình Chiểu", "Pasteur", "Lê Duẩn", "Điện Biên Phủ"];
+            const firstNames = ["Nguyễn", "Trần", "Lê", "Phạm", "Hoàng", "Huỳnh", "Phan", "Vũ", "Võ", "Đặng"];
+            const middleNames = ["Văn", "Thị", "Thanh", "Minh", "Hữu", "Đức", "Ngọc", "Gia", "Bảo", "Thu"];
+            const lastNames = ["Anh", "Bình", "Châu", "Dương", "Hải", "Linh", "Quân", "Sơn", "Tuấn", "Hùng", "Huy", "Tiến"];
+            const r = a => a[Math.floor(Math.random() * a.length)];
+            const newAddr = {
+                name: r(firstNames) + ' ' + r(middleNames) + ' ' + r(lastNames),
+                address1: 'So ' + (Math.floor(Math.random() * 888) + 12) + ' ' + r(STREETS),
+                city: VN_LOCATIONS[Math.floor(Math.random() * VN_LOCATIONS.length)].city,
+                state: VN_LOCATIONS[Math.floor(Math.random() * VN_LOCATIONS.length)].state,
+                zip: VN_LOCATIONS[Math.floor(Math.random() * VN_LOCATIONS.length)].zip
+            };
+
+            await chrome.storage.local.set({ current_checkout_address: newAddr });
+            window.postMessage({ type: 'CHATGPT_UPDATE_ADDRESS_CARD', address: newAddr }, '*');
+
+            updateMainStatus('<span style="color:#4caf50;">✓ Đã tạo địa chỉ mới (xem bảng góc phải để copy)!</span>');
 
             setTimeout(() => {
                 addrBtn.disabled = false;
                 addrBtn.innerHTML = '📍';
-            }, 1200);
+            }, 800);
         };
 
-        // Lắng nghe khi fill.js hoàn tất
+        // Lắng nghe khi hoàn tất
         window.addEventListener('message', (event) => {
             if (event.data && event.data.type === 'CHATGPT_AUTOFILL_DONE') {
-                updateMainStatus('<span style="color:#4caf50;">✓ Đã đổi xong địa chỉ mới!</span>');
+                updateMainStatus('<span style="color:#4caf50;">✓ Đã điền xong địa chỉ vào form!</span>');
             }
         });
 

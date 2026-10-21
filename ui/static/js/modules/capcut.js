@@ -1,5 +1,5 @@
 // ==== CAPCUT ====
-let ccMode=3, ccMailType='hotmail', ccMailApiSource='dongvanfb', ccDomainSource='phhinfi', ccBrowser=localStorage.getItem('ccBrowser')||'chrome', ccHeadless=(localStorage.getItem('ccHeadless')==='true'), ccIncognito=(localStorage.getItem('ccIncognito')==='true'), ccFilter='ALL', ccLogs=[], ccOk=0, ccFail=0, ccTotal=0;
+let ccMode=3, ccMailType='hotmail', ccMailApiSource='dongvanfb', ccDomainSource='phhinfi', ccBrowser=localStorage.getItem('ccBrowser')||'chrome', ccHeadless=(localStorage.getItem('ccHeadless')==='true'), ccIncognito=(localStorage.getItem('ccIncognito')==='true'), ccSaveTrial7day=(localStorage.getItem('ccSaveTrial7day')==='true'), ccFilter='ALL', ccLogs=[], ccOk=0, ccFail=0, ccTotal=0;
 function ccSetMode(m){ccMode=m;[1,2,3,4].forEach(i=>{const el=document.getElementById('cc-mode'+i);if(el)el.classList.toggle('active',m===i);});document.getElementById('cc-joinLinkGroup').style.display=(m===2||m===4)?'block':'none';const isApiMode=m===4;document.getElementById('cc-browserGroup').style.display=isApiMode?'none':'block';document.getElementById('cc-headlessGroup').style.display=isApiMode?'none':'block';}
 function ccSetMailType(m){
   ccMailType=m;
@@ -50,6 +50,19 @@ function ccToggleIncognito() {
   localStorage.setItem('ccIncognito', ccIncognito);
   document.getElementById('cc-incognitoToggle').classList.toggle('active',ccIncognito);
 }
+function ccToggleTrial7day(checked) {
+  ccSaveTrial7day = !!checked;
+  localStorage.setItem('ccSaveTrial7day', ccSaveTrial7day);
+}
+function ccInitTrialCheckbox() {
+  const cb = document.getElementById('cc-saveTrial7day');
+  if (cb) cb.checked = ccSaveTrial7day;
+}
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', ccInitTrialCheckbox);
+} else {
+  ccInitTrialCheckbox();
+}
 async function ccLoadHotmailCount(){
   try{const r=await fetch('/api/capcut/hotmail/count');const d=await r.json();
     document.getElementById('cc-statHotmail').textContent=d.count;
@@ -96,8 +109,10 @@ async function ccLoadAccounts(){
       const link = a.join_link || '';
       const displayLink = link.length > 30 ? link.substring(0, 30) + '...' : link;
       const linkHtml = link ? `<a href="${escHtml(link)}" target="_blank" style="font-size:12px;color:var(--accent);text-decoration:none;">${escHtml(displayLink)}</a>` : '<span style="color:var(--muted)">-</span>';
+      const isTrial = (a.uudai === 'trial_7day');
+      const trialBadge = isTrial ? '<span class="tag" style="margin:0;background:rgba(234,179,8,0.2);color:#eab308;border:1px solid #eab308;font-size:10px;">🎁 Trial 7D</span>' : '';
       
-      return `<tr><td style="color:var(--accent)">${escHtml(a.uid||'–')}</td><td>${escHtml(a.email)}</td><td><code style="color:var(--muted)">${escHtml(a.password)}</code><br/>${linkHtml}</td><td><div style="display:flex;align-items:center;gap:6px;"><span class="tag tag-ok" style="margin:0;">✅ OK</span><button class="copy-btn" title="Copy Email | Pass | Link" onclick="navigator.clipboard.writeText('${escHtml(a.email)}\\t${escHtml(a.password)}\\t${escHtml(link)}');showToast('📋','Đã copy (có link)!');"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button></div></td></tr>`;
+      return `<tr><td style="color:var(--accent)">${escHtml(a.uid||'–')}</td><td>${escHtml(a.email)}</td><td><code style="color:var(--muted)">${escHtml(a.password)}</code><br/>${linkHtml}</td><td><div style="display:flex;align-items:center;gap:6px;"><span class="tag tag-ok" style="margin:0;">✅ OK</span>${trialBadge}<button class="copy-btn" title="Copy Email | Pass | Link" onclick="navigator.clipboard.writeText('${escHtml(a.email)}\\t${escHtml(a.password)}\\t${escHtml(link)}');showToast('📋','Đã copy (có link)!');"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button></div></td></tr>`;
     }).join('');
   }catch(e){}
 }
@@ -116,6 +131,14 @@ async function ccCopyAccountsEPL(){
   if(!t.trim()){showToast('⚠️','Không có dữ liệu!');return;}
   await navigator.clipboard.writeText(t);showToast('📋','Đã copy (Email|Pass|Link)!');}catch(e){}
 }
+async function ccCopyTrial7day(){
+  try{
+    const r=await fetch('/api/capcut/accounts/raw_trial_7day?session=' + (ccAccountsTab==='session'));
+    const t=await r.text();
+    if(!t.trim()){showToast('⚠️','Chưa có link Trial 7 ngày nào!');return;}
+    await navigator.clipboard.writeText(t);showToast('🎉','Đã copy danh sách link Trial 7 ngày!');
+  }catch(e){showToast('❌','Lỗi copy link Trial!');}
+}
 async function ccClearAccounts(){
   showConfirmModal('Xóa tài khoản CapCut', 'Bạn có chắc chắn muốn xóa toàn bộ danh sách tài khoản CapCut đã tạo?', async () => {
     try{await fetch('/api/capcut/accounts/clear',{method:'POST'});showToast('🗑️','Đã xóa danh sách!');ccLoadAccounts();}catch(e){}
@@ -126,9 +149,10 @@ async function ccStartTask(){
   const count=parseInt(document.getElementById('cc-count').value)||1;
   const threads=parseInt(document.getElementById('cc-threads').value)||1;
   const jl=document.getElementById('cc-joinLink').value.trim();
+  const saveTrial7day = document.getElementById('cc-saveTrial7day') ? document.getElementById('cc-saveTrial7day').checked : ccSaveTrial7day;
   if((ccMode===2||ccMode===4) && !jl){showToast('⚠️','Vui lòng nhập Link Join Team!');return;}
   try{
-    const r=await fetch('/api/capcut/task/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:ccMode,count,threads,join_link:jl,mail_type:ccMailType,mail_api_source:ccMailApiSource,mail_domain_source:ccDomainSource,browser_type:ccBrowser,headless:ccHeadless,incognito:ccIncognito})});
+    const r=await fetch('/api/capcut/task/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:ccMode,count,threads,join_link:jl,mail_type:ccMailType,mail_api_source:ccMailApiSource,mail_domain_source:ccDomainSource,browser_type:ccBrowser,headless:ccHeadless,incognito:ccIncognito,save_trial_7day:saveTrial7day})});
     const d=await r.json();
     if(!d.success){showToast('❌',d.error);return;}
     ccIsRunning=true;ccSetUI(true);ccStartSSE();

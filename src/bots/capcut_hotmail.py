@@ -869,17 +869,18 @@ def save_account(uidname, email, password, join_link, msToken=""):
         f.write(line + "\n")
     log(f"Đã lưu tài khoản → {OUTPUT_FILE}", "OK")
 
-def update_account_payment_link(email, link):
+def update_account_payment_link(email, link, has_trial=False):
     try:
         import sqlite3
         db_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "database.db"))
         if os.path.exists(db_path):
             conn = sqlite3.connect(db_path)
             cur = conn.cursor()
-            cur.execute("UPDATE accounts SET join_link = ? WHERE app = 'capcut' AND email = ?", (link, email))
+            uudai_val = "trial_7day" if has_trial else ""
+            cur.execute("UPDATE accounts SET join_link = ?, uudai = ? WHERE app = 'capcut' AND email = ?", (link, uudai_val, email))
             conn.commit()
             conn.close()
-            log(f"Đã lưu link thanh toán vào Database cho {email}", "OK")
+            log(f"Đã lưu link thanh toán vào Database cho {email} (Trial 7D: {has_trial})", "OK")
     except Exception as e:
         log(f"Lỗi update DB payment link: {e}", "WARN")
 
@@ -1002,10 +1003,10 @@ def api_upgrade_vip(driver):
     return False
 
 
-def step_get_payment_link(driver, email, password):
+def step_get_payment_link(driver, email, password, save_trial_7day=False):
     import time
     for attempt in range(5):
-        res = _do_get_payment_link(driver, email, password, attempt)
+        res = _do_get_payment_link(driver, email, password, attempt, save_trial_7day=save_trial_7day)
         if res == "TOAST_ERROR":
             log("⚠️ Phát hiện toast lỗi (lv-message-wrapper)! Mở tab mới thử lại liền...", "WARN")
             driver.execute_script("window.open('https://www.capcut.com/vi-vn/login', '_blank');")
@@ -1018,7 +1019,130 @@ def step_get_payment_link(driver, email, password):
         return res
     return None
 
-def _do_get_payment_link(driver, email, password, attempt=0):
+def _check_cashier_trial_dom(driver):
+    """
+    Kiểm tra DOM trang Pipopay cashier (trong iframe, trong window khác hoặc current page)
+    để phát hiện gói Trial 7 ngày theo đúng cấu trúc HTML pipo checkout:
+    - 'Gói Pro theo tháng (dùng thử miễn phí 7 ngày)'
+    - 'Miễn phí trong 7 ngày' / 'Dùng thử'
+    - 'Bắt đầu dùng thử miễn phí' (trên pay-button)
+    - 'Thời hạn dùng thử miễn phí của bạn sẽ kết thúc vào ngày...'
+    - 'Đến hạn hôm nay' + 0₫
+    """
+    from selenium.webdriver.common.by import By
+    import time
+
+    trial_phrases = [
+        "dùng thử miễn phí 7 ngày",
+        "miễn phí trong 7 ngày",
+        "bắt đầu dùng thử miễn phí",
+        "thời hạn dùng thử miễn phí",
+        "dùng thử miễn phí",
+        "7-day free trial",
+        "7 day free trial",
+        "free trial for 7 days",
+        "start free trial",
+        "free for 7 days",
+        "7-day trial"
+    ]
+
+    def _inspect_context(d):
+        try:
+            body_elem = d.find_element(By.TAG_NAME, "body")
+            body_text = (body_elem.text or "").lower()
+            if not body_text:
+                return False, ""
+
+            for phrase in trial_phrases:
+                if phrase in body_text:
+                    return True, f"Khớp cụm từ '{phrase}'"
+
+            pay_btns = d.find_elements(By.CSS_SELECTOR, ".pay-button, .element-pay-button-wrapper button, button.pipo-button")
+            for b in pay_btns:
+                b_txt = (b.text or "").lower()
+                if "dùng thử" in b_txt or "trial" in b_txt:
+                    return True, f"Nút thanh toán: '{b_txt.strip()}'"
+
+            summary_els = d.find_elements(By.CSS_SELECTOR, ".order-summary, .element-order-summary-pipo-list, .order-summary-value, .amount-item")
+            for s in summary_els:
+                s_txt = (s.text or "").lower()
+                for phrase in trial_phrases:
+                    if phrase in s_txt:
+                        return True, f"Order summary: '{phrase}'"
+                if "dùng thử" in s_txt or "trial" in s_txt:
+                    return True, f"Order summary item: '{s_txt.strip()}'"
+
+            if ("đến hạn hôm nay" in body_text or "due today" in body_text) and any(z in body_text for z in ["0₫", "0 ₫", "0đ", "0 đ", "$0", "0$"]) and ("dùng thử" in body_text or "trial" in body_text or "miễn phí" in body_text):
+                return True, "Đến hạn hôm nay 0đ + có dùng thử"
+        except Exception:
+            pass
+        return False, ""
+
+    # 1. Quét iframe trên trang hiện tại
+    try:
+        iframes = driver.find_elements(By.CSS_SELECTOR, "iframe[src*='pipopay.com'], iframe[src*='cashier'], iframe[src*='agreement-cashier'], iframe")
+        for iframe in iframes:
+            try:
+                src = iframe.get_attribute("src") or ""
+                if "pipopay.com" in src or "cashier" in src or len(iframes) <= 4:
+                    driver.switch_to.frame(iframe)
+                    found, reason = _inspect_context(driver)
+                    driver.switch_to.default_content()
+                    if found:
+                        return True, f"Iframe Cashier ({reason})"
+            except Exception:
+                try:
+                    driver.switch_to.default_content()
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    # 2. Quét tất cả các tab / window
+    orig_handle = driver.current_window_handle
+    for h in driver.window_handles:
+        try:
+            driver.switch_to.window(h)
+            curr_url = (driver.current_url or "").lower()
+            if "pipopay.com" in curr_url or "cashier" in curr_url or len(driver.window_handles) > 1:
+                found, reason = _inspect_context(driver)
+                if found:
+                    driver.switch_to.window(orig_handle)
+                    return True, f"Tab ({reason})"
+
+                try:
+                    nested_iframes = driver.find_elements(By.CSS_SELECTOR, "iframe[src*='pipopay.com'], iframe")
+                    for n_if in nested_iframes:
+                        try:
+                            driver.switch_to.frame(n_if)
+                            n_found, n_reason = _inspect_context(driver)
+                            driver.switch_to.default_content()
+                            if n_found:
+                                driver.switch_to.window(orig_handle)
+                                return True, f"Iframe trong Tab ({n_reason})"
+                        except Exception:
+                            driver.switch_to.default_content()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+    try:
+        driver.switch_to.window(orig_handle)
+    except Exception:
+        pass
+
+    # 3. Quét trực tiếp trang hiện tại
+    try:
+        found, reason = _inspect_context(driver)
+        if found:
+            return True, f"Trang hiện tại ({reason})"
+    except Exception:
+        pass
+
+    return False, ""
+
+
+def _do_get_payment_link(driver, email, password, attempt=0, save_trial_7day=False):
     try:
         from selenium.webdriver.common.by import By
         import time
@@ -1153,20 +1277,28 @@ def _do_get_payment_link(driver, email, password, attempt=0):
                 except:
                     pass
 
-                # Check ưu đãi 7 ngày
+                # Check ưu đãi 7 ngày toàn diện
+                trial_keywords = ["7 ngày", "7 day", "7-day", "7 days", "dùng thử", "trial", "free trial", "miễn phí 7 ngày", "0đ", "0 đ", "dùng thử miễn phí"]
                 try:
-                    pro_section = driver.find_element(By.CSS_SELECTOR, '.subscriptionProductSection-pro')
-                    if pro_section and pro_section.is_displayed():
-                        pro_text = pro_section.text.lower()
-                        if "7 ngày" in pro_text or "7 day" in pro_text or "7-day" in pro_text or "dùng thử" in pro_text or "trial" in pro_text:
-                            has_7day_trial = True
+                    pro_sections = driver.find_elements(By.CSS_SELECTOR, '.subscriptionProductSection-pro, .subscriptionProductSection, [class*="subscriptionProduct"], [class*="proSection"], [class*="vipModal"], [class*="proModal"], .lv-modal, [role="dialog"]')
+                    for sec in pro_sections:
+                        if sec.is_displayed():
+                            stext = sec.text.lower()
+                            if any(k in stext for k in trial_keywords):
+                                has_7day_trial = True
+                                log(f"[{email}] 🎯 Phát hiện ưu đãi TRIAL 7 NGÀY trong modal: {stext[:70].replace(chr(10), ' ')}", "OK")
+                                break
                 except:
                     pass
 
                 # Tìm nút thanh toán trong modal
-                action_btns = driver.find_elements(By.CSS_SELECTOR, '.subscriptionProductSection-pro button.subscriptionProductSection-actionDark, button.subscriptionProductSection-actionGradient, button.subscriptionProductSection-actionDark')
+                action_btns = driver.find_elements(By.CSS_SELECTOR, '.subscriptionProductSection-pro button.subscriptionProductSection-actionDark, button.subscriptionProductSection-actionGradient, button.subscriptionProductSection-actionDark, [class*="actionDark"], [class*="actionGradient"]')
                 for btn in action_btns:
                     if btn.is_displayed() and btn.is_enabled():
+                        btn_txt = (btn.text or "").lower()
+                        if any(k in btn_txt for k in trial_keywords):
+                            has_7day_trial = True
+                            log(f"[{email}] 🎯 Nút nâng cấp có nội dung TRIAL: {btn_txt}", "OK")
                         try_click(driver, btn, "Nâng cấp (Trong Modal Gói Pro)")
                         clicked_modal = True
                         break
@@ -1228,6 +1360,20 @@ def _do_get_payment_link(driver, email, password, attempt=0):
             time.sleep(1)
             
         if payment_url:
+            if "trial" in payment_url.lower() or "7day" in payment_url.lower():
+                has_7day_trial = True
+
+            # Quét trực tiếp DOM của Cashier Pipopay để phát hiện trial 7 ngày
+            if not has_7day_trial:
+                log(f"[{email}] Đang quét DOM cashier Pipopay để xác minh gói dùng thử 7 ngày...", "INFO")
+                for _check_round in range(3):
+                    time.sleep(1.2)
+                    found, reason = _check_cashier_trial_dom(driver)
+                    if found:
+                        has_7day_trial = True
+                        log(f"[{email}] 🎯 Xác định thành công TRIAL 7 NGÀY từ Cashier Pipopay: {reason}", "OK")
+                        break
+
             os.makedirs("data", exist_ok=True)
             with open("data/success_links.txt", "a", encoding="utf-8") as f:
                 f.write(f"{email}\t{password}\t{payment_url}\n")
@@ -1235,9 +1381,11 @@ def _do_get_payment_link(driver, email, password, attempt=0):
                 with open("data/trial_7day.txt", "a", encoding="utf-8") as f:
                     f.write(f"{email}\t{password}\t{payment_url}\n")
                 log(f"🎉 Phát hiện và đã lưu account có TRIAL 7 NGÀY: {email}", "OK")
+            else:
+                log(f"[{email}] Tài khoản không có ưu đãi Trial 7 ngày (đã lưu vào success_links.txt).", "INFO")
             # Bước 6: Lưu theo đúng tài khoản vào file và database
             try:
-                update_account_payment_link(email, payment_url)
+                update_account_payment_link(email, payment_url, has_trial=has_7day_trial)
             except Exception as dbe:
                 log(f"Lỗi cập nhật database link: {dbe}", "WARN")
             return payment_url
@@ -1573,7 +1721,7 @@ def retry_get_payment_link_for_acc(email, password, refresh_token, client_id, co
             except: pass
 
 
-def register_one_account(index, join_link=None, keep_open=False, batch_size=3, predefined_proxy=None, headless=False, browser_type="chrome", get_link=False, mail_api_source="mixmmo", incognito=False, **kwargs):
+def register_one_account(index, join_link=None, keep_open=False, batch_size=3, predefined_proxy=None, headless=False, browser_type="chrome", get_link=False, mail_api_source="mixmmo", incognito=False, save_trial_7day=False, **kwargs):
     try:
         acc = HOTMAIL_QUEUE.get_nowait()
     except queue.Empty:
@@ -1636,7 +1784,7 @@ def register_one_account(index, join_link=None, keep_open=False, batch_size=3, p
                     break
         except: pass
 
-        should_keep_open = keep_open
+        should_keep_open = keep_open and not get_link and not save_trial_7day
         link = None
 
         if join_link:
@@ -1667,21 +1815,20 @@ def register_one_account(index, join_link=None, keep_open=False, batch_size=3, p
             step_skip_role_survey(driver, timeout=10)
             step_close_whats_new(driver, timeout=15)
 
-            if get_link:
+            if get_link or save_trial_7day:
                 # Bước 5 & 6: Bấm nâng cấp trong thẻ Pro, lấy URL checkout và lưu file + database
-                link = step_get_payment_link(driver, email, password)
+                link = step_get_payment_link(driver, email, password, save_trial_7day=save_trial_7day)
                 if link:
                     # Bước 7 & 8: Đóng checkout, về tab tài khoản và đăng xuất -> xác nhận đăng xuất -> chờ 3s -> đóng tab
                     logout_ok = close_checkout_and_logout(driver, email)
                     if not logout_ok:
-                        log(f"[{email}] ⚠️ Chưa xác nhận đăng xuất được -> GIỮ TAB để xử lý tiếp!", "WARN")
-                        should_keep_open = True
+                        log(f"[{email}] ⚠️ Chưa xác nhận đăng xuất được! Đóng tab để tránh lag máy.", "WARN")
                     else:
                         log(f"[{email}] ✅ Đã lưu link và đăng xuất thành công -> Đóng tab tài khoản.", "OK")
-                        should_keep_open = False
+                    should_keep_open = False
                 else:
-                    log(f"[{email}] ⚠️ Chưa lưu được link checkout -> GIỮ TAB để xử lý tiếp!", "WARN")
-                    should_keep_open = True
+                    log(f"[{email}] ⚠️ Chưa lưu được link checkout! Đóng tab để tránh lag máy.", "WARN")
+                    should_keep_open = False
                     # Lưu cookie để retry sau
                     try:
                         cookies = driver.get_cookies()
@@ -1691,7 +1838,7 @@ def register_one_account(index, join_link=None, keep_open=False, batch_size=3, p
                         log(f"Không lưu được cookie: {ck_err}", "WARN")
 
         # Chỉ đánh dấu hotmail đã dùng khi mọi thứ đều thành công
-        if not get_link or link:
+        if (not get_link and not save_trial_7day) or link:
             mark_hotmail_used(acc)
             return True
         else:
@@ -1710,7 +1857,12 @@ def register_one_account(index, join_link=None, keep_open=False, batch_size=3, p
             try:
                 if hasattr(driver, '_proxy_relay') and driver._proxy_relay:
                     driver._proxy_relay.stop()
-                if driver in ACTIVE_DRIVERS: ACTIVE_DRIVERS.remove(driver)
+            except: pass
+            try:
+                if driver in ACTIVE_DRIVERS:
+                    ACTIVE_DRIVERS.remove(driver)
+            except: pass
+            try:
                 driver.quit()
                 log("Đã đóng trình duyệt.", "INFO")
             except: pass
@@ -1751,7 +1903,7 @@ def load_hotmails_to_queue(limit=None):
     log(f"Đã tải {count} hotmail từ file {HOTMAIL_FILE}.", "OK")
     return count
 
-def register_multiple(count, threads, join_link, keep_open=False, get_link=False):
+def register_multiple(count, threads, join_link, keep_open=False, get_link=False, save_trial_7day=False):
     import concurrent.futures
     results = {"ok": 0, "fail": 0}
     
@@ -1772,7 +1924,7 @@ def register_multiple(count, threads, join_link, keep_open=False, get_link=False
         def worker(slot_idx):
             time.sleep((slot_idx % batch_size) * 2.5)
             log(f"Luồng {slot_idx+1}/{curr_batch} bắt đầu xử lý tài khoản...", "INFO")
-            res = register_one_account(slot_idx + 1, join_link, keep_open, batch_size=batch_size, get_link=get_link)
+            res = register_one_account(slot_idx + 1, join_link, keep_open, batch_size=batch_size, get_link=get_link, save_trial_7day=save_trial_7day)
             return bool(res)
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=curr_batch) as executor:
@@ -1790,6 +1942,16 @@ def register_multiple(count, threads, join_link, keep_open=False, get_link=False
 
         if keep_open:
             break
+
+        # Đảm bảo đóng toàn bộ trình duyệt còn sót lại sau mỗi lượt để không lag máy
+        if not keep_open and ACTIVE_DRIVERS:
+            for d in list(ACTIVE_DRIVERS):
+                try:
+                    if hasattr(d, '_proxy_relay') and d._proxy_relay:
+                        d._proxy_relay.stop()
+                    d.quit()
+                except: pass
+            ACTIVE_DRIVERS.clear()
 
         # Nếu còn tài khoản cần chạy tiếp -> Xoay proxy một lần và kiểm tra kết nối
         if total_processed < count and not HOTMAIL_QUEUE.empty():

@@ -4,7 +4,8 @@
   "version": "1.5",
   "description": "Tự động đăng nhập + fill checkout Stripe cho ChatGPT",
   "permissions": [
-    "storage"
+    "storage",
+    "clipboardWrite"
   ],
   "host_permissions": [
     "*://chatgpt.com/*",
