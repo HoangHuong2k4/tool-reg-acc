@@ -31,11 +31,15 @@ function gptToggleKeepOpen() {
   document.getElementById('gpt-keepOpenToggle').classList.toggle('active', gptKeepOpen);
 }
 
-let gptApiSource = 'dongvanfb';
+let gptApiSource = 'webmail';
 function gptSetApiSource(src) {
   gptApiSource = src;
+  const webmailBtn = document.getElementById('gpt-sourceWebmail');
+  if (webmailBtn) webmailBtn.classList.toggle('active', src === 'webmail');
   document.getElementById('gpt-sourceDongvanfb').classList.toggle('active', src === 'dongvanfb');
   document.getElementById('gpt-sourceMixmmo').classList.toggle('active', src === 'mixmmo');
+  const smail1sBtn = document.getElementById('gpt-sourceSmail1s');
+  if (smail1sBtn) smail1sBtn.classList.toggle('active', src === 'smail1s');
 }
 
 function gptSetMailType(m){

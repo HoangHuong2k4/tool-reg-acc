@@ -15,8 +15,12 @@ function gpmSetMailType(t) {
 
 function gpmSetApiSource(src) {
   gpmApiSource = src;
+  const webmailBtn = document.getElementById('gpm-sourceWebmail');
+  if (webmailBtn) webmailBtn.classList.toggle('active', src === 'webmail');
   document.getElementById('gpm-sourceDongvanfb').classList.toggle('active', src === 'dongvanfb');
   document.getElementById('gpm-sourceMixmmo').classList.toggle('active', src === 'mixmmo');
+  const smail1sBtn = document.getElementById('gpm-sourceSmail1s');
+  if (smail1sBtn) smail1sBtn.classList.toggle('active', src === 'smail1s');
 }
 
 function gpmSetMode(m) {

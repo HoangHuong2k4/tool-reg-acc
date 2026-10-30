@@ -143,35 +143,65 @@ def mark_hotmail_used(acc):
 
 
 def wait_for_otp_hotmail(email, password, refresh_token, client_id, timeout=120, interval=4, mail_api_source="mixmmo"):
-    api_url = HOTMAIL_API_URL if mail_api_source == "dongvanfb" else "https://mixmmo.com/api/get-hotmail-messages.php"
     log(f"Chờ OTP xAI cho {email} qua {mail_api_source.upper()} (tối đa {timeout}s)...", "INFO")
-    if mail_api_source == "dongvanfb":
+    if mail_api_source in ("webmail", "web_mail_reader", "web-mail-reader"):
+        api_url = "https://web-mail-reader.vercel.app/api/mail-all"
+        headers = {"Content-Type": "application/json"}
+        payload = {"refresh_token": refresh_token, "client_id": client_id, "limit": 10}
+    elif mail_api_source == "dongvanfb":
+        api_url = HOTMAIL_API_URL
         headers = {"Content-Type": "application/json"}
         payload = {"email": email, "pass": password, "refresh_token": refresh_token, "client_id": client_id}
+    elif mail_api_source == "smail1s":
+        api_url = "https://smail1s.com/get_messages"
+        headers = {"Content-Type": "application/json"}
+        payload = {
+            "mode": "oauth" if (refresh_token and client_id) else "roundcube",
+            "data": f"{email}|{refresh_token}|{client_id}" if (refresh_token and client_id) else f"{email}|{password}"
+        }
     else:
+        api_url = "https://mixmmo.com/api/get-hotmail-messages.php"
         headers = {"Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"}
         payload = {"action": "get_hotmail_messages", "account": f"{email}|{password}|{refresh_token}|{client_id}", "mode": "oauth", "folder": "inbox", "start_timestamp": "0"}
     elapsed = 0
     consecutive_api_errors = 0
-    fatal_keywords = ["empty access token", "imap connection failed", "invalid_grant", "invalid_client", "unauthorized", "expired_token", "account is locked"]
+    fatal_keywords = ["empty access token", "imap connection failed", "invalid_grant", "invalid_client", "expired_token", "account is locked", "compromised", "account security interrupt"]
     while elapsed < timeout:
         if GLOBAL_STOP_EVENT and GLOBAL_STOP_EVENT.is_set():
             return None
         try:
-            if mail_api_source == "dongvanfb":
+            if mail_api_source in ("dongvanfb", "smail1s", "webmail", "web_mail_reader", "web-mail-reader"):
                 resp = requests.post(api_url, headers=headers, json=payload, timeout=15)
             else:
                 resp = requests.post(api_url, headers=headers, data=payload, timeout=15)
             data = resp.json()
-            if data.get("status") or data.get("success"):
+            messages = []
+            if mail_api_source in ("webmail", "web_mail_reader", "web-mail-reader"):
+                messages = data.get("messages", [])
+            elif mail_api_source == "smail1s":
+                d_list = data.get("data")
+                if isinstance(d_list, list) and len(d_list) > 0 and not d_list[0].get("error"):
+                    messages = d_list[0].get("messages", [])
+            elif data.get("status") or data.get("success"):
+                messages = data.get("messages", [])
+
+            # Fallback sang WebMail Reader nếu các bên khác không có thư
+            if not messages and refresh_token and client_id and mail_api_source not in ("webmail", "web_mail_reader", "web-mail-reader"):
+                try:
+                    fb_res = requests.post("https://web-mail-reader.vercel.app/api/mail-all", json={"refresh_token": refresh_token, "client_id": client_id, "limit": 10}, headers={"Content-Type": "application/json"}, timeout=10)
+                    if fb_res.status_code == 200:
+                        messages = fb_res.json().get("messages", [])
+                except Exception:
+                    pass
+
+            if messages:
                 consecutive_api_errors = 0
-                if data.get("messages"):
-                    for msg in data["messages"]:
-                        text_to_search = msg.get("subject", "") + " " + msg.get("message", "") + " " + msg.get("bodyText", "")
-                        code = _extract_xai_code(text_to_search)
-                        if code:
-                            log(f"Nhận OTP xAI: {code}", "OK")
-                            return code
+                for msg in messages:
+                    text_to_search = str(msg.get("subject", "")) + " " + str(msg.get("message", "")) + " " + str(msg.get("bodyText", ""))
+                    code = msg.get("code") or _extract_xai_code(text_to_search)
+                    if code:
+                        log(f"Nhận OTP xAI: {code}", "OK")
+                        return code
             else:
                 consecutive_api_errors += 1
                 log(f"API Hotmail trả về lỗi ({consecutive_api_errors}/3): {data}", "WARN")

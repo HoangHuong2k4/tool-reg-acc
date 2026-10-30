@@ -312,6 +312,182 @@ def delete_mailbox(email_address):
         return _delete_mailbox_mailtemp(email_address)
     return _delete_mailbox_phhinfi(email_address)
 
+
+# ── [TỐI ƯU Tool 2] Regex và hàm nhận diện Trial 7 ngày chuẩn xác ────
+SEVEN_DAYS_RE = re.compile(r"7\s*[-–—]?\s*(?:ngày|ngay|day|days)\b", re.I)
+ZERO_VND_RE   = re.compile(r"(?:\b0\s*[₫đ]|đến\s*hạn\s*hôm\s*nay\s*0|\b0\s*usd|\$0\b|0\s*\$)", re.I)
+PRO_PLAN_RE   = re.compile(r"\bpro\b|capcut\s*pro", re.I)
+FREE_PLAN_RE  = re.compile(r"\bfree\b|miễn\s*phí\s*vĩnh\s*viễn", re.I)
+PIPOPAY_URL_RE = re.compile(r"https?://(?:[a-zA-Z0-9-]+\.)?pipopay\.com", re.I)
+STATUS_PRICE_RE = re.compile(r"status_price\s*:\s*([^\r\n,]+)", re.I)
+FREE_SEVEN_DAYS_RE = re.compile(r"dùng thử miễn phí\s*7\s*ngày|free trial\s*7\s*days?|7\s*days?\s*free trial", re.I)
+
+def is_trial_7d_offer(text):
+    """Kiểm tra chuỗi text có phải ưu đãi dùng thử 7 ngày hay không."""
+    if not text:
+        return False
+    return bool(SEVEN_DAYS_RE.search(text))
+
+def is_pro_pricing_card(text):
+    """Kiểm tra card có phải gói Pro thật sự không (tránh click nhầm thẻ Free)."""
+    if not text:
+        return False
+    if FREE_PLAN_RE.search(text) and not PRO_PLAN_RE.search(text):
+        return False
+    return bool(PRO_PLAN_RE.search(text))
+
+def is_pipopay_url(url):
+    """Kiểm tra URL có thuộc cổng thanh toán PipoPay không."""
+    return bool(PIPOPAY_URL_RE.search(url or ""))
+
+def has_currency_price(text):
+    """Kiểm tra một dòng text có chứa giá tiền (VNĐ hoặc ngoại tệ) hay không."""
+    if not text:
+        return False
+    try:
+        t = str(text)
+        if re.search(r"(?:₫|vnd|vnđ|\$|usd|eur|gbp)", t, re.I):
+            return True
+        if re.search(r"\b\d{1,3}(?:[.,]\d{3})+\b", t):
+            return True
+        return False
+    except Exception:
+        return False
+
+def extract_detected_price(card_text="", full_text="", default="không xác định"):
+    """
+    [TỐI ƯU Tool 2] Trích xuất mức giá từ nội dung text của card/bảng giá CapCut.
+    Ưu tiên text của card trước, sau đó đến full text.
+    """
+    for text in [card_text, full_text]:
+        if not text:
+            continue
+        if is_trial_7d_offer(text) or ZERO_VND_RE.search(text) or FREE_SEVEN_DAYS_RE.search(text):
+            return "0đ"
+        m_22k = re.search(r"(?<![\d.,])(?:₫|vnd|vnđ)?\s*(?:22[.,]000|22000)(?!\d)\s*(?:[đ₫]|vnd|vnđ)?", text, re.I)
+        if m_22k:
+            p = m_22k.group(0).strip()
+            if not re.search(r"[đ₫vnd]", p, re.I):
+                p += "đ"
+            return p
+        m_vnd = re.search(r"(?:[₫đ]|vnd|vnđ)\s*\d{1,3}(?:[.,]\d{3})+(?!\d)|\b\d{1,3}(?:[.,]\d{3})+\s*(?:[₫đ]|vnd|vnđ)", text, re.I)
+        if m_vnd:
+            return m_vnd.group(0).strip()
+        m_curr = re.search(r"[\$€£¥]\s*\d+(?:[.,]\d+)?|\b\d+(?:[.,]\d+)?\s*(?:usd|eur|gbp)", text, re.I)
+        if m_curr:
+            return m_curr.group(0).strip()
+        m_num = re.search(r"\b\d{1,3}(?:[.,]\d{3})+\b", text)
+        if m_num:
+            return m_num.group(0).strip() + "đ"
+    return default
+
+def trial_checkout_is_free(text):
+    """
+    [TỐI ƯU Tool 2] Xác minh trực tiếp nội dung checkout Pipopay:
+    Chỉ công nhận là Trial 0đ nếu số tiền ĐẾN HẠN HÔM NAY (due today / total due) là 0đ.
+    """
+    if not text:
+        return False
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    due_label = re.compile(
+        r"thanh toán hôm nay|(?:tổng|số) tiền (?:cần )?thanh toán|tổng cộng|đến hạn (?:hôm nay|ngay)"
+        r"|\btotal(?:\s+(?:due|today|now))?\b(?!\s*(?:discount|savings|credits?))"
+        r"|\bdue\s*(?:today|now)\b|\bpay\s*today\b|\bamount\s*due\b", re.I
+    )
+    for index, line in enumerate(lines):
+        if not due_label.search(line):
+            continue
+        for amount_line in lines[index:index + 3]:
+            if has_currency_price(amount_line):
+                without_zero = ZERO_VND_RE.sub("", amount_line)
+                if has_currency_price(without_zero) or not ZERO_VND_RE.search(amount_line):
+                    return False
+                return True
+    return bool(is_trial_7d_offer(text) and (ZERO_VND_RE.search(text) or "$0" in text or "0$" in text))
+
+def record_pricing_status(email, price_text):
+    """Lưu phân loại giá tiền vào file data/status_prices.txt."""
+    try:
+        os.makedirs("data", exist_ok=True)
+        with open("data/status_prices.txt", "a", encoding="utf-8") as f:
+            f.write(f"{email}\t{price_text}\n")
+    except Exception as e:
+        log(f"Lỗi lưu status_prices: {e}", "WARN")
+
+def password_form_kind(driver):
+    """
+    [TỐI ƯU Tool 2] Phân biệt form Đăng nhập (email đã có) vs Đăng ký (email mới).
+    Trả về: "existing" | "new" | "unknown"
+    """
+    from selenium.webdriver.common.by import By
+    try:
+        forms = driver.find_elements(By.CSS_SELECTOR, "form")
+        if not forms:
+            pw_inputs = driver.find_elements(By.CSS_SELECTOR, "input[type='password']")
+            if pw_inputs:
+                forms = [driver.find_element(By.TAG_NAME, "body")]
+
+        for form in forms:
+            try:
+                pw = form.find_elements(By.CSS_SELECTOR, "input[type='password']")
+                if not pw:
+                    continue
+                btns = form.find_elements(By.CSS_SELECTOR, "button[type='submit'], button")
+                for btn in btns:
+                    txt = (btn.text or "").strip().lower()
+                    if any(k in txt for k in ["đăng nhập", "sign in", "log in", "login"]):
+                        return "existing"
+                    if any(k in txt for k in ["đăng ký", "sign up", "register", "create"]):
+                        return "new"
+            except Exception:
+                continue
+
+        page_text = driver.find_element(By.TAG_NAME, "body").text.lower()
+        if any(k in page_text for k in ["đăng nhập vào tài khoản", "sign in to your account", "welcome back"]):
+            return "existing"
+        if any(k in page_text for k in ["tạo tài khoản", "create account", "create your account", "đăng ký tài khoản"]):
+            return "new"
+    except Exception:
+        pass
+    return "unknown"
+
+def verify_trial_checkout_dom(driver, timeout=15):
+    """
+    [TỐI ƯU Tool 2] Xác minh trang checkout THẬT SỰ là 0đ/trial 7 ngày
+    trước khi lưu vào trial_7day.txt.
+    """
+    from selenium.webdriver.common.by import By
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            text_candidates = []
+            if is_pipopay_url(driver.current_url):
+                try:
+                    text_candidates.append(("current_page", driver.find_element(By.TAG_NAME, "body").text))
+                except Exception:
+                    pass
+            orig = driver.current_window_handle
+            for h in driver.window_handles:
+                try:
+                    driver.switch_to.window(h)
+                    if is_pipopay_url(driver.current_url):
+                        text_candidates.append((f"tab_{h[:6]}", driver.find_element(By.TAG_NAME, "body").text))
+                except Exception:
+                    pass
+            try:
+                driver.switch_to.window(orig)
+            except Exception:
+                pass
+
+            for label, text in text_candidates:
+                if trial_checkout_is_free(text):
+                    log(f"✅ verify_trial_checkout_dom: Xác minh THÀNH CÔNG gói 0đ/trial 7 ngày từ {label}.", "OK")
+                    return True
+        except Exception:
+            pass
+    return False
+
+
 from .browser_utils import get_settings_from_db
 from .browser_utils import get_rotated_proxy as _grp
 def get_rotated_proxy():
@@ -602,6 +778,7 @@ def step1_enter_email(driver, email):
 def step2_enter_password(driver, password):
     """Bước 2: Nhập mật khẩu và bấm Đăng ký"""
     from selenium.webdriver.common.by import By
+    from selenium.webdriver.common.keys import Keys
 
     log("Bước 2: Nhập mật khẩu...", "INFO")
 
@@ -627,23 +804,39 @@ def step2_enter_password(driver, password):
 
     time.sleep(0.3)
 
-    # Bấm Đăng ký / Register / Sign up
-    signup_xpaths = [
-        '//button[contains(text(),"Đăng ký") or contains(text(),"Register") or contains(text(),"Sign up")]',
-        '//button[@type="submit"]',
-        '//button[contains(@class,"primary") or contains(@class,"submit") or contains(@class,"sign")]',
-        '//div[contains(@id,"submit")]/button',
-    ]
-    for attempt in range(3):
-        for xpath in signup_xpaths:
+    target_keywords = ["đăng ký", "register", "sign up", "tạo tài khoản", "create account"]
+
+    button_candidates = []
+    try:
+        found_buttons = driver.find_elements(By.XPATH, '//button | //*[@role="button"]')
+        for b in found_buttons:
             try:
-                els = driver.find_elements(By.XPATH, xpath)
-                for el in els:
-                    if el.is_displayed() and el.is_enabled():
-                        try_click(driver, el, f"Đăng ký: '{el.text.strip()[:20]}'")
+                if not b.is_displayed() or not b.is_enabled():
+                    continue
+                txt = (b.text or "").strip().lower()
+                if not txt:
+                    continue  # Bỏ qua icon con mắt ẩn/hiện password
+                if any(kw in txt for kw in target_keywords):
+                    button_candidates.append((b, txt))
             except Exception:
-                pass
-        time.sleep(1)
+                continue
+    except Exception:
+        pass
+
+    clicked = False
+    for btn, btn_txt in button_candidates:
+        if try_click(driver, btn, f"Nút: '{btn_txt}'"):
+            clicked = True
+            break
+
+    if not clicked:
+        log("Thử submit bằng phím ENTER trên ô mật khẩu...", "INFO")
+        try:
+            pwd_input.send_keys(Keys.ENTER)
+            clicked = True
+            time.sleep(1)
+        except Exception:
+            pass
 
     log("Đã nhập mật khẩu và bấm Đăng ký", "OK")
     time.sleep(2)
@@ -1129,33 +1322,85 @@ def _do_get_payment_link(driver, email, password, attempt=0, save_trial_7day=Fal
                 except:
                     pass
 
-                # Check ưu đãi 7 ngày toàn diện
-                trial_keywords = ["7 ngày", "7 day", "7-day", "7 days", "dùng thử", "trial", "free trial", "miễn phí 7 ngày", "0đ", "0 đ", "dùng thử miễn phí"]
+                # [BƯỚC 1] Ưu tiên bấm chuyển sang Tab "Tháng" để xem đúng gói tháng/trial
                 try:
-                    # 1. Quét các container / section chứa thông tin gói
-                    pro_sections = driver.find_elements(By.CSS_SELECTOR, '.subscriptionProductSection-pro, .subscriptionProductSection, [class*="subscriptionProduct"], [class*="proSection"], [class*="vipModal"], [class*="proModal"], .lv-modal, [role="dialog"]')
-                    for sec in pro_sections:
-                        if sec.is_displayed():
-                            stext = sec.text.lower()
-                            if any(k in stext for k in trial_keywords):
-                                has_7day_trial = True
-                                log(f"[{email}] 🎯 Phát hiện ưu đãi TRIAL 7 NGÀY trong modal: {stext[:70].replace(chr(10), ' ')}", "OK")
-                                break
-                except:
+                    month_tabs = driver.find_elements(By.XPATH, "//*[contains(@class, 'tab') or contains(@class, 'segment') or self::button or self::span][normalize-space(text())='Tháng' or normalize-space(text())='Monthly' or normalize-space(text())='Hàng tháng']")
+                    for mt in month_tabs:
+                        if mt.is_displayed():
+                            try_click(driver, mt, "Chuyển sang Tab Tháng (Monthly)")
+                            time.sleep(1)
+                            break
+                except Exception:
                     pass
 
-                # Tìm nút thanh toán trong modal
-                action_btns = driver.find_elements(By.CSS_SELECTOR, '.subscriptionProductSection-pro button.subscriptionProductSection-actionDark, button.subscriptionProductSection-actionGradient, button.subscriptionProductSection-actionDark, [class*="actionDark"], [class*="actionGradient"]')
-                for btn in action_btns:
-                    if btn.is_displayed() and btn.is_enabled():
-                        btn_txt = (btn.text or "").lower()
-                        if any(k in btn_txt for k in trial_keywords):
-                            has_7day_trial = True
-                            log(f"[{email}] 🎯 Nút nâng cấp có nội dung TRIAL: {btn_txt}", "OK")
-                        try_click(driver, btn, "Nâng cấp (Trong Modal Gói Pro)")
-                        clicked_modal = True
-                        break
-                if clicked_modal:
+                # [BƯỚC 2] Tìm thẻ gói Pro và đọc text để xác định giá tiền
+                card_text = ""
+                target_pro_card = None
+                try:
+                    pricing_cards = driver.find_elements(By.CSS_SELECTOR, '[class*="pricing-card"], [class*="plan-card"], [class*="subscriptionProductSection"], .lv-radio, [role="radio"]')
+                    for c in pricing_cards:
+                        if c.is_displayed():
+                            txt = c.text or ""
+                            if is_pro_pricing_card(txt):
+                                target_pro_card = c
+                                card_text = txt
+                                if is_trial_7d_offer(txt):
+                                    break
+                except Exception:
+                    pass
+
+                modal_text = ""
+                try:
+                    modal_el = driver.find_element(By.CSS_SELECTOR, '.lv-modal, [role="dialog"], body')
+                    modal_text = modal_el.text or ""
+                except Exception:
+                    pass
+
+                # Trích xuất mức giá chính xác
+                detected_price = extract_detected_price(card_text, modal_text)
+                is_0d = (target_pro_card is not None and is_trial_7d_offer(card_text)) or detected_price == "0đ"
+                is_22k = bool(re.search(r"(?<!\d)22[.,]000(?!\d)|(?<!\d)22000(?!\d)", card_text + " " + modal_text)) or "22" in detected_price
+
+                price_label = "0đ (Trial 7 ngày)" if is_0d else ("22,000đ" if is_22k else detected_price)
+                log(f"[{email}] 📊 Mức giá CapCut phát hiện: {price_label}", "INFO")
+                record_pricing_status(email, price_label)
+                update_account_payment_link(email, None, has_trial=is_0d, uudai=price_label)
+
+                # [BƯỚC 3] Nếu bật chế độ CHỈ LẤY TRIAL 7 NGÀY (save_trial_7day=True) mà KHÔNG PHẢI 0đ
+                if save_trial_7day and not is_0d:
+                    log(f"[{email}] ℹ️ [CHẾ ĐỘ CHỈ LẤY TRIAL 7 NGÀY] Gói là {price_label} -> BỎ QUA không lấy link (đã lưu phân loại giá)!", "INFO")
+                    try:
+                        close_btns = driver.find_elements(By.CSS_SELECTOR, '.lv-modal-close-icon, button[aria-label="close"], .skip-mrkR37')
+                        for cb in close_btns:
+                            if cb.is_displayed():
+                                try_click(driver, cb, "Đóng modal Nâng cấp")
+                                break
+                    except Exception:
+                        pass
+                    return None
+
+                # [BƯỚC 4] Tìm nút bấm Nâng cấp trong thẻ Pro đã xác nhận
+                upgrade_btn = None
+                if target_pro_card:
+                    try:
+                        btns = target_pro_card.find_elements(By.CSS_SELECTOR, 'button')
+                        for b in btns:
+                            if b.is_displayed() and b.is_enabled():
+                                upgrade_btn = b
+                                break
+                    except Exception:
+                        pass
+
+                if not upgrade_btn:
+                    action_btns = driver.find_elements(By.CSS_SELECTOR, '.subscriptionProductSection-pro button, button.subscriptionProductSection-actionDark, button.subscriptionProductSection-actionGradient, [class*="actionDark"], [class*="actionGradient"]')
+                    for b in action_btns:
+                        if b.is_displayed() and b.is_enabled():
+                            upgrade_btn = b
+                            break
+
+                if upgrade_btn:
+                    try_click(driver, upgrade_btn, "Nâng cấp (Trong Thẻ Gói Pro)")
+                    clicked_modal = True
                     break
             except Exception as e:
                 pass
@@ -1213,34 +1458,32 @@ def _do_get_payment_link(driver, email, password, attempt=0, save_trial_7day=Fal
             time.sleep(1)
             
         if payment_url:
-            if "trial" in payment_url.lower() or "7day" in payment_url.lower():
-                has_7day_trial = True
+            # 1. NẾU LÀ TRIAL 7 NGÀY (is_0d): BẮT BUỘC xác minh trang checkout thật sự là 0đ
+            if is_0d:
+                log(f"[{email}] Đang quét DOM cashier Pipopay để xác minh số tiền đến hạn hôm nay là 0đ...", "INFO")
+                is_verified_0d = verify_trial_checkout_dom(driver, timeout=12)
+                if is_verified_0d:
+                    with open("data/trial_7day.txt", "a", encoding="utf-8") as f:
+                        f.write(f"{email}\t{password}\t{payment_url}\n")
+                    with open("data/success_links.txt", "a", encoding="utf-8") as f:
+                        f.write(f"{email}\t{password}\t{payment_url}\n")
+                    log(f"🎉 [{email}] ĐÃ XÁC MINH VÀ LƯU VÀO data/trial_7day.txt: {payment_url}", "OK")
+                    update_account_payment_link(email, payment_url, has_trial=True, uudai="trial_7day")
+                    return payment_url
+                else:
+                    log(f"⚠️ [{email}] Trang checkout Pipopay KHÔNG PHẢI 0đ! Không lưu vào trial_7day.txt.", "WARN")
+                    record_pricing_status(email, "checkout không phải 0đ")
+                    update_account_payment_link(email, payment_url, has_trial=False, uudai="checkout_not_0d")
+                    if not save_trial_7day:
+                        with open("data/success_links.txt", "a", encoding="utf-8") as f:
+                            f.write(f"{email}\t{password}\t{payment_url}\n")
+                    return payment_url
 
-            # Quét trực tiếp DOM của Cashier Pipopay để phát hiện trial 7 ngày
-            if not has_7day_trial:
-                log(f"[{email}] Đang quét DOM cashier Pipopay để xác minh gói dùng thử 7 ngày...", "INFO")
-                for _check_round in range(3):
-                    time.sleep(1.2)
-                    found, reason = _check_cashier_trial_dom(driver)
-                    if found:
-                        has_7day_trial = True
-                        log(f"[{email}] 🎯 Xác định thành công TRIAL 7 NGÀY từ Cashier Pipopay: {reason}", "OK")
-                        break
-
-            os.makedirs("data", exist_ok=True)
+            # 2. GÓI TRẢ PHÍ (22.000đ hoặc giá khác):
             with open("data/success_links.txt", "a", encoding="utf-8") as f:
                 f.write(f"{email}\t{password}\t{payment_url}\n")
-            if has_7day_trial:
-                with open("data/trial_7day.txt", "a", encoding="utf-8") as f:
-                    f.write(f"{email}\t{password}\t{payment_url}\n")
-                log(f"🎉 Phát hiện và đã lưu account có TRIAL 7 NGÀY: {email}", "OK")
-            else:
-                log(f"[{email}] Tài khoản không có ưu đãi Trial 7 ngày (đã lưu vào success_links.txt).", "INFO")
-            # Bước 6: Lưu link vào database (có cờ has_trial)
-            try:
-                update_account_payment_link(email, payment_url, has_trial=has_7day_trial)
-            except Exception as dbe:
-                log(f"Lỗi cập nhật database link: {dbe}", "WARN")
+            log(f"✅ [{email}] Đã lưu link thanh toán ({price_label}) vào data/success_links.txt: {payment_url}", "OK")
+            update_account_payment_link(email, payment_url, has_trial=False, uudai=price_label)
             return payment_url
 
         log("Không tìm thấy link thanh toán pipopay sau khi bấm Nâng cấp!", "WARN")
@@ -1251,18 +1494,21 @@ def _do_get_payment_link(driver, email, password, attempt=0, save_trial_7day=Fal
         return None
 
 
-def update_account_payment_link(email, link, has_trial=False):
+def update_account_payment_link(email, link, has_trial=False, uudai=None):
     try:
         import sqlite3
         db_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "database.db"))
         if os.path.exists(db_path):
             conn = sqlite3.connect(db_path)
             cur = conn.cursor()
-            uudai_val = "trial_7day" if has_trial else ""
-            cur.execute("UPDATE accounts SET join_link = ?, uudai = ? WHERE app = 'capcut' AND email = ?", (link, uudai_val, email))
+            uudai_val = uudai if uudai else ("trial_7day" if has_trial else "")
+            if link:
+                cur.execute("UPDATE accounts SET join_link = ?, uudai = ? WHERE app = 'capcut' AND email = ?", (link, uudai_val, email))
+            else:
+                cur.execute("UPDATE accounts SET uudai = ? WHERE app = 'capcut' AND email = ?", (uudai_val, email))
             conn.commit()
             conn.close()
-            log(f"Đã lưu link thanh toán vào Database cho {email} (Trial 7D: {has_trial})", "OK")
+            log(f"Đã lưu thông tin vào Database cho {email} (Trial 7D: {has_trial}, Ưu đãi: {uudai_val})", "OK")
     except Exception as e:
         log(f"Lỗi update DB payment link: {e}", "WARN")
 
@@ -1568,6 +1814,7 @@ def save_pending_link(email, password, cookies):
 def register_one_account(index, join_link=None, keep_open=False, batch_size=3, predefined_proxy=None, shared_relay_port=None, headless=False, browser_type="chrome", get_link=False, incognito=False, save_trial_7day=False, **kwargs):
     email = None
     driver = None
+    should_keep_open = keep_open and not get_link and not save_trial_7day
     password = get_settings_from_db().get("CAPCUT_PASSWORD", "capcut123") or "capcut123"
 
     try:

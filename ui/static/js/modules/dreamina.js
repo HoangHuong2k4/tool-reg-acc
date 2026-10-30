@@ -18,7 +18,7 @@ function drmSetAccountsTab(tab) {
 
 function drmSetApiSource(src) {
   drmApiSource = src;
-  ['dongvanfb','mixmmo'].forEach(s => {
+  ['webmail','dongvanfb','mixmmo','smail1s'].forEach(s => {
     const el = document.getElementById(`drm-source${s.charAt(0).toUpperCase()+s.slice(1)}`);
     if(el) el.classList.toggle('active', s === src);
   });

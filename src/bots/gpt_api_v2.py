@@ -229,13 +229,25 @@ def custom_wait_for_otp(email_addr, after_ts, **kwargs):
         elapsed = 0
         while elapsed < timeout:
             try:
-                resp = requests.post("https://tools.dongvanfb.net/api/get_messages_oauth2", headers=headers, json=payload, timeout=20)
-                data = resp.json()
+                messages = []
+                try:
+                    resp = requests.post("https://tools.dongvanfb.net/api/get_messages_oauth2", headers=headers, json=payload, timeout=12)
+                    data = resp.json()
+                    if data.get("status"):
+                        messages = data.get("messages") or []
+                except Exception:
+                    pass
+
+                # Fallback sang Web Mail Reader API
+                if not messages and refresh_token and client_id:
+                    try:
+                        fb_res = requests.post("https://web-mail-reader.vercel.app/api/mail-all", json={"refresh_token": refresh_token, "client_id": client_id, "limit": 10}, headers={"Content-Type": "application/json"}, timeout=10)
+                        if fb_res.status_code == 200:
+                            messages = fb_res.json().get("messages", [])
+                    except Exception:
+                        pass
                 
-                if data.get("status"):
-                    messages = data.get("messages")
-                    
-                    if messages:
+                if messages:
                         for msg in messages:
                             subject = msg.get("subject", "")
                             message = msg.get("message", "")

@@ -196,9 +196,12 @@ def get_otp_callback_hotmail(email_addr, after_ts=0, mail_api_source="dongvanfb"
     def wait_for_otp(email, password, refresh_token, client_id, timeout=120, interval=4, mail_api_source="dongvanfb"):
         import requests, time, re
         
-        api_url = "https://tools.dongvanfb.net/api/get_messages_oauth2" if mail_api_source == "dongvanfb" else "https://mixmmo.com/api/get-hotmail-messages.php"
-        
-        if mail_api_source == "dongvanfb":
+        if mail_api_source in ("webmail", "web_mail_reader", "web-mail-reader"):
+            api_url = "https://web-mail-reader.vercel.app/api/mail-all"
+            headers = {"Content-Type": "application/json"}
+            payload = {"refresh_token": refresh_token, "client_id": client_id, "limit": 10}
+        elif mail_api_source == "dongvanfb":
+            api_url = "https://tools.dongvanfb.net/api/get_messages_oauth2"
             headers = {"Content-Type": "application/json"}
             payload = {
                 "email": email,
@@ -206,7 +209,15 @@ def get_otp_callback_hotmail(email_addr, after_ts=0, mail_api_source="dongvanfb"
                 "refresh_token": refresh_token,
                 "client_id": client_id
             }
+        elif mail_api_source == "smail1s":
+            api_url = "https://smail1s.com/get_messages"
+            headers = {"Content-Type": "application/json"}
+            payload = {
+                "mode": "oauth" if (refresh_token and client_id) else "roundcube",
+                "data": f"{email}|{refresh_token}|{client_id}" if (refresh_token and client_id) else f"{email}|{password}"
+            }
         else:
+            api_url = "https://mixmmo.com/api/get-hotmail-messages.php"
             headers = {"Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"}
             payload = {
                 "action": "get_hotmail_messages",
@@ -220,12 +231,18 @@ def get_otp_callback_hotmail(email_addr, after_ts=0, mail_api_source="dongvanfb"
         elapsed = 0
         while elapsed < timeout:
             try:
-                resp = requests.post(api_url, headers=headers, data=payload if mail_api_source != "dongvanfb" else None, json=payload if mail_api_source == "dongvanfb" else None, timeout=20)
+                resp = requests.post(api_url, headers=headers, data=payload if mail_api_source == "mixmmo" else None, json=payload if mail_api_source in ("dongvanfb", "smail1s", "webmail", "web_mail_reader", "web-mail-reader") else None, timeout=20)
                 data = resp.json()
                 
                 messages = []
-                if mail_api_source == "dongvanfb" and data.get("status"):
+                if mail_api_source in ("webmail", "web_mail_reader", "web-mail-reader"):
                     messages = data.get("messages", [])
+                elif mail_api_source == "dongvanfb" and data.get("status"):
+                    messages = data.get("messages", [])
+                elif mail_api_source == "smail1s":
+                    d_list = data.get("data")
+                    if isinstance(d_list, list) and len(d_list) > 0 and not d_list[0].get("error"):
+                        messages = d_list[0].get("messages", [])
                 elif mail_api_source == "mixmmo" and data.get("success"):
                     messages = data.get("data", [])
                     

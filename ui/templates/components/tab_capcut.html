@@ -96,9 +96,10 @@
             <div class="form-group" id="cc-apiSourceGroup">
               <label>Nguồn đọc Mail (Hotmail)</label>
               <div class="radio-group">
-                <div class="radio-btn active" id="cc-sourceDongvanfb" onclick="ccSetApiSource('dongvanfb')">DongVanFB
-                </div>
+                <div class="radio-btn active" id="cc-sourceWebmail" onclick="ccSetApiSource('webmail')">⚡ WebMail (Vercel)</div>
+                <div class="radio-btn" id="cc-sourceDongvanfb" onclick="ccSetApiSource('dongvanfb')">DongVanFB</div>
                 <div class="radio-btn" id="cc-sourceMixmmo" onclick="ccSetApiSource('mixmmo')">MixMMO</div>
+                <div class="radio-btn" id="cc-sourceSmail1s" onclick="ccSetApiSource('smail1s')">Smail1s</div>
               </div>
             </div>
             <div class="form-group">
@@ -140,7 +141,7 @@
             <div class="form-group" id="cc-trialGroup">
               <label style="cursor:pointer; display:flex; align-items:center; gap:8px; font-size:12px; font-weight:500; color:var(--text); user-select:none; background:rgba(234,179,8,0.08); padding:8px 12px; border:1px solid rgba(234,179,8,0.28); border-radius:8px;">
                 <input type="checkbox" id="cc-saveTrial7day" style="width:16px;height:16px;accent-color:#eab308;cursor:pointer;" onchange="ccToggleTrial7day(this.checked)">
-                <span>🎁 Lưu link Trial 7 ngày (<code style="color:#eab308;font-size:11px;">data/trial_7day.txt</code>)</span>
+                <span>🎁 <strong>Chỉ lấy Trial 7 ngày 0đ</strong> (Bỏ qua acc tính phí, lưu <code style="color:#eab308;font-size:11px;">data/trial_7day.txt</code>)</span>
               </label>
             </div>
             <div class="row2">
@@ -211,7 +212,7 @@
               </div>
               <div class="nav-btn" id="cc-tabAccountsAll" onclick="ccSetAccountsTab('all')">Tất cả</div>
             </div>
-            <div style="margin-left:auto;display:flex;gap:8px;">
+            <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap;">
               <button class="btn-secondary btn" style="width:auto;padding:6px 12px;font-size:11px;"
                 onclick="ccCopyAccounts()">📋 Copy</button>
               <button class="btn-secondary btn" style="width:auto;padding:6px 12px;font-size:11px;"
@@ -220,6 +221,8 @@
                 onclick="ccCopyAccountsEPL()">📋 Copy E|P|L</button>
               <button class="btn-secondary btn" style="width:auto;padding:6px 12px;font-size:11px;border-color:#eab308;color:#eab308;"
                 onclick="ccCopyTrial7day()">🎁 Copy Trial 7D</button>
+              <button class="btn-secondary btn" style="width:auto;padding:6px 12px;font-size:11px;border-color:#38bdf8;color:#38bdf8;"
+                onclick="ccCopyStatusPrices()">💰 Copy Bảng Giá</button>
               <button class="btn-secondary btn" style="width:auto;padding:6px 12px;font-size:11px;"
                 onclick="ccClearAccounts()">🗑️ Xóa</button>
               <button class="btn-secondary btn" style="width:auto;padding:6px 12px;font-size:11px;"

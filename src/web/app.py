@@ -496,6 +496,27 @@ def capcut_accounts_raw_trial_7day():
                 pass
     return text, 200, {"Content-Type": "text/plain; charset=utf-8"}
 
+@app.route("/api/capcut/accounts/raw_status_prices")
+def capcut_accounts_raw_status_prices():
+    text = ""
+    status_file = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "status_prices.txt"))
+    if os.path.exists(status_file):
+        try:
+            with open(status_file, "r", encoding="utf-8") as f:
+                text = f.read()
+        except Exception:
+            pass
+    if not text.strip():
+        try:
+            with get_db() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT email, uudai FROM accounts WHERE app='capcut' AND uudai IS NOT NULL AND uudai != '' ORDER BY id ASC")
+                for row in cursor.fetchall():
+                    text += f"{row['email']}\t{row['uudai']}\n"
+        except Exception:
+            pass
+    return text, 200, {"Content-Type": "text/plain; charset=utf-8"}
+
 @app.route("/api/capcut/accounts/clear", methods=["POST"])
 def capcut_accounts_clear():
     try:
@@ -521,7 +542,7 @@ def capcut_task_start():
     threads = int(data.get("threads", 1))
     join_link = data.get("join_link", "")
     mail_type = data.get("mail_type", "hotmail")
-    mail_api_source = data.get("mail_api_source", "mixmmo")
+    mail_api_source = data.get("mail_api_source", "webmail")
     mail_domain_source = data.get("mail_domain_source", "phhinfi")
     browser_type = data.get("browser_type", "chrome")
     headless = bool(data.get("headless", False))
@@ -666,7 +687,7 @@ def retry_links_start():
     browser_type = data.get("browser_type", "chrome")
     headless = bool(data.get("headless", False))
     incognito = bool(data.get("incognito", False))
-    mail_api_source = data.get("mail_api_source", "mixmmo")
+    mail_api_source = data.get("mail_api_source", "webmail")
     threads = int(data.get("threads", 2))
 
     # Check count before starting
@@ -881,12 +902,15 @@ def _run_capcut_task(mode, count, threads, join_link, mail_type, mail_api_source
             except Exception as e:
                 state_capcut.log(f"Lỗi lưu DB: {e}", "ERR")
                 
-        def capcut_update_link(email, link, has_trial=False):
+        def capcut_update_link(email, link, has_trial=False, uudai=None):
             try:
                 with get_db() as conn:
                     cursor = conn.cursor()
-                    uudai_val = "trial_7day" if has_trial else ""
-                    cursor.execute("UPDATE accounts SET join_link = ?, uudai = ? WHERE app = 'capcut' AND email = ?", (link, uudai_val, email))
+                    uudai_val = uudai if uudai else ("trial_7day" if has_trial else "")
+                    if link:
+                        cursor.execute("UPDATE accounts SET join_link = ?, uudai = ? WHERE app = 'capcut' AND email = ?", (link, uudai_val, email))
+                    else:
+                        cursor.execute("UPDATE accounts SET uudai = ? WHERE app = 'capcut' AND email = ?", (uudai_val, email))
                     conn.commit()
             except Exception as e:
                 state_capcut.log(f"Lỗi update DB link: {e}", "ERR")
@@ -1319,7 +1343,7 @@ def gpt_task_start():
     creation_method = data.get("creation_method", "selenium")
     check_momo = data.get("check_momo", True)
     check_apple_pay_ui = data.get("check_apple_pay_ui", False)
-    mail_api_source = data.get("mail_api_source", "dongvanfb")
+    mail_api_source = data.get("mail_api_source", "webmail")
     
     driver_mode = data.get("driver_mode", "playwright_ui")
     browser_type = data.get("browser_type", "chrome")
@@ -1781,7 +1805,7 @@ def gpm_task_start():
 
     threads = int(data.get("threads", 1))
     mail_type = data.get("mail_type", "hotmail")
-    mail_api_source = data.get("mail_api_source", "mixmmo")
+    mail_api_source = data.get("mail_api_source", "webmail")
     mode = int(data.get("mode", 1))
     join_link = data.get("join_link", "")
     gpm_api_url = data.get("gpm_api_url") or load_settings().get("GPM_API_URL", "http://127.0.0.1:19995")
@@ -2041,7 +2065,7 @@ def dreamina_task_start():
     threads = int(data.get("threads", 1))
     headless = bool(data.get("headless", False))
     browser_type = data.get("browser_type", "chrome")
-    mail_api_source = data.get("mail_api_source", "mixmmo")
+    mail_api_source = data.get("mail_api_source", "webmail")
 
     state_dreamina.task_stop.clear()
     while not state_dreamina.log_queue.empty():
@@ -2552,7 +2576,7 @@ def grok_task_start():
     headless = bool(data.get("headless", False))
     browser_type = data.get("browser_type", "chrome")
     mail_type = data.get("mail_type", "hotmail")
-    mail_api_source = data.get("mail_api_source", "mixmmo")
+    mail_api_source = data.get("mail_api_source", "webmail")
     open_payment = bool(data.get("open_payment", False))
     apple_pay = bool(data.get("apple_pay", False))
     language = data.get("language", "en-US")

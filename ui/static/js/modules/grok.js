@@ -39,8 +39,10 @@ function grkSetMailType(t) {
 
 function grkSetApiSource(s) {
   grkApiSource = s;
-  ['grk-sourceDongvanfb','grk-sourceMixmmo'].forEach(id => document.getElementById(id).classList.remove('active'));
-  document.getElementById(s === 'dongvanfb' ? 'grk-sourceDongvanfb' : 'grk-sourceMixmmo').classList.add('active');
+  ['grk-sourceWebmail','grk-sourceDongvanfb','grk-sourceMixmmo','grk-sourceSmail1s'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.classList.toggle('active', (s === 'webmail' && id === 'grk-sourceWebmail') || (s === 'dongvanfb' && id === 'grk-sourceDongvanfb') || (s === 'mixmmo' && id === 'grk-sourceMixmmo') || (s === 'smail1s' && id === 'grk-sourceSmail1s'));
+  });
 }
 
 function grkSetBrowser(b) {

@@ -4,6 +4,10 @@ import time
 import re
 import sys
 import os
+import json
+import shutil
+import uuid
+from pathlib import Path
 import requests
 import random
 import socket
@@ -85,8 +89,75 @@ DOB_DAY   = "12"
 
 import queue
 import threading
+from concurrent.futures import ThreadPoolExecutor, wait as futures_wait, FIRST_COMPLETED
 HOTMAIL_QUEUE = queue.Queue()
 FILE_LOCK = threading.Lock()
+ACCOUNTS_LOCK = threading.RLock()
+
+# ── File đánh dấu tài khoản đã đăng ký thành công ────────────────────
+REGISTERED_FILE = "data/registered.jsonl"
+
+def registered_emails():
+    """Lấy tập hợp email đã xác nhận đăng ký thành công (đọc từ registered.jsonl)."""
+    result = set()
+    path = Path(REGISTERED_FILE)
+    if path.exists():
+        for line in path.read_text(encoding="utf-8-sig").splitlines():
+            try:
+                entry = json.loads(line)
+                if entry.get("email") and entry.get("status"):
+                    result.add(entry["email"].strip().casefold())
+            except (ValueError, AttributeError):
+                continue
+    return result
+
+def record_registered_account(email, evidence, capcut_password=None):
+    """Ghi nhận tài khoản đã đăng ký thành công vào registered.jsonl."""
+    with ACCOUNTS_LOCK:
+        if email.strip().casefold() not in registered_emails():
+            entry = {"email": email, "status": evidence, "confirmed_at": datetime.now().strftime("%Y-%m-%dT%H:%M:%S")}
+            if capcut_password is not None:
+                entry["capcut_password"] = capcut_password
+            os.makedirs("data", exist_ok=True)
+            with open(REGISTERED_FILE, "a", encoding="utf-8") as f:
+                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+                f.flush()
+        removed = prune_registered_accounts()
+        log(f"✅ Đã xác nhận tài khoản {email}; lọc {removed} dòng khỏi hotmails.txt.", "OK")
+
+def prune_registered_accounts(file_path=None):
+    """Lọc email đã đăng ký thành công khỏi hotmails.txt (atomic replace)."""
+    with ACCOUNTS_LOCK:
+        if file_path is None:
+            file_path = HOTMAIL_FILE
+        path = Path(file_path)
+        confirmed = registered_emails()
+        if not path.exists() or not confirmed:
+            return 0
+        lines = path.read_text(encoding="utf-8-sig").splitlines(keepends=True)
+        kept = []
+        for line in lines:
+            email_col = line.split("|", 1)[0].strip().casefold()
+            if line.lstrip().startswith("#") or email_col not in confirmed:
+                kept.append(line)
+        removed = len(lines) - len(kept)
+        if not removed:
+            return 0
+        # Backup trước khi sửa
+        backup_dir = path.parent / "backups"
+        backup_dir.mkdir(exist_ok=True)
+        backup = backup_dir / f"{path.name}.{datetime.now().strftime('%Y%m%d-%H%M%S')}.{uuid.uuid4().hex[:8]}.bak"
+        shutil.copy2(path, backup)
+        # Atomic write
+        tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+        try:
+            tmp.write_text("".join(kept), encoding="utf-8")
+            os.replace(tmp, path)
+        finally:
+            if tmp.exists():
+                tmp.unlink()
+        log(f"📋 Đã lọc {removed} email đã đăng ký khỏi {file_path} (backup: {backup.name})", "INFO")
+        return removed
 
 def mark_hotmail_used(acc):
     with FILE_LOCK:
@@ -142,102 +213,597 @@ def log(msg, level="INFO"):
 
 GLOBAL_STOP_EVENT = None
 
-def wait_for_otp(email, password, refresh_token, client_id, timeout=90, interval=4, after_ts=0, mail_api_source="mixmmo", max_api_errors=3):
-    api_url = HOTMAIL_API_URL if mail_api_source == "dongvanfb" else "https://mixmmo.com/api/get-hotmail-messages.php"
-    log(f"Đang chờ OTP cho {email} qua {mail_api_source.upper()} API (tối đa {timeout}s)...", "INFO")
-    
-    if mail_api_source == "dongvanfb":
-        headers = {"Content-Type": "application/json"}
+# ── Regex phân biệt trial 0đ chuẩn (từ Tool 2) ───────────────────────
+ZERO_VND_RE = re.compile(
+    r"(?<![\w.,])(?:0(?:[.,]0+)?\s*(?:₫|đ|vnđ|vnd)|(?:₫|đ|vnđ|vnd)\s*0(?:[.,]0+)?)(?![\w.,])", re.I
+)
+SEVEN_DAYS_RE = re.compile(r"(?<!\d)7\s*[-–]?\s*(?:ngày|ngay|days?)\b", re.I)
+FREE_SEVEN_DAYS_RE = re.compile(
+    r"(?<!\d)(?:7\s*[-–]?\s*(?:ngày|ngay)\s*(?:dùng thử\s*)?miễn phí"
+    r"|miễn phí\s*(?:trong\s*)?7\s*(?:ngày|ngay)"
+    r"|7\s*[-–]?\s*days?\s*(?:free(?:\s+trial)?|trial\s+free)"
+    r"|free\s*(?:trial\s*)?(?:for\s*)?7\s*[-–]?\s*days?)\b", re.I
+)
+
+def is_trial_7d_offer(text):
+    """Thẻ gói phải có CẢ thời hạn 7 ngày VÀ bằng chứng miễn phí/0đ."""
+    if re.search(r"not eligible|trial.{0,20}(?:unavailable|not available)|no free trial|không đủ điều kiện|không có\s*(?:bản\s*)?dùng thử", text, re.I):
+        return False
+    return bool(SEVEN_DAYS_RE.search(text) and (ZERO_VND_RE.search(text) or FREE_SEVEN_DAYS_RE.search(text)))
+
+def is_pro_pricing_card(text):
+    """Xác định đây là thẻ gói Pro thật (không phải Free/Basic)."""
+    return bool(re.match(r"\s*(?:CapCut\s+)?Pro\b", text, re.I)) and not bool(
+        re.search(r"^\s*(?:Free|Basic|Miễn phí|Ultra|Standard|Teams?|Business|Doanh nghiệp)\s*$", text, re.I | re.M)
+    )
+
+def has_currency_price(text):
+    return bool(re.search(r"\d[\d.,]*\s*(?:[đ₫]|vnd|vnđ)|(?:[đ₫]|vnd|vnđ)\s*\d|[$€£]\s*\d|\d+(?:[.,]\d+)?\s*(?:usd|eur|gbp)", text, re.I))
+
+def is_pipopay_url(url):
+    """Kiểm tra URL thuộc cashier pipopay."""
+    try:
+        from urllib.parse import urlsplit
+        parsed = urlsplit(url or "")
+        host = (parsed.hostname or "").lower()
+        return parsed.scheme in ("http", "https") and (host == "pipopay.com" or host.endswith(".pipopay.com"))
+    except Exception:
+        return False
+
+def extract_detected_price(card_text="", full_text="", default="không xác định"):
+    """
+    [TỐI ƯU Tool 2] Trích xuất mức giá từ nội dung text của card/bảng giá CapCut.
+    Ưu tiên text của card trước, sau đó đến full text.
+    """
+    for text in [card_text, full_text]:
+        if not text:
+            continue
+        # 1. Kiểm tra 0đ / trial 7 ngày
+        if is_trial_7d_offer(text) or ZERO_VND_RE.search(text) or FREE_SEVEN_DAYS_RE.search(text):
+            return "0đ"
+        # 2. Kiểm tra gói 22k
+        m_22k = re.search(r"(?<![\d.,])(?:₫|vnd|vnđ)?\s*(?:22[.,]000|22000)(?!\d)\s*(?:[đ₫]|vnd|vnđ)?", text, re.I)
+        if m_22k:
+            p = m_22k.group(0).strip()
+            if not re.search(r"[đ₫vnd]", p, re.I):
+                p += "đ"
+            return p
+        # 3. Tìm giá VNĐ có số phân cách nghìn và ký hiệu đ/₫/vnd (vd: 189.000đ, 222.000đ)
+        m_vnd = re.search(r"(?:[₫đ]|vnd|vnđ)\s*\d{1,3}(?:[.,]\d{3})+(?!\d)|\b\d{1,3}(?:[.,]\d{3})+\s*(?:[₫đ]|vnd|vnđ)", text, re.I)
+        if m_vnd:
+            return m_vnd.group(0).strip()
+        # 4. Tìm số tiền ngoại tệ (vd: $9.99, £7.99, 9.99 USD)
+        m_curr = re.search(r"[\$€£¥]\s*\d+(?:[.,]\d+)?|\b\d+(?:[.,]\d+)?\s*(?:usd|eur|gbp)", text, re.I)
+        if m_curr:
+            return m_curr.group(0).strip()
+        # 5. Tìm số hàng nghìn bất kỳ (vd: 189.000, 199.000)
+        m_num = re.search(r"\b\d{1,3}(?:[.,]\d{3})+\b", text)
+        if m_num:
+            return m_num.group(0).strip() + "đ"
+    return default
+
+def trial_checkout_is_free(text):
+    """
+    [TỐI ƯU Tool 2] Xác minh trực tiếp nội dung checkout Pipopay:
+    Chỉ công nhận là Trial 0đ nếu số tiền ĐẾN HẠN HÔM NAY (due today / total due) là 0đ.
+    Nếu là 22k hoặc thu tiền hôm nay thì KHÔNG phải trial 0đ.
+    """
+    if not text:
+        return False
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    due_label = re.compile(
+        r"thanh toán hôm nay|(?:tổng|số) tiền (?:cần )?thanh toán|tổng cộng|đến hạn (?:hôm nay|ngay)"
+        r"|\btotal(?:\s+(?:due|today|now))?\b(?!\s*(?:discount|savings|credits?))"
+        r"|\bdue\s*(?:today|now)\b|\bpay\s*today\b|\bamount\s*due\b", re.I
+    )
+    for index, line in enumerate(lines):
+        if not due_label.search(line):
+            continue
+        for amount_line in lines[index:index + 3]:
+            if has_currency_price(amount_line):
+                without_zero = ZERO_VND_RE.sub("", amount_line)
+                if has_currency_price(without_zero) or not ZERO_VND_RE.search(amount_line):
+                    return False
+                return True
+    return bool(is_trial_7d_offer(text) and (ZERO_VND_RE.search(text) or "$0" in text or "0$" in text))
+
+def record_pricing_status(email, price_text):
+    """Lưu phân loại giá tiền vào file data/status_prices.txt."""
+    try:
+        os.makedirs("data", exist_ok=True)
+        with open("data/status_prices.txt", "a", encoding="utf-8") as f:
+            f.write(f"{email}\t{price_text}\n")
+    except Exception as e:
+        log(f"Lỗi lưu status_prices: {e}", "WARN")
+
+
+_MS_TOKEN_CACHE = {}
+
+def _fetch_messages_webmail(refresh_token, client_id, limit=10):
+    """
+    Đọc thư qua Web Mail Reader API chính thức (https://web-mail-reader.vercel.app/api/mail-all).
+    Tự động giải mã Microsoft OAuth và trích xuất mã OTP thông minh ngay trong response.
+    """
+    try:
+        url = "https://web-mail-reader.vercel.app/api/mail-all"
         payload = {
-            "email": email,
-            "pass": password,
             "refresh_token": refresh_token,
             "client_id": client_id,
+            "limit": limit
         }
-    else:
-        headers = {"Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"}
-        payload = {
-            "action": "get_hotmail_messages",
-            "account": f"{email}|{password}|{refresh_token}|{client_id}",
-            "mode": "oauth",
-            "folder": "inbox",
-            "start_timestamp": "0"
-        }
-    
+        headers = {"Content-Type": "application/json"}
+        r = requests.post(url, json=payload, headers=headers, timeout=12)
+        if r.status_code == 200:
+            data = r.json()
+            raw_msgs = data.get("messages") or []
+            normalized = []
+            for m in raw_msgs:
+                from_addr = str(m.get("from_address") or "").strip()
+                from_name = str(m.get("from_name") or "").strip()
+                sender = from_addr or from_name
+                subj = str(m.get("subject") or "")
+                date_str = str(m.get("date") or "")
+                snippet = str(m.get("snippet") or "")
+                code = str(m.get("code") or "").strip()
+                uid = str(m.get("id") or "")
+                normalized.append({
+                    "from": sender,
+                    "sender": sender,
+                    "from_name": from_name,
+                    "from_address": from_addr,
+                    "subject": subj,
+                    "date": date_str,
+                    "message": snippet,
+                    "bodyText": snippet,
+                    "code": code,
+                    "uid": uid,
+                    "id": uid
+                })
+            return normalized, None
+        else:
+            err_text = r.text
+            try:
+                err_data = r.json()
+                err_text = err_data.get("error") or err_text
+            except Exception:
+                pass
+            return [], f"WebMail API ({r.status_code}): {err_text}"
+    except Exception as e:
+        return [], str(e)
+
+def _fetch_messages_direct_microsoft(refresh_token, client_id):
+    """
+    Đọc trực tiếp từ Microsoft Graph API chính chủ bằng refresh_token và client_id.
+    Tốc độ ~0.5s, hỗ trợ cả Live OAuth endpoint (login.live.com) lẫn Microsoft Online v2.0 endpoint.
+    """
+    global _MS_TOKEN_CACHE
+    try:
+        cache_key = f"{refresh_token[:30]}_{client_id}"
+        cached = _MS_TOKEN_CACHE.get(cache_key)
+        now = time.time()
+        access_token = None
+        if cached and cached[1] > now:
+            access_token = cached[0]
+
+        if not access_token:
+            # 1. Thử Live OAuth endpoint (chuẩn nhất cho tài khoản cá nhân Hotmail / Outlook mua ngoài)
+            try:
+                r = requests.post(
+                    "https://login.live.com/oauth20_token.srf",
+                    data={
+                        "client_id": client_id,
+                        "grant_type": "refresh_token",
+                        "refresh_token": refresh_token
+                    },
+                    headers={"Content-Type": "application/x-www-form-urlencoded"},
+                    timeout=10
+                )
+                data = r.json()
+                if data.get("access_token"):
+                    access_token = data.get("access_token")
+                    expires_in = int(data.get("expires_in") or 3600)
+                    _MS_TOKEN_CACHE[cache_key] = (access_token, now + max(300, expires_in - 60))
+            except Exception:
+                pass
+
+        if not access_token:
+            # 2. Thử Microsoft Online v2.0 endpoint (cho Azure AD App registered with Graph scopes)
+            for token_url in (
+                "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+                "https://login.microsoftonline.com/consumers/oauth2/v2.0/token"
+            ):
+                try:
+                    r = requests.post(
+                        token_url,
+                        data={
+                            "client_id": client_id,
+                            "grant_type": "refresh_token",
+                            "refresh_token": refresh_token,
+                            "scope": "https://graph.microsoft.com/Mail.Read offline_access"
+                        },
+                        timeout=10
+                    )
+                    data = r.json()
+                    if data.get("access_token"):
+                        access_token = data.get("access_token")
+                        expires_in = int(data.get("expires_in") or 3600)
+                        _MS_TOKEN_CACHE[cache_key] = (access_token, now + max(300, expires_in - 60))
+                        break
+                except Exception:
+                    pass
+
+        if not access_token:
+            return [], "Không lấy được access_token từ Microsoft OAuth"
+
+        headers = {"Authorization": f"Bearer {access_token}"}
+        g_res = requests.get(
+            "https://graph.microsoft.com/v1.0/me/messages?$top=15&$orderby=receivedDateTime desc",
+            headers=headers,
+            timeout=10
+        )
+        if g_res.status_code != 200:
+            return [], f"Microsoft Graph API lỗi HTTP {g_res.status_code}: {g_res.text[:120]}"
+
+        raw_msgs = g_res.json().get("value", [])
+        normalized = []
+        for m in raw_msgs:
+            sender_addr = m.get("from", {}).get("emailAddress", {}).get("address", "")
+            from_name = m.get("from", {}).get("emailAddress", {}).get("name", "")
+            subj = m.get("subject", "")
+            date_str = m.get("receivedDateTime", "")
+            body_content = m.get("body", {}).get("content", "")
+            uid = m.get("id", "")
+            
+            otp = ""
+            m_code = re.search(r'\b(\d{6})\b', subj + ' ' + body_content)
+            if m_code:
+                otp = m_code.group(1)
+                
+            normalized.append({
+                "from": sender_addr,
+                "sender": sender_addr,
+                "from_name": from_name,
+                "from_address": sender_addr,
+                "subject": subj,
+                "date": date_str,
+                "message": body_content,
+                "bodyText": body_content,
+                "code": otp,
+                "uid": uid,
+                "id": uid
+            })
+        return normalized, None
+    except Exception as e:
+        return [], str(e)
+
+def _fetch_messages_from_api(email, password, refresh_token, client_id, mail_api_source):
+    """Lấy danh sách messages từ API (webmail, direct, smail1s, dongvanfb, mixmmo). Trả về (list, error)."""
+    try:
+        # 1. Nguồn WebMail (Web Mail Reader Vercel API): Cực nhanh, ổn định và tự bóc tách OTP
+        if mail_api_source in ("webmail", "web_mail_reader", "web-mail-reader", "vercel"):
+            if refresh_token and client_id:
+                msgs, err = _fetch_messages_webmail(refresh_token, client_id)
+                if not err:
+                    return msgs, None
+                # Fallback sang direct Microsoft Graph
+                direct_msgs, direct_err = _fetch_messages_direct_microsoft(refresh_token, client_id)
+                if not direct_err:
+                    return direct_msgs, None
+                return msgs, err
+
+        # 2. Nguồn Direct Microsoft Graph API
+        if mail_api_source in ("direct", "microsoft"):
+            if refresh_token and client_id:
+                msgs, err = _fetch_messages_direct_microsoft(refresh_token, client_id)
+                if not err:
+                    return msgs, None
+                return _fetch_messages_webmail(refresh_token, client_id)
+
+        # 3. Nguồn Smail1s:
+        # Nếu có refresh_token & client_id: ưu tiên WebMail Reader / Direct Graph
+        if mail_api_source == "smail1s":
+            if refresh_token and client_id:
+                msgs, err = _fetch_messages_webmail(refresh_token, client_id)
+                if not err:
+                    return msgs, None
+                direct_msgs, direct_err = _fetch_messages_direct_microsoft(refresh_token, client_id)
+                if not direct_err:
+                    return direct_msgs, None
+
+            api_url = "https://smail1s.com/get_messages"
+            headers = {"Content-Type": "application/json"}
+            payload = {
+                "mode": "oauth" if (refresh_token and client_id) else "roundcube",
+                "data": f"{email}|{refresh_token}|{client_id}" if (refresh_token and client_id) else f"{email}|{password}"
+            }
+            try:
+                resp = requests.post(api_url, headers=headers, json=payload, timeout=15)
+                data = resp.json()
+                d_list = data.get("data")
+                if isinstance(d_list, list) and len(d_list) > 0:
+                    item = d_list[0]
+                    msgs = item.get("messages") or []
+                    return msgs, None
+            except Exception:
+                pass
+
+            if refresh_token and client_id:
+                msgs, err = _fetch_messages_webmail(refresh_token, client_id)
+                return msgs, err
+
+            return [], None
+
+        # 4. Nguồn DongVanFB
+        elif mail_api_source == "dongvanfb":
+            api_url = HOTMAIL_API_URL
+            headers = {"Content-Type": "application/json"}
+            payload = {"email": email, "pass": password, "refresh_token": refresh_token, "client_id": client_id}
+            try:
+                resp = requests.post(api_url, headers=headers, json=payload, timeout=15)
+                data = resp.json()
+                if data.get("status") or data.get("success"):
+                    msgs = data.get("messages") or []
+                    return msgs, None
+                if ("IMAP connection failed" in str(data) or not data.get("messages")) and refresh_token and client_id:
+                    msgs, err = _fetch_messages_webmail(refresh_token, client_id)
+                    if not err:
+                        return msgs, None
+                    direct_msgs, direct_err = _fetch_messages_direct_microsoft(refresh_token, client_id)
+                    return direct_msgs, direct_err
+            except Exception:
+                if refresh_token and client_id:
+                    msgs, err = _fetch_messages_webmail(refresh_token, client_id)
+                    return msgs, err
+            return [], None
+
+        # 5. Nguồn MixMMO
+        else: # mixmmo
+            api_url = "https://mixmmo.com/api/get-hotmail-messages.php"
+            headers = {"Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"}
+            payload = {"action": "get_hotmail_messages", "account": f"{email}|{password}|{refresh_token}|{client_id}", "mode": "oauth", "folder": "inbox", "start_timestamp": "0"}
+            try:
+                resp = requests.post(api_url, headers=headers, data=payload, timeout=15)
+                data = resp.json()
+                if data.get("status") or data.get("success"):
+                    msgs = data.get("messages") or []
+                    return msgs, None
+            except Exception:
+                pass
+            if refresh_token and client_id:
+                msgs, err = _fetch_messages_webmail(refresh_token, client_id)
+                if not err:
+                    return msgs, None
+                direct_msgs, direct_err = _fetch_messages_direct_microsoft(refresh_token, client_id)
+                return direct_msgs, direct_err
+            return [], None
+    except Exception as e:
+        if refresh_token and client_id:
+            msgs, err = _fetch_messages_webmail(refresh_token, client_id)
+            return msgs, err
+        return [], str(e)
+
+def _extract_otp_from_message(msg):
+    """Trích xuất mã OTP 6 chữ số từ một tin nhắn. Trả về string OTP hoặc None."""
+    otp = str(msg.get("code") or "").strip()
+    if otp and otp.isdigit() and len(otp) == 6:
+        return otp
+    subject = str(msg.get("subject") or "")
+    message = str(msg.get("message") or "")
+    bodyText = str(msg.get("bodyText") or "")
+    clean_message = re.sub(r'<style[^>]*>.*?</style>', ' ', message, flags=re.IGNORECASE)
+    clean_message = re.sub(r'<[^>]+>', ' ', clean_message)
+    import html as _html
+    clean_message = _html.unescape(clean_message)
+    text_to_search = subject + " " + clean_message + " " + bodyText
+    match = re.search(r'(?<![#&a-zA-Z0-9])(\d{6})(?![0-9])', text_to_search)
+    if match:
+        return match.group(1)
+    return None
+
+def snapshot_mail_before_register(email, password, refresh_token, client_id, mail_api_source="mixmmo"):
+    """
+    [TỐI ƯU Tool 2] Chụp nhanh hộp thư TRƯỚC khi bấm Đăng ký.
+    Trả về dict: {existing_ids: set, existing_otps: set}
+    Dùng để bỏ qua OTP cũ khi polling sau này.
+    """
+    result = {"existing_ids": set(), "existing_otps": set()}
+    try:
+        messages, err = _fetch_messages_from_api(email, password, refresh_token, client_id, mail_api_source)
+        capcut_found = 0
+        for msg in messages:
+            sender = str(msg.get("from") or msg.get("sender") or "").lower()
+            if "admin@mail.capcut.com" not in sender and "capcut" not in sender:
+                continue
+            capcut_found += 1
+            msg_id = str(msg.get("id") or msg.get("uid") or "").strip()
+            msg_date = str(msg.get("date") or "")
+            msg_subj = str(msg.get("subject") or "")
+            sig = msg_id if msg_id else f"{msg_date}_{msg_subj}"
+            result["existing_ids"].add(sig)
+            otp = _extract_otp_from_message(msg)
+            if otp:
+                result["existing_otps"].add(otp)
+        if capcut_found > 0:
+            log(f"[OTP Snapshot] Phát hiện {capcut_found} thư CapCut cũ (OTP cũ: {list(result['existing_otps'])}). Sẽ bỏ qua khi polling.", "INFO")
+        else:
+            log(f"[OTP Snapshot] Hộp thư {email} sạch — không có thư CapCut cũ.", "INFO")
+    except Exception as e:
+        log(f"[OTP Snapshot] Lỗi snapshot hộp thư: {e}", "WARN")
+    return result
+
+def wait_for_otp(email, password, refresh_token, client_id, timeout=90, interval=4, after_ts=0,
+                 mail_api_source="mixmmo", max_api_errors=3,
+                 ignore_ids=None, ignore_otps=None):
+    """
+    Chờ OTP mới từ CapCut.
+    ignore_ids, ignore_otps: tập hợp ID/OTP cũ đã có trước khi đăng ký (từ snapshot_mail_before_register)
+    — chỉ trả về OTP mới được gửi SAU khi bấm Đăng ký.
+    """
+    if ignore_ids is None:
+        ignore_ids = set()
+    if ignore_otps is None:
+        ignore_otps = set()
+
+    log(f"Đang chờ OTP cho {email} qua {mail_api_source.upper()} API (tối đa {timeout}s)...", "INFO")
+    if ignore_ids or ignore_otps:
+        log(f"   Bỏ qua {len(ignore_ids)} thư cũ (OTP cũ: {list(ignore_otps)})...", "INFO")
+
     elapsed = 0
     consecutive_api_errors = 0
+    last_skip_notice = 0
     fatal_keywords = [
-        "empty access token", "imap connection failed", "invalid_grant", 
-        "invalid_client", "unauthorized", "expired_token", "account is locked", 
-        "account is blocked", "login failed"
+        "account security interrupt", "compromised", "account is locked",
+        "account is blocked", "token het han", "invalid_client", "expired_token",
+        "aadsts50057", "aadsts50076", "aadsts50079", "aadsts70008"
     ]
-    
+
     while elapsed < timeout:
         if GLOBAL_STOP_EVENT and GLOBAL_STOP_EVENT.is_set():
             log("Task bị dừng bởi người dùng, thoát chờ OTP!", "WARN")
             return None
         try:
-            if mail_api_source == "dongvanfb":
-                resp = requests.post(api_url, headers=headers, json=payload, timeout=15)
-            else:
-                resp = requests.post(api_url, headers=headers, data=payload, timeout=15)
-                
-            data = resp.json()
-            
-            if data.get("status") or data.get("success"):
-                consecutive_api_errors = 0  # Reset khi API phản hồi bình thường
-                if data.get("messages"):
-                    for msg in data["messages"]:
-                        otp = msg.get("code", "").strip()
-                        if otp and otp.isdigit() and len(otp) == 6:
-                            log(f"Nhận được OTP: {C.BOLD}{otp}{C.RST}", "OK")
-                            return otp
-                            
-                        subject = msg.get("subject", "")
-                        message = msg.get("message", "")
-                        bodyText = msg.get("bodyText", "")
-                        
-                        clean_message = re.sub(r'<style[^>]*>.*?</style>', ' ', message, flags=re.IGNORECASE)
-                        clean_message = re.sub(r'<[^>]+>', ' ', clean_message)
-                        text_to_search = subject + " " + clean_message + " " + bodyText
-                        
-                        match = re.search(r'\b(\d{6})\b', text_to_search)
-                        if match:
-                            otp = match.group(1)
-                            log(f"Nhận được OTP: {C.BOLD}{otp}{C.RST}", "OK")
-                            return otp
-            else:
+            messages, err = _fetch_messages_from_api(email, password, refresh_token, client_id, mail_api_source)
+            if err is not None:
                 consecutive_api_errors += 1
-                raw_err = str(data).lower()
-                is_fatal = any(k in raw_err for k in fatal_keywords)
-                
-                log(f"API Hotmail trả về lỗi ({consecutive_api_errors}/{max_api_errors}): {data}", "WARN")
-                
-                # Nếu gặp lỗi token chết/IMAP hỏng: chỉ thử 2 lần là bỏ qua ngay
+                raw_err = str(err).lower()
+                is_fatal = any(k in raw_err for k in fatal_keywords) and ("scopes requested are unauthorized" not in raw_err)
+                log(f"API Hotmail trả về lỗi ({consecutive_api_errors}/{max_api_errors}): {err}", "WARN")
                 if is_fatal and consecutive_api_errors >= 2:
-                    log(f"⚠️ Phát hiện lỗi Token/Hotmail chết ('{data.get('message', '')}'). Bỏ qua mail {email} ngay để tránh treo CapCut!", "ERR")
+                    log(f"⚠️ Lỗi Token/Hotmail chết. Bỏ qua mail {email}!", "ERR")
                     return None
-                    
                 if consecutive_api_errors >= max_api_errors:
-                    log(f"⚠️ API Hotmail lỗi liên tiếp {consecutive_api_errors} lần. Bỏ qua mail {email} để tránh treo CapCut!", "ERR")
+                    log(f"⚠️ API lỗi liên tiếp {consecutive_api_errors} lần. Bỏ qua mail {email}!", "ERR")
                     return None
-                
+            else:
+                consecutive_api_errors = 0
+                has_skipped = False
+                # Sort thư mới nhất trước
+                sorted_msgs = sorted(messages, key=lambda m: str(m.get("date") or ""), reverse=True)
+                for msg in sorted_msgs:
+                    sender = str(msg.get("from") or msg.get("sender") or "").lower()
+                    if "admin@mail.capcut.com" not in sender and "capcut" not in sender:
+                        continue
+                    msg_id = str(msg.get("id") or msg.get("uid") or "").strip()
+                    msg_date = str(msg.get("date") or "")
+                    msg_subj = str(msg.get("subject") or "")
+                    sig = msg_id if msg_id else f"{msg_date}_{msg_subj}"
+                    # Bỏ qua thư cũ đã có trước khi đăng ký
+                    if sig in ignore_ids or (msg_id and msg_id in ignore_ids):
+                        has_skipped = True
+                        continue
+                    otp = _extract_otp_from_message(msg)
+                    if not otp:
+                        continue
+                    # Bỏ qua nếu OTP trùng cũ và không có ID riêng để phân biệt
+                    if not msg_id and not msg_date and otp in ignore_otps:
+                        has_skipped = True
+                        continue
+                    log(f"✅ Nhận được OTP MỚI: {C.BOLD}{otp}{C.RST} (Subject: {msg_subj[:50]})", "OK")
+                    return otp
+                if has_skipped and elapsed - last_skip_notice >= 10:
+                    log("Thư CapCut cũ bị bỏ qua, đang chờ thư MỚI...", "INFO")
+                    last_skip_notice = elapsed
         except Exception as e:
             consecutive_api_errors += 1
             log(f"Lỗi gọi API Hotmail ({consecutive_api_errors}/{max_api_errors}): {e}", "WARN")
             if consecutive_api_errors >= max_api_errors:
                 log(f"⚠️ Không thể kết nối API Hotmail sau {consecutive_api_errors} lần thử. Bỏ qua mail {email}!", "ERR")
                 return None
-            
+
         time.sleep(interval)
         elapsed += interval
-    
+
     log(f"Hết thời gian chờ OTP ({timeout}s) cho {email}!", "ERR")
     return None
+
+
+def password_form_kind(driver):
+    """
+    [TỐI ƯU Tool 2] Phân biệt form Đăng nhập (email đã có) vs Đăng ký (email mới).
+    Trả về: "existing" | "new" | "unknown"
+    - "existing": Email đã có tài khoản CapCut → không đăng ký lại
+    - "new": Email mới → tiếp tục đăng ký
+    - "unknown": Không xác định được (an toàn, không bấm bừa)
+    """
+    from selenium.webdriver.common.by import By
+    try:
+        # Tìm nút submit trong form có input password
+        forms = driver.find_elements(By.CSS_SELECTOR, "form")
+        if not forms:
+            # Không có form — thử tìm container chứa password input
+            pw_inputs = driver.find_elements(By.CSS_SELECTOR, "input[type='password']")
+            if pw_inputs:
+                forms = [driver.find_element(By.TAG_NAME, "body")]
+
+        for form in forms:
+            try:
+                pw = form.find_elements(By.CSS_SELECTOR, "input[type='password']")
+                if not pw:
+                    continue
+                btns = form.find_elements(By.CSS_SELECTOR, "button[type='submit'], button")
+                for btn in btns:
+                    txt = (btn.text or "").strip().lower()
+                    if any(k in txt for k in ["đăng nhập", "sign in", "log in", "login"]):
+                        return "existing"
+                    if any(k in txt for k in ["đăng ký", "sign up", "register", "create"]):
+                        return "new"
+            except Exception:
+                continue
+
+        # Fallback: tìm label/heading gần nhất
+        page_text = driver.find_element(By.TAG_NAME, "body").text.lower()
+        if any(k in page_text for k in ["đăng nhập vào tài khoản", "sign in to your account", "welcome back"]):
+            return "existing"
+        if any(k in page_text for k in ["tạo tài khoản", "create account", "create your account", "đăng ký tài khoản"]):
+            return "new"
+    except Exception:
+        pass
+    return "unknown"
+
+
+def verify_trial_checkout_dom(driver, timeout=15):
+    """
+    [TỐI ƯU Tool 2] Xác minh trang checkout THẬT SỰ là 0đ/trial 7 ngày
+    trước khi lưu vào trial_7day.txt.
+    Đọc DOM cashier PipoPay để kiểm tra chắc chắn số tiền phải trả hôm nay là 0đ.
+    """
+    from selenium.webdriver.common.by import By
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            text_candidates = []
+            if is_pipopay_url(driver.current_url):
+                try:
+                    text_candidates.append(("current_page", driver.find_element(By.TAG_NAME, "body").text))
+                except Exception:
+                    pass
+            orig = driver.current_window_handle
+            for h in driver.window_handles:
+                try:
+                    driver.switch_to.window(h)
+                    if is_pipopay_url(driver.current_url):
+                        text_candidates.append((f"tab_{h[:6]}", driver.find_element(By.TAG_NAME, "body").text))
+                except Exception:
+                    pass
+            try:
+                driver.switch_to.window(orig)
+            except Exception:
+                pass
+
+            for label, text in text_candidates:
+                if trial_checkout_is_free(text):
+                    log(f"✅ verify_trial_checkout_dom: Xác minh THÀNH CÔNG gói 0đ/trial 7 ngày từ {label}.", "OK")
+                    return True
+        except Exception:
+            pass
+        time.sleep(1)
+    return False
+
 
 from .browser_utils import get_settings_from_db
 from .browser_utils import get_rotated_proxy as _grp
 def get_rotated_proxy():
+
     return _grp(logger_func=log)
 def setup_driver(index=1, keep_open=False, use_api_proxy=True, batch_size=3, use_proxy=True, predefined_proxy=None, incognito=False, headless=False, browser_type="chrome"):
     from selenium import webdriver
@@ -513,8 +1079,9 @@ def step1_enter_email(driver, email):
     time.sleep(2)
 
 def step2_enter_password(driver, password):
-    """Bước 2: Nhập mật khẩu và bấm Đăng ký"""
+    """Bước 2: Nhập mật khẩu và bấm Đăng ký (hoặc Đăng nhập nếu mail đã tồn tại)"""
     from selenium.webdriver.common.by import By
+    from selenium.webdriver.common.keys import Keys
 
     log("Bước 2: Nhập mật khẩu...", "INFO")
 
@@ -523,6 +1090,13 @@ def step2_enter_password(driver, password):
 
     set_react_input(driver, pwd_input, password)
     time.sleep(0.5)
+
+    # Kiểm tra loại form: email đã tồn tại hay mới
+    form_kind = password_form_kind(driver)
+    if form_kind == "existing":
+        log("Phát hiện form ĐĂNG NHẬP (email này đã có tài khoản CapCut)", "WARN")
+    elif form_kind == "new":
+        log("Xác nhận form ĐĂNG KÝ mới", "INFO")
 
     # Tích checkbox nhận email khuyến mãi (nếu có)
     try:
@@ -540,26 +1114,62 @@ def step2_enter_password(driver, password):
 
     time.sleep(0.3)
 
-    # Bấm Đăng ký / Register / Sign up
-    signup_xpaths = [
-        '//button[contains(text(),"Đăng ký") or contains(text(),"Register") or contains(text(),"Sign up")]',
-        '//button[@type="submit"]',
-        '//button[contains(@class,"primary") or contains(@class,"submit") or contains(@class,"sign")]',
-        '//div[contains(@id,"submit")]/button',
-    ]
-    
-    for attempt in range(3):
-        for xpath in signup_xpaths:
-            try:
-                els = driver.find_elements(By.XPATH, xpath)
-                for el in els:
-                    if el.is_displayed() and el.is_enabled():
-                        try_click(driver, el, f"Đăng ký: '{el.text.strip()[:20]}'")
-            except Exception:
-                pass
-        time.sleep(1)
+    target_keywords = ["đăng ký", "register", "sign up", "tạo tài khoản", "create account"]
+    if form_kind == "existing":
+        target_keywords = ["đăng nhập", "log in", "login", "sign in"]
 
-    log("Đã nhập mật khẩu và bấm Đăng ký", "OK")
+    # Ưu tiên tìm các button có text chứa từ khóa hành động (dùng . thay vì text() để lấy text trong thẻ con)
+    button_candidates = []
+    try:
+        # Tìm các nút và phần tử button/div role=button
+        found_buttons = driver.find_elements(By.XPATH, '//button | //*[@role="button"]')
+        for b in found_buttons:
+            try:
+                if not b.is_displayed() or not b.is_enabled():
+                    continue
+                txt = (b.text or "").strip().lower()
+                # TUYỆT ĐỐI BỎ QUA nút rỗng (icon mắt ẩn/hiện password)
+                if not txt:
+                    continue
+                if any(kw in txt for kw in target_keywords):
+                    button_candidates.append((b, txt))
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+    clicked = False
+    for btn, btn_txt in button_candidates:
+        if try_click(driver, btn, f"Nút: '{btn_txt}'"):
+            clicked = True
+            break
+
+    # Nếu chưa click được nút phù hợp, thử submit bằng phím Enter trên ô password
+    if not clicked:
+        log("Thử submit bằng phím ENTER trên ô mật khẩu...", "INFO")
+        try:
+            pwd_input.send_keys(Keys.ENTER)
+            clicked = True
+            time.sleep(1)
+        except Exception as e_enter:
+            log(f"Không gửi được Enter: {e_enter}", "WARN")
+
+    # Fallback cuối cùng: tìm button submit duy nhất trong form chứa password
+    if not clicked:
+        try:
+            submit_btns = driver.find_elements(By.CSS_SELECTOR, 'button[type="submit"], #submit-button-container button')
+            for sb in submit_btns:
+                txt = (sb.text or "").strip().lower()
+                if txt and (any(kw in txt for kw in target_keywords) or "tiếp" in txt or "next" in txt or "continue" in txt):
+                    if try_click(driver, sb, f"Submit: '{txt}'"):
+                        clicked = True
+                        break
+        except Exception:
+            pass
+
+    log("Đã nhập mật khẩu và bấm xác nhận Đăng ký", "OK")
+    time.sleep(2)
+    return form_kind
 
 def step3_enter_birthday(driver):
     """Bước 3: Điền năm/tháng/ngày sinh"""
@@ -666,8 +1276,12 @@ def step3_enter_birthday(driver):
     time.sleep(2)
 
 
-def step4_enter_otp(driver, email, password, refresh_token, client_id, mail_api_source="mixmmo"):
-    """Bước 4: Chờ OTP và nhập vào ô xác nhận"""
+def step4_enter_otp(driver, email, password, refresh_token, client_id, mail_api_source="mixmmo", snapshot=None):
+    """
+    Bước 4: Chờ OTP và nhập vào ô xác nhận
+    snapshot: Dict chứa ignore_ids, ignore_otps từ snapshot_mail_before_register()
+    để lọc sạch các thư/OTP cũ đã có trước khi bấm đăng ký.
+    """
     from selenium.webdriver.common.by import By
 
     log("Bước 4: Chờ và nhập OTP...", "INFO")
@@ -678,10 +1292,18 @@ def step4_enter_otp(driver, email, password, refresh_token, client_id, mail_api_
 
     log("Màn hình xác nhận email xuất hiện. Đang lấy OTP từ API...", "INFO")
 
-    # Chờ 5 giây để email server nhận thư
-    time.sleep(5)
+    # Chờ 3 giây để email server nhận thư
+    time.sleep(3)
 
-    otp = wait_for_otp(email, password, refresh_token, client_id, timeout=120, interval=4, mail_api_source=mail_api_source)
+    ignore_ids = snapshot.get("ignore_ids", set()) if snapshot else set()
+    ignore_otps = snapshot.get("ignore_otps", set()) if snapshot else set()
+
+    otp = wait_for_otp(
+        email, password, refresh_token, client_id,
+        timeout=120, interval=4,
+        mail_api_source=mail_api_source,
+        ignore_ids=ignore_ids, ignore_otps=ignore_otps
+    )
 
     if not otp:
         log("Không lấy được OTP!", "ERR")
@@ -869,18 +1491,22 @@ def save_account(uidname, email, password, join_link, msToken=""):
         f.write(line + "\n")
     log(f"Đã lưu tài khoản → {OUTPUT_FILE}", "OK")
 
-def update_account_payment_link(email, link, has_trial=False):
+def update_account_payment_link(email, link=None, has_trial=False, uudai=None):
     try:
         import sqlite3
         db_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "database.db"))
         if os.path.exists(db_path):
             conn = sqlite3.connect(db_path)
             cur = conn.cursor()
-            uudai_val = "trial_7day" if has_trial else ""
-            cur.execute("UPDATE accounts SET join_link = ?, uudai = ? WHERE app = 'capcut' AND email = ?", (link, uudai_val, email))
+            uudai_val = str(uudai) if uudai is not None else ("trial_7day" if has_trial else "")
+            if link:
+                cur.execute("UPDATE accounts SET join_link = ?, uudai = ? WHERE app = 'capcut' AND email = ?", (link, uudai_val, email))
+            else:
+                cur.execute("UPDATE accounts SET uudai = ? WHERE app = 'capcut' AND email = ?", (uudai_val, email))
             conn.commit()
             conn.close()
-            log(f"Đã lưu link thanh toán vào Database cho {email} (Trial 7D: {has_trial})", "OK")
+            if link:
+                log(f"Đã lưu link thanh toán vào Database cho {email} (Ưu đãi: {uudai_val})", "OK")
     except Exception as e:
         log(f"Lỗi update DB payment link: {e}", "WARN")
 
@@ -1277,32 +1903,86 @@ def _do_get_payment_link(driver, email, password, attempt=0, save_trial_7day=Fal
                 except:
                     pass
 
-                # Check ưu đãi 7 ngày toàn diện
-                trial_keywords = ["7 ngày", "7 day", "7-day", "7 days", "dùng thử", "trial", "free trial", "miễn phí 7 ngày", "0đ", "0 đ", "dùng thử miễn phí"]
+                # [BƯỚC 1] Nhấn vào Tab 'Tháng' (Monthly) trước khi kiểm tra giá
                 try:
-                    pro_sections = driver.find_elements(By.CSS_SELECTOR, '.subscriptionProductSection-pro, .subscriptionProductSection, [class*="subscriptionProduct"], [class*="proSection"], [class*="vipModal"], [class*="proModal"], .lv-modal, [role="dialog"]')
-                    for sec in pro_sections:
-                        if sec.is_displayed():
-                            stext = sec.text.lower()
-                            if any(k in stext for k in trial_keywords):
-                                has_7day_trial = True
-                                log(f"[{email}] 🎯 Phát hiện ưu đãi TRIAL 7 NGÀY trong modal: {stext[:70].replace(chr(10), ' ')}", "OK")
-                                break
-                except:
+                    monthly_tabs = driver.find_elements(By.XPATH, "//*[contains(text(), 'Tháng') or contains(text(), 'Monthly')]")
+                    for mt in monthly_tabs:
+                        if mt.is_displayed():
+                            try_click(driver, mt, "Chọn Tab Gói Tháng")
+                            time.sleep(1)
+                            break
+                except Exception:
                     pass
 
-                # Tìm nút thanh toán trong modal
-                action_btns = driver.find_elements(By.CSS_SELECTOR, '.subscriptionProductSection-pro button.subscriptionProductSection-actionDark, button.subscriptionProductSection-actionGradient, button.subscriptionProductSection-actionDark, [class*="actionDark"], [class*="actionGradient"]')
-                for btn in action_btns:
-                    if btn.is_displayed() and btn.is_enabled():
-                        btn_txt = (btn.text or "").lower()
-                        if any(k in btn_txt for k in trial_keywords):
-                            has_7day_trial = True
-                            log(f"[{email}] 🎯 Nút nâng cấp có nội dung TRIAL: {btn_txt}", "OK")
-                        try_click(driver, btn, "Nâng cấp (Trong Modal Gói Pro)")
-                        clicked_modal = True
-                        break
-                if clicked_modal:
+                # [BƯỚC 2] Quét tìm thẻ Pro và xác định mức giá (0đ, 22.000đ hay khác)
+                target_pro_card = None
+                card_text = ""
+                try:
+                    pro_cards = driver.find_elements(By.CSS_SELECTOR, '.subscriptionProductSection-pro, .subscriptionProductSection, [class*="pricing-card"], [class*="plan-card"], [class*="proSection"]')
+                    for c in pro_cards:
+                        if c.is_displayed():
+                            txt = c.text or ""
+                            if is_pro_pricing_card(txt):
+                                target_pro_card = c
+                                card_text = txt
+                                if is_trial_7d_offer(txt):
+                                    break
+                except Exception:
+                    pass
+
+                modal_text = ""
+                try:
+                    modal_el = driver.find_element(By.CSS_SELECTOR, '.lv-modal, [role="dialog"], body')
+                    modal_text = modal_el.text or ""
+                except Exception:
+                    pass
+
+                # Trích xuất mức giá chính xác
+                detected_price = extract_detected_price(card_text, modal_text)
+                is_0d = (target_pro_card is not None and is_trial_7d_offer(card_text)) or detected_price == "0đ"
+                is_22k = bool(re.search(r"(?<!\d)22[.,]000(?!\d)|(?<!\d)22000(?!\d)", card_text + " " + modal_text)) or "22" in detected_price
+
+                price_label = "0đ (Trial 7 ngày)" if is_0d else ("22,000đ" if is_22k else detected_price)
+                log(f"[{email}] 📊 Mức giá CapCut phát hiện: {price_label}", "INFO")
+                record_pricing_status(email, price_label)
+                update_account_payment_link(email, None, has_trial=is_0d, uudai=price_label)
+
+                # [BƯỚC 3] Nếu bật chế độ CHỈ LẤY TRIAL 7 NGÀY (save_trial_7day=True) mà KHÔNG PHẢI 0đ
+                if save_trial_7day and not is_0d:
+                    log(f"[{email}] ℹ️ [CHẾ ĐỘ CHỈ LẤY TRIAL 7 NGÀY] Gói là {price_label} -> BỎ QUA không lấy link (đã lưu phân loại giá)!", "INFO")
+                    # Đóng modal
+                    try:
+                        close_btns = driver.find_elements(By.CSS_SELECTOR, '.lv-modal-close-icon, button[aria-label="close"], .skip-mrkR37')
+                        for cb in close_btns:
+                            if cb.is_displayed():
+                                try_click(driver, cb, "Đóng modal Nâng cấp")
+                                break
+                    except Exception:
+                        pass
+                    return None
+
+                # [BƯỚC 4] Tìm nút bấm Nâng cấp trong thẻ Pro đã xác nhận
+                upgrade_btn = None
+                if target_pro_card:
+                    try:
+                        btns = target_pro_card.find_elements(By.CSS_SELECTOR, 'button')
+                        for b in btns:
+                            if b.is_displayed() and b.is_enabled():
+                                upgrade_btn = b
+                                break
+                    except Exception:
+                        pass
+
+                if not upgrade_btn:
+                    action_btns = driver.find_elements(By.CSS_SELECTOR, '.subscriptionProductSection-pro button, button.subscriptionProductSection-actionDark, button.subscriptionProductSection-actionGradient, [class*="actionDark"], [class*="actionGradient"]')
+                    for b in action_btns:
+                        if b.is_displayed() and b.is_enabled():
+                            upgrade_btn = b
+                            break
+
+                if upgrade_btn:
+                    try_click(driver, upgrade_btn, "Nâng cấp (Trong Thẻ Gói Pro)")
+                    clicked_modal = True
                     break
             except Exception as e:
                 pass
@@ -1360,34 +2040,32 @@ def _do_get_payment_link(driver, email, password, attempt=0, save_trial_7day=Fal
             time.sleep(1)
             
         if payment_url:
-            if "trial" in payment_url.lower() or "7day" in payment_url.lower():
-                has_7day_trial = True
+            # 1. NẾU LÀ TRIAL 7 NGÀY (is_0d): BẮT BUỘC xác minh trang checkout thật sự là 0đ
+            if is_0d:
+                log(f"[{email}] Đang quét DOM cashier Pipopay để xác minh số tiền đến hạn hôm nay là 0đ...", "INFO")
+                is_verified_0d = verify_trial_checkout_dom(driver, timeout=12)
+                if is_verified_0d:
+                    with open("data/trial_7day.txt", "a", encoding="utf-8") as f:
+                        f.write(f"{email}\t{password}\t{payment_url}\n")
+                    with open("data/success_links.txt", "a", encoding="utf-8") as f:
+                        f.write(f"{email}\t{password}\t{payment_url}\n")
+                    log(f"🎉 [{email}] ĐÃ XÁC MINH VÀ LƯU VÀO data/trial_7day.txt: {payment_url}", "OK")
+                    update_account_payment_link(email, payment_url, has_trial=True, uudai="trial_7day")
+                    return payment_url
+                else:
+                    log(f"⚠️ [{email}] Trang checkout Pipopay KHÔNG PHẢI 0đ! Không lưu vào trial_7day.txt.", "WARN")
+                    record_pricing_status(email, "checkout không phải 0đ")
+                    update_account_payment_link(email, payment_url, has_trial=False, uudai="checkout_not_0d")
+                    if not save_trial_7day:
+                        with open("data/success_links.txt", "a", encoding="utf-8") as f:
+                            f.write(f"{email}\t{password}\t{payment_url}\n")
+                    return payment_url
 
-            # Quét trực tiếp DOM của Cashier Pipopay để phát hiện trial 7 ngày
-            if not has_7day_trial:
-                log(f"[{email}] Đang quét DOM cashier Pipopay để xác minh gói dùng thử 7 ngày...", "INFO")
-                for _check_round in range(3):
-                    time.sleep(1.2)
-                    found, reason = _check_cashier_trial_dom(driver)
-                    if found:
-                        has_7day_trial = True
-                        log(f"[{email}] 🎯 Xác định thành công TRIAL 7 NGÀY từ Cashier Pipopay: {reason}", "OK")
-                        break
-
-            os.makedirs("data", exist_ok=True)
+            # 2. GÓI TRẢ PHÍ (22.000đ hoặc giá khác):
             with open("data/success_links.txt", "a", encoding="utf-8") as f:
                 f.write(f"{email}\t{password}\t{payment_url}\n")
-            if has_7day_trial:
-                with open("data/trial_7day.txt", "a", encoding="utf-8") as f:
-                    f.write(f"{email}\t{password}\t{payment_url}\n")
-                log(f"🎉 Phát hiện và đã lưu account có TRIAL 7 NGÀY: {email}", "OK")
-            else:
-                log(f"[{email}] Tài khoản không có ưu đãi Trial 7 ngày (đã lưu vào success_links.txt).", "INFO")
-            # Bước 6: Lưu theo đúng tài khoản vào file và database
-            try:
-                update_account_payment_link(email, payment_url, has_trial=has_7day_trial)
-            except Exception as dbe:
-                log(f"Lỗi cập nhật database link: {dbe}", "WARN")
+            log(f"✅ [{email}] Đã lưu link thanh toán ({price_label}) vào data/success_links.txt: {payment_url}", "OK")
+            update_account_payment_link(email, payment_url, has_trial=False, uudai=price_label)
             return payment_url
 
         log("Không tìm thấy link thanh toán pipopay sau khi bấm Nâng cấp!", "WARN")
@@ -1730,12 +2408,22 @@ def register_one_account(index, join_link=None, keep_open=False, batch_size=3, p
         
     email = acc["email"]
 
+    # [TỐI ƯU Tool 2] Bỏ qua ngay nếu email này đã đăng ký thành công trước đó
+    if email.strip().casefold() in registered_emails():
+        log(f"[{email}] ĐÃ ĐĂNG KÝ TRƯỚC ĐÓ (tìm thấy trong registered.jsonl) -> Bỏ qua!", "WARN")
+        prune_registered_accounts()
+        return True
+
     email_pass = acc["pass"]
     refresh_token = acc["refresh_token"]
     client_id = acc["client_id"]
     password = get_settings_from_db().get("CAPCUT_PASSWORD", "capcut123") or "capcut123"
 
+    # [TỐI ƯU Tool 2] Chụp snapshot hòm thư trước khi đăng ký để lọc sạch OTP cũ
+    snapshot = snapshot_mail_before_register(email, email_pass, refresh_token, client_id, mail_api_source)
+
     driver = None
+    should_keep_open = keep_open and not get_link and not save_trial_7day
     try:
         max_retries = 3
 
@@ -1771,7 +2459,7 @@ def register_one_account(index, join_link=None, keep_open=False, batch_size=3, p
         step2_enter_password(driver, password)
         bday_status = step3_enter_birthday(driver)
         if bday_status != "ALREADY_LOGGED_IN":
-            if not step4_enter_otp(driver, email, email_pass, refresh_token, client_id, mail_api_source):
+            if not step4_enter_otp(driver, email, email_pass, refresh_token, client_id, mail_api_source, snapshot=snapshot):
                 log(f"[{email}] Bỏ qua email này do không lấy được OTP / lỗi Hotmail API!", "WARN")
                 mark_hotmail_failed(acc, reason="OTP_FAILED_OR_TOKEN_ERROR")
                 return False
@@ -1796,6 +2484,7 @@ def register_one_account(index, join_link=None, keep_open=False, batch_size=3, p
                 
             uidname = extract_uidname(driver)
             save_account(uidname, email, password, join_link, msToken)
+            record_registered_account(email, "signup_join_ok", capcut_password=password)
             log(f"ĐĂNG KÝ & JOIN THÀNH CÔNG! {email} (UID: {uidname})", "OK")
         else:
             if bday_status != "ALREADY_LOGGED_IN":
@@ -1809,6 +2498,7 @@ def register_one_account(index, join_link=None, keep_open=False, batch_size=3, p
 
             # Bước 3: Lưu tài khoản ngay sau khi tạo xong (UID + thông tin)
             save_account(uidname, email, password, "", msToken)
+            record_registered_account(email, "signup_verified", capcut_password=password)
 
             # Bước 4: Đóng popup/hướng dẫn
             log("Đang xử lý các popup sau đăng ký...", "INFO")
@@ -1840,6 +2530,7 @@ def register_one_account(index, join_link=None, keep_open=False, batch_size=3, p
         # Chỉ đánh dấu hotmail đã dùng khi mọi thứ đều thành công
         if (not get_link and not save_trial_7day) or link:
             mark_hotmail_used(acc)
+            record_registered_account(email, "completed", capcut_password=password)
             return True
         else:
             return False
@@ -1875,7 +2566,14 @@ def load_hotmails_to_queue(limit=None):
     if not os.path.exists(HOTMAIL_FILE):
         log(f"Không tìm thấy file {HOTMAIL_FILE}", "ERR")
         return 0
-    
+
+    # Lọc trước email đã đăng ký thành công khỏi hotmails.txt
+    pruned = prune_registered_accounts()
+    if pruned:
+        log(f"Đã tự động loại {pruned} tài khoản đã đăng ký trước đó khỏi {HOTMAIL_FILE}.", "INFO")
+
+    already_done = registered_emails()
+
     # Xóa queue cũ (nếu có)
     while not HOTMAIL_QUEUE.empty():
         try: HOTMAIL_QUEUE.get_nowait()
@@ -1888,9 +2586,12 @@ def load_hotmails_to_queue(limit=None):
             if not line: continue
             parts = line.split("|")
             if len(parts) >= 4:
+                email = parts[0].strip()
+                if email.casefold() in already_done:
+                    continue
 
                 HOTMAIL_QUEUE.put({
-                    "email": parts[0].strip(),
+                    "email": email,
                     "pass": parts[1].strip(),
                     "refresh_token": parts[2].strip(),
                     "client_id": parts[3].strip(),
@@ -1900,7 +2601,7 @@ def load_hotmails_to_queue(limit=None):
                 count += 1
                 if limit and count >= limit:
                     break
-    log(f"Đã tải {count} hotmail từ file {HOTMAIL_FILE}.", "OK")
+    log(f"Đã tải {count} hotmail hợp lệ vào hàng đợi từ {HOTMAIL_FILE}.", "OK")
     return count
 
 def register_multiple(count, threads, join_link, keep_open=False, get_link=False, save_trial_7day=False):

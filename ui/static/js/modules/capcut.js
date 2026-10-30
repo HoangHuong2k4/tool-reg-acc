@@ -1,5 +1,5 @@
 // ==== CAPCUT ====
-let ccMode=3, ccMailType='hotmail', ccMailApiSource='dongvanfb', ccDomainSource='phhinfi', ccBrowser=localStorage.getItem('ccBrowser')||'chrome', ccHeadless=(localStorage.getItem('ccHeadless')==='true'), ccIncognito=(localStorage.getItem('ccIncognito')==='true'), ccSaveTrial7day=(localStorage.getItem('ccSaveTrial7day')==='true'), ccFilter='ALL', ccLogs=[], ccOk=0, ccFail=0, ccTotal=0;
+let ccMode=3, ccMailType='hotmail', ccMailApiSource='webmail', ccDomainSource='phhinfi', ccBrowser=localStorage.getItem('ccBrowser')||'chrome', ccHeadless=(localStorage.getItem('ccHeadless')==='true'), ccIncognito=(localStorage.getItem('ccIncognito')==='true'), ccSaveTrial7day=(localStorage.getItem('ccSaveTrial7day')==='true'), ccFilter='ALL', ccLogs=[], ccOk=0, ccFail=0, ccTotal=0;
 function ccSetMode(m){ccMode=m;[1,2,3,4].forEach(i=>{const el=document.getElementById('cc-mode'+i);if(el)el.classList.toggle('active',m===i);});document.getElementById('cc-joinLinkGroup').style.display=(m===2||m===4)?'block':'none';const isApiMode=m===4;document.getElementById('cc-browserGroup').style.display=isApiMode?'none':'block';document.getElementById('cc-headlessGroup').style.display=isApiMode?'none':'block';}
 function ccSetMailType(m){
   ccMailType=m;
@@ -27,8 +27,12 @@ function ccSetDomainSource(src){
 }
 function ccSetApiSource(s){
   ccMailApiSource=s;
+  const webmailBtn = document.getElementById('cc-sourceWebmail');
+  if(webmailBtn) webmailBtn.classList.toggle('active', s==='webmail');
   document.getElementById('cc-sourceDongvanfb').classList.toggle('active',s==='dongvanfb');
   document.getElementById('cc-sourceMixmmo').classList.toggle('active',s==='mixmmo');
+  const smail1sBtn = document.getElementById('cc-sourceSmail1s');
+  if(smail1sBtn) smail1sBtn.classList.toggle('active',s==='smail1s');
 }
 function ccSetBrowser(b){
   ccBrowser=b;
@@ -109,10 +113,20 @@ async function ccLoadAccounts(){
       const link = a.join_link || '';
       const displayLink = link.length > 30 ? link.substring(0, 30) + '...' : link;
       const linkHtml = link ? `<a href="${escHtml(link)}" target="_blank" style="font-size:12px;color:var(--accent);text-decoration:none;">${escHtml(displayLink)}</a>` : '<span style="color:var(--muted)">-</span>';
-      const isTrial = (a.uudai === 'trial_7day');
-      const trialBadge = isTrial ? '<span class="tag" style="margin:0;background:rgba(234,179,8,0.2);color:#eab308;border:1px solid #eab308;font-size:10px;">🎁 Trial 7D</span>' : '';
       
-      return `<tr><td style="color:var(--accent)">${escHtml(a.uid||'–')}</td><td>${escHtml(a.email)}</td><td><code style="color:var(--muted)">${escHtml(a.password)}</code><br/>${linkHtml}</td><td><div style="display:flex;align-items:center;gap:6px;"><span class="tag tag-ok" style="margin:0;">✅ OK</span>${trialBadge}<button class="copy-btn" title="Copy Email | Pass | Link" onclick="navigator.clipboard.writeText('${escHtml(a.email)}\\t${escHtml(a.password)}\\t${escHtml(link)}');showToast('📋','Đã copy (có link)!');"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button></div></td></tr>`;
+      const uudai = (a.uudai || '').trim();
+      const isTrial = (uudai === 'trial_7day' || uudai.toLowerCase().includes('trial') || uudai === '0đ');
+      let priceBadge = '';
+      if (isTrial) {
+        priceBadge = '<span class="tag" style="margin:0;background:rgba(34,197,94,0.2);color:#22c55e;border:1px solid #22c55e;font-size:10px;">🎁 0đ Trial 7D</span>';
+      } else if (uudai && uudai !== 'checkout_not_0d') {
+        priceBadge = `<span class="tag" style="margin:0;background:rgba(56,189,248,0.2);color:#38bdf8;border:1px solid #38bdf8;font-size:10px;">💰 ${escHtml(uudai)}</span>`;
+      } else if (uudai === 'checkout_not_0d') {
+        priceBadge = '<span class="tag" style="margin:0;background:rgba(239,68,68,0.2);color:#ef4444;border:1px solid #ef4444;font-size:10px;">⚠️ Ko phải 0đ</span>';
+      }
+      
+      const copyPayload = [a.email, a.password, link, uudai].filter(Boolean).join('\t');
+      return `<tr><td style="color:var(--accent)">${escHtml(a.uid||'–')}</td><td>${escHtml(a.email)}</td><td><code style="color:var(--muted)">${escHtml(a.password)}</code><br/>${linkHtml}</td><td><div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><span class="tag tag-ok" style="margin:0;">✅ OK</span>${priceBadge}<button class="copy-btn" title="Copy Email | Pass | Link | Giá" onclick="navigator.clipboard.writeText('${escHtml(copyPayload)}');showToast('📋','Đã copy (Email|Pass|Link|Giá)!');"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button></div></td></tr>`;
     }).join('');
   }catch(e){}
 }
@@ -138,6 +152,14 @@ async function ccCopyTrial7day(){
     if(!t.trim()){showToast('⚠️','Chưa có link Trial 7 ngày nào!');return;}
     await navigator.clipboard.writeText(t);showToast('🎉','Đã copy danh sách link Trial 7 ngày!');
   }catch(e){showToast('❌','Lỗi copy link Trial!');}
+}
+async function ccCopyStatusPrices(){
+  try{
+    const r=await fetch('/api/capcut/accounts/raw_status_prices');
+    const t=await r.text();
+    if(!t.trim()){showToast('⚠️','Chưa có dữ liệu phân loại giá!');return;}
+    await navigator.clipboard.writeText(t);showToast('💰','Đã copy danh sách phân loại giá (Email \\t Mức giá)!');
+  }catch(e){showToast('❌','Lỗi copy phân loại giá!');}
 }
 async function ccClearAccounts(){
   showConfirmModal('Xóa tài khoản CapCut', 'Bạn có chắc chắn muốn xóa toàn bộ danh sách tài khoản CapCut đã tạo?', async () => {
