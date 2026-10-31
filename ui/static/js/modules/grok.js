@@ -2,11 +2,11 @@
 let grkIsRunning = false;
 let grkEvt = null;
 let grkMailType = 'hotmail';
-let grkApiSource = 'mixmmo';
+let grkApiSource = 'webmail';
 let grkBrowserType = 'uc';
-let grkLanguage = 'ko-KR';
+let grkLanguage = 'en-US';
 let grkHeadless = false;
-let grkOpenPayment = true;
+let grkOpenPayment = false;
 let grkApplePay = false;
 let grkPaymentMode = 'masa'; // 'masa' = Masa168 tự động | 'manual' = quét tay qua Telegram
 let grkSessionMode = 'session';
@@ -56,9 +56,9 @@ function grkSetBrowser(b) {
 function grkSetLanguage(lang) {
   grkLanguage = lang;
   const us = document.getElementById('grk-langUs');
-  const ko = document.getElementById('grk-langKo');
+  const vi = document.getElementById('grk-langVi');
   if(us) us.classList.toggle('active', lang === 'en-US');
-  if(ko) ko.classList.toggle('active', lang === 'ko-KR');
+  if(vi) vi.classList.toggle('active', lang === 'vi-VN');
 }
 
 function grkToggleHeadless() {
@@ -208,7 +208,7 @@ async function grkStartTask() {
     const r = await fetch('/api/grok/task/start', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ count, threads, mail_type: grkMailType, mail_api_source: grkApiSource, browser_type: grkBrowserType, headless: grkHeadless, open_payment: grkOpenPayment, apple_pay: grkApplePay, language: grkLanguage, cards, payment_mode: grkPaymentMode })
+      body: JSON.stringify({ count, threads, mail_type: grkMailType, mail_api_source: grkApiSource, browser_type: grkBrowserType, headless: grkHeadless, open_payment: grkOpenPayment, apple_pay: grkApplePay, language: grkLanguage, cards, payment_mode: grkPaymentMode, refer_link: (document.getElementById('grk-referLink')?.value || '').trim() })
     });
     const d = await r.json();
     if (!d.success) { showToast('❌', d.error || 'Lỗi khởi động'); return; }

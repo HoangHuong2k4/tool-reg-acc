@@ -142,8 +142,22 @@ def mark_hotmail_used(acc):
             log(f"Lỗi cập nhật file hotmail Grok: {e}", "WARN")
 
 
-def wait_for_otp_hotmail(email, password, refresh_token, client_id, timeout=120, interval=4, mail_api_source="mixmmo"):
+def _parse_iso_time(date_str):
+    if not date_str:
+        return 0
+    try:
+        from datetime import datetime
+        clean = date_str.replace("Z", "+00:00")
+        return datetime.fromisoformat(clean).timestamp()
+    except:
+        return 0
+
+
+def wait_for_otp_hotmail(email, password, refresh_token, client_id, timeout=120, interval=4, mail_api_source="webmail", min_timestamp=0, ignored_codes=None):
     log(f"Chờ OTP xAI cho {email} qua {mail_api_source.upper()} (tối đa {timeout}s)...", "INFO")
+    if ignored_codes is None:
+        ignored_codes = set()
+
     if mail_api_source in ("webmail", "web_mail_reader", "web-mail-reader"):
         api_url = "https://web-mail-reader.vercel.app/api/mail-all"
         headers = {"Content-Type": "application/json"}
@@ -174,7 +188,43 @@ def wait_for_otp_hotmail(email, password, refresh_token, client_id, timeout=120,
                 resp = requests.post(api_url, headers=headers, json=payload, timeout=15)
             else:
                 resp = requests.post(api_url, headers=headers, data=payload, timeout=15)
+
+            if resp.status_code != 200:
+                consecutive_api_errors += 1
+                log(f"API Hotmail HTTP {resp.status_code} ({consecutive_api_errors}/4): {resp.text[:150]}", "WARN")
+                if consecutive_api_errors >= 4:
+                    log(f"API Hotmail lỗi kết nối HTTP {resp.status_code} liên tiếp 4 lần. Bỏ qua mail {email}!", "ERR")
+                    return None
+                time.sleep(interval)
+                elapsed += interval
+                continue
+
             data = resp.json()
+            # CHỈ kiểm tra lỗi ở các trường error/message khi API báo fail, KHÔNG search trong nội dung email
+            api_err = ""
+            if isinstance(data, dict):
+                if data.get("error"):
+                    api_err = str(data.get("error"))
+                elif not data.get("success") and data.get("status") not in ("ok", True) and data.get("message"):
+                    api_err = str(data.get("message"))
+
+            if api_err:
+                raw_err = api_err.lower()
+                if any(k in raw_err for k in fatal_keywords):
+                    consecutive_api_errors += 1
+                    log(f"Lỗi Token/Hotmail chết ({email}): {api_err}. Bỏ qua mail!", "ERR")
+                    return None
+                consecutive_api_errors += 1
+                log(f"API Hotmail cảnh báo ({consecutive_api_errors}/4): {api_err}", "WARN")
+                if consecutive_api_errors >= 4:
+                    return None
+                time.sleep(interval)
+                elapsed += interval
+                continue
+
+            # API phản hồi thành công, reset error counter
+            consecutive_api_errors = 0
+
             messages = []
             if mail_api_source in ("webmail", "web_mail_reader", "web-mail-reader"):
                 messages = data.get("messages", [])
@@ -183,6 +233,8 @@ def wait_for_otp_hotmail(email, password, refresh_token, client_id, timeout=120,
                 if isinstance(d_list, list) and len(d_list) > 0 and not d_list[0].get("error"):
                     messages = d_list[0].get("messages", [])
             elif data.get("status") or data.get("success"):
+                messages = data.get("messages", [])
+            elif isinstance(data.get("messages"), list):
                 messages = data.get("messages", [])
 
             # Fallback sang WebMail Reader nếu các bên khác không có thư
@@ -195,28 +247,51 @@ def wait_for_otp_hotmail(email, password, refresh_token, client_id, timeout=120,
                     pass
 
             if messages:
-                consecutive_api_errors = 0
                 for msg in messages:
-                    text_to_search = str(msg.get("subject", "")) + " " + str(msg.get("message", "")) + " " + str(msg.get("bodyText", ""))
-                    code = msg.get("code") or _extract_xai_code(text_to_search)
-                    if code:
-                        log(f"Nhận OTP xAI: {code}", "OK")
-                        return code
+                    subject = str(msg.get("subject", ""))
+                    from_addr = str(msg.get("from_address", "")).lower()
+                    from_name = str(msg.get("from_name", "")).lower()
+                    body_text = str(msg.get("snippet", "")) + " " + str(msg.get("message", "")) + " " + str(msg.get("bodyText", ""))
+                    text_to_search = f"{subject} {from_addr} {from_name} {body_text}"
+
+                    # Kiểm tra xem có đúng thư xAI / Grok không
+                    is_xai = any(k in from_addr for k in ["x.ai", "grok", "spacex"]) or \
+                             any(k in from_name for k in ["spacex", "grok", "xai", "x.ai"]) or \
+                             any(k in subject.lower() for k in ["grok", "spacex", "confirmation code", "validate your email"])
+                    if not is_xai:
+                        continue
+
+                    # Kiểm tra thời gian gửi thư (nếu có min_timestamp)
+                    mail_date = msg.get("date", "")
+                    if min_timestamp > 0 and mail_date:
+                        t = _parse_iso_time(mail_date)
+                        if t > 0 and t < (min_timestamp - 60):
+                            # Thư cũ trước thời điểm bấm submit
+                            continue
+
+                    # Trích xuất OTP: kiểm tra trường code, nếu không đủ 6 số thì tìm bằng regex trong subject + body
+                    code_val = msg.get("code")
+                    clean_code = ""
+                    if code_val:
+                        digits = re.sub(r'\D', '', str(code_val))
+                        if len(digits) == 6:
+                            clean_code = digits
+                    if not clean_code:
+                        clean_code = _extract_xai_code(text_to_search)
+
+                    if clean_code and len(clean_code) == 6:
+                        if clean_code in ignored_codes:
+                            continue
+                        log(f"Nhận OTP xAI hợp lệ: {clean_code} (từ '{subject}')", "OK")
+                        return clean_code
             else:
-                consecutive_api_errors += 1
-                log(f"API Hotmail trả về lỗi ({consecutive_api_errors}/3): {data}", "WARN")
-                raw_err = str(data).lower()
-                if any(k in raw_err for k in fatal_keywords) and consecutive_api_errors >= 2:
-                    log(f"Lỗi Token/Hotmail chết. Bỏ qua mail {email} ngay!", "ERR")
-                    return None
-                if consecutive_api_errors >= 3:
-                    log(f"API Hotmail lỗi liên tiếp 3 lần. Bỏ qua mail {email}!", "ERR")
-                    return None
+                if elapsed > 0 and elapsed % 16 == 0:
+                    log(f"[{email}] Đang chờ email OTP từ xAI tới hộp thư... ({elapsed}/{timeout}s)", "INFO")
         except Exception as e:
             consecutive_api_errors += 1
-            log(f"Lỗi API Hotmail ({consecutive_api_errors}/3): {e}", "WARN")
-            if consecutive_api_errors >= 3:
-                log(f"Lỗi kết nối API Hotmail 3 lần. Bỏ qua mail {email}!", "ERR")
+            log(f"Lỗi API Hotmail ({consecutive_api_errors}/4): {e}", "WARN")
+            if consecutive_api_errors >= 4:
+                log(f"Lỗi kết nối API Hotmail 4 lần. Bỏ qua mail {email}!", "ERR")
                 return None
         time.sleep(interval)
         elapsed += interval
@@ -273,7 +348,12 @@ def setup_driver(index=1, keep_open=False, batch_size=3, headless=False, browser
         options = uc.ChromeOptions()
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
-        lang_pref = "ko-KR,ko,en-US,en" if "ko" in language else "en-US,en"
+        if "vi" in language:
+            lang_pref = "vi-VN,vi,en-US,en"
+        elif "ko" in language:
+            lang_pref = "ko-KR,ko,en-US,en"
+        else:
+            lang_pref = "en-US,en"
         options.add_argument(f"--lang={language}")
         options.add_argument(f"--accept-lang={lang_pref}")
         if not hasattr(options, "_uc_prefs"):
@@ -283,8 +363,7 @@ def setup_driver(index=1, keep_open=False, batch_size=3, headless=False, browser
         options.add_argument(f"--window-position={x},0")
         if headless:
             options.add_argument("--headless=new")
-        if keep_open:
-            options.add_experimental_option("detach", True)
+        # Không dùng detach với undetected_chromedriver vì sẽ gây lỗi crash 'unrecognized chrome option: detach'
         with DRIVER_LOCK:
             try:
                 driver = uc.Chrome(options=options, use_subprocess=True)
@@ -312,7 +391,12 @@ def setup_driver(index=1, keep_open=False, batch_size=3, headless=False, browser
         options.add_argument("--disable-blink-features=AutomationControlled")
         options.add_experimental_option("excludeSwitches", ["enable-automation"])
         options.add_experimental_option("useAutomationExtension", False)
-        lang_pref = "ko-KR,ko,en-US,en" if "ko" in language else "en-US,en"
+        if "vi" in language:
+            lang_pref = "vi-VN,vi,en-US,en"
+        elif "ko" in language:
+            lang_pref = "ko-KR,ko,en-US,en"
+        else:
+            lang_pref = "en-US,en"
         options.add_argument(f"--lang={language}")
         options.add_argument(f"--accept-lang={lang_pref}")
         options.add_experimental_option('prefs', {'intl.accept_languages': lang_pref})
@@ -377,26 +461,35 @@ def is_element_present(driver, By, selector):
         return None
 
 
-def worker_loop(driver, email, password, acc_info, mail_api_source="mixmmo", open_payment=False, apple_pay=False, language="en-US", payment_mode="masa"):
+def worker_loop(driver, email, password, acc_info, mail_api_source="mixmmo", open_payment=False, apple_pay=False, language="en-US", payment_mode="masa", refer_link=""):
     from selenium.webdriver.common.by import By
     from selenium.webdriver.common.keys import Keys
-    log(f"[{email}] Bắt đầu đăng ký Grok (hotmail)...", "INFO")
+    log(f"[{email}] Bắt đầu đăng ký Grok referral...", "INFO")
     masked_email = email[:3] + "***" + email[email.find("@"):] if "@" in email else email[:3] + "***"
-    send_telegram_message(f"⏳ Bắt đầu đăng ký Grok cho tài khoản:\nEmail: {masked_email}")
+    send_telegram_message(f"⏳ Bắt đầu đăng ký Grok referral:\nEmail: {masked_email}")
 
     # ── State tracking ────────────────────────────────────
     otp_fetched = False
     otp_entered = False
     confirm_retries = 0
-    names_filled = False
+    email_submitted = False
+    otp_submitted = False
+    account_created = False
+    age_submitted = False
+    email_sent_time = 0
+    invalid_otps = set()
+    last_tried_otp = ""
     saved = False
     last_state = ""
     stuck_count = 0
+    start_time = time.time()
 
-    # ── Mở trang đăng ký ─────────────────────────────────
+    # ── Xác định URL bắt đầu (referral link) ──────────────
+    target_url = refer_link.strip() if (refer_link and refer_link.strip()) else "https://grok.com/refer/bot?code=GMED5B6WV9GC"
+    log(f"[{email}] Truy cập Grok referral: {target_url}", "INFO")
     for _ in range(3):
         try:
-            driver.get(GROK_URL)
+            driver.get(target_url)
             time.sleep(3)
             break
         except:
@@ -416,302 +509,292 @@ def worker_loop(driver, email, password, acc_info, mail_api_source="mixmmo", ope
             time.sleep(2)
             continue
 
-        # ── Xác định trạng thái hiện tại ─────────────────
-        state = "LOADING"
+        state = "CHECKING"
 
-        if "accounts.x.ai" in url:
-
-            # --- Dashboard: tạo acc thành công ---
-            if url.endswith("/account") or "/account/" in url or url.endswith("/dashboard") or "/dashboard/" in url:
-                state = "DASHBOARD"
-                if state != last_state:
-                    log(f"[{email}] ✅ Đã vào dashboard! Đăng ký thành công.", "OK")
-                    if not saved:
-                        save_account(email, password)
-                        saved = True
-                time.sleep(2)
-                if open_payment or apple_pay:
-                    log(f"[{email}] Mở link thanh toán...", "INFO")
-                    try:
-                        driver.get("https://grok.com")
-                        log(f"[{email}] Chờ 5 giây cho trang chủ tải...", "INFO")
-                        time.sleep(5)
-                        
-                        log(f"[{email}] Tìm nút đen xác nhận điều khoản...", "INFO")
-                        try:
-                            # Nút confirm thường là button có class/text cụ thể
-                            confirm_btn = _find(driver, By.XPATH, "//button[contains(., 'Confirm') or contains(., 'Agree') or contains(., '확인')]")
-                            if not confirm_btn:
-                                confirm_btn = _find(driver, By.CSS_SELECTOR, "button[data-slot='button']")
-                            
-                            if confirm_btn:
-                                try_click(driver, confirm_btn)
-                                log(f"[{email}] Đã bấm xác nhận điều khoản!", "OK")
-                            else:
-                                log(f"[{email}] Không tìm thấy nút xác nhận, bỏ qua...", "WARN")
-                        except Exception as e:
-                            log(f"[{email}] Lỗi khi bấm xác nhận: {e}", "ERR")
-                            
-                        log(f"[{email}] Chờ 4 giây hoàn tất xác nhận...", "INFO")
-                        time.sleep(4)
-                        
-                        try:
-                            import json, os
-                            os.makedirs("data/cookies", exist_ok=True)
-                            with open(f"data/cookies/{email}.json", "w", encoding="utf-8") as f:
-                                json.dump(driver.get_cookies(), f)
-                        except:
-                            pass
-                        
-                        payment_url = "https://www.google.com/url?q=https://click.email.grok.com/f/a/D44YCrJINRlgI2nErQ2N4w~~/AAQRxRA~/o0ricJbDY0rYPxCddFIDNRk2rG8EhS26KMn4apYEY-nr5FVszrYVqzImlPsu8vfrgKF0FDNuaRbdv6FpHk28pqS1U_QbRThaJXq2gQ5kS6Kq7PHN-qbhqmI_S0v4c8kwZLpv5MxoCt4-NHuKiAbRNfuKPaKKadwrK5qyXW_4DV1SmDj5rbIN58HAqOsDJvZ-txKf9S5c34i5kRa3cvXLZorKvePXynuJgcjyNYlFAV4brCqx9YfZ3Z_BUQyMWuXKZ5JA_JUVoqaxMmhKIEYLegWBe__10w_McQJSnoGwLvmHAOlVMZ0F5HNP-vOv97LJ6Dx_K4DkAG4PTT5S3sa2ruUinHy0N6kNLDFqGishvN7zb_NyaCc6vZZNHXbB1oiafAQlED9USuI_1dpIfm8IUNnCJ-3TVkFOtU5o3b4bBKk~&source=gmail&ust=1788539378411000&usg=AOvVaw1j8Snr-3bNvMemb1zmc57D"
-                        driver.switch_to.new_window('tab')
-                        driver.get(payment_url)
-                        
-                        has_reloaded_tmr = False
-                        start_time = time.time()
-                        while time.time() - start_time < 90:
-                            current_url = driver.current_url
-                            
-                            if not has_reloaded_tmr and "Too Many Requests" in driver.page_source:
-                                log(f"[{email}] Bị Too Many Requests, chờ 15s rồi load lại...", "WARN")
-                                time.sleep(15)
-                                driver.refresh()
-                                has_reloaded_tmr = True
-                                time.sleep(5)
-                                continue
-                            
-                            if "/tos-gate" in current_url:
-                                log(f"[{email}] Đang xác nhận TOS, chờ 5s...", "INFO")
-                                time.sleep(5)
-                                tos_btn = _find(driver, By.CSS_SELECTOR, "button[data-slot='button']")
-                                if tos_btn:
-                                    try_click(driver, tos_btn)
-                                    time.sleep(3)
-                                    driver.get(payment_url)
-                                    time.sleep(2)
-                                    start_time = time.time()
-                                    continue
-                            
-                            redirect_link = _find(driver, By.CSS_SELECTOR, 'a[href^="/goto?url="], a[href^="/url?q="]')
-                            if redirect_link:
-                                try_click(driver, redirect_link)
-                                time.sleep(2)
-                                start_time = time.time()
-                                continue
-                                
-                            claim_btn = _find(driver, By.XPATH, "//button[contains(., 'Claim') or contains(., '무료 혜택 받기')]")
-                            if claim_btn:
-                                try_click(driver, claim_btn)
-                                log(f"[{email}] Đã click Claim offer!", "INFO")
-                                time.sleep(5)
-                                start_time = time.time()
-                                continue
-                                
-                            # Stripe Checkout
-                            if "checkout.stripe.com" in current_url:
-                                if apple_pay:
-                                    log(f"[{email}] Đã dừng ở trang Checkout để bạn tự thanh toán Apple Pay!", "OK")
-                                    masked_email = email[:3] + "***" + email[email.find("@"):] if "@" in email else email[:3] + "***"
-                                    send_telegram_message(f"🍏 Đã dừng ở trang Checkout (Apple Pay)\nEmail: {masked_email}")
-                                    return True
-                                    
-                                kakao_btn = _find(driver, By.CSS_SELECTOR, '[data-testid="kakao_pay-accordion-item"]')
-                                if kakao_btn:
-                                    try_click(driver, kakao_btn)
-                                    time.sleep(1)
-                                
-                                submit_btn = _find(driver, By.CSS_SELECTOR, 'button[data-testid="hosted-payment-submit-button"]')
-                                if submit_btn:
-                                    try_click(driver, submit_btn)
-                                    log(f"[{email}] Đã chọn KakaoPay và thanh toán Stripe!", "OK")
-                                    time.sleep(5)
-                                    if "nicepay.co.kr" in driver.current_url:
-                                        log(f"[{email}] Đã chuyển qua cổng NicePay thành công!", "OK")
-                                        final_link = driver.current_url
-                                        masked_email = email[:3] + "***" + email[email.find("@"):] if "@" in email else email[:3] + "***"
-                                        if payment_mode == "manual":
-                                            # Chỉ gửi link qua Telegram, không gọi Masa168
-                                            log(f"[{email}] Chế độ quét tay — gửi link NicePay qua Telegram.", "OK")
-                                            send_telegram_message(
-                                                f"💳 Link thanh toán NicePay (Quét tay):\nEmail: {masked_email}\n{final_link}"
-                                            )
-                                        else:
-                                            msg = f"🎉 Đăng ký thành công!\nEmail: {masked_email}\nLink thanh toán NicePay:\n{final_link}"
-                                            send_telegram_message(msg)
-                                            masa_token = get_db_setting("MASA_TOKEN", "")
-                                            submit_to_masa_api(final_link, email, masa_token, send_telegram_message, lambda txt, lvl="INFO": log(f"[{email}] {txt}", lvl))
-                                    break
-                                
-                            time.sleep(1)
-                    except Exception as e:
-                        log(f"[{email}] Lỗi mở link thanh toán: {str(e)}", "ERR")
-                return True
-
-            # --- Bước 4: Điền tên + mật khẩu + Turnstile ---
-            elif _find(driver, By.CSS_SELECTOR, 'input[data-testid="givenName"], input[name="givenName"]'):
-                state = "STEP4_COMPLETE"
-                if state != last_state:
-                    log(f"[{email}] Bước 4: Điền tên, mật khẩu, chờ Turnstile...", "INFO")
-
-                if not names_filled:
-                    try:
-                        # First name
-                        f_inp = _find(driver, By.CSS_SELECTOR, 'input[data-testid="givenName"], input[name="givenName"]')
-                        if f_inp and not f_inp.get_attribute("value"):
-                            _set_react_value(driver, f_inp, _rand_name())
-
-                        # Last name
-                        l_inp = _find(driver, By.CSS_SELECTOR, 'input[data-testid="familyName"], input[name="familyName"]')
-                        if l_inp and not l_inp.get_attribute("value"):
-                            _set_react_value(driver, l_inp, _rand_name())
-
-                        # Password
-                        p_inp = _find(driver, By.CSS_SELECTOR, 'input[data-testid="password"], input[name="password"]')
-                        if p_inp and not p_inp.get_attribute("value"):
-                            _set_react_value(driver, p_inp, password)
-
-                        names_filled = True
-                        log(f"[{email}] Đã điền tên và mật khẩu, chờ Turnstile...", "INFO")
-                    except Exception as ex:
-                        log(f"[{email}] Lỗi điền tên: {ex}", "WARN")
-
-                # Chờ Turnstile hoàn thành (cf-turnstile-response có giá trị)
-                try:
-                    cf_val = driver.execute_script(
-                        "var el = document.querySelector('input[name=\"cf-turnstile-response\"]'); return el ? el.value : '';"
-                    )
-                    if cf_val and len(cf_val) > 20:
-                        log(f"[{email}] Turnstile OK! Click Complete sign up...", "INFO")
-                        btn = _find(driver, By.XPATH, "//button[@type='submit' and contains(., 'Complete sign up')]")
-                        if btn:
-                            try_click(driver, btn, "Complete sign up")
-                            time.sleep(4)
-                        else:
-                            log(f"[{email}] Không tìm thấy nút Complete sign up!", "WARN")
-                    else:
-                        log(f"[{email}] Chờ Turnstile... (còn chờ)", "INFO")
-                except Exception as ex:
-                    log(f"[{email}] Lỗi check Turnstile: {ex}", "WARN")
-
-            # --- Bước 3: OTP 6 số ---
-            elif _find(driver, By.CSS_SELECTOR, 'input[data-input-otp="true"], input[name="code"]'):
-                state = "STEP3_OTP"
-                if state != last_state:
-                    log(f"[{email}] Bước 3: Chờ OTP xAI 6 số...", "INFO")
-
-                if not otp_fetched:
-                    otp = wait_for_otp_hotmail(
-                        acc_info["email"], acc_info["password"],
-                        acc_info["refresh_token"], acc_info["client_id"],
-                        timeout=120, interval=4, mail_api_source=mail_api_source
-                    )
-                    if otp:
-                        otp_fetched = True
-                        log(f"[{email}] OTP = {otp}, đang nhập...", "INFO")
-                        # Nhập vào input[data-input-otp] (OTP widget ẩn)
-                        try:
-                            otp_inp = driver.find_element(By.CSS_SELECTOR, 'input[data-input-otp="true"]')
-                            driver.execute_script("arguments[0].focus();", otp_inp)
-                            time.sleep(0.3)
-                            # Send từng ký tự
-                            for ch in otp:
-                                otp_inp.send_keys(ch)
-                                time.sleep(0.1)
-                            otp_entered = True
-                            log(f"[{email}] Đã nhập OTP {otp}", "OK")
-                            time.sleep(1)
-                            # Click Confirm email
-                            btn = _find(driver, By.XPATH, "//button[@type='submit' and contains(., 'Confirm email')]")
-                            if btn:
-                                try_click(driver, btn, "Confirm email")
-                                time.sleep(3)
-                        except Exception as ex:
-                            log(f"[{email}] Lỗi nhập OTP: {ex}", "WARN")
-                    else:
-                        log(f"[{email}] Không nhận được OTP! Dừng.", "ERR")
-                        return False
-
-                elif otp_entered:
-                    # Check for invalid OTP message
-                    invalid_msg = driver.execute_script("return document.body.innerText.toLowerCase().includes('invalid') || document.body.innerText.toLowerCase().includes('expired') || document.body.innerText.toLowerCase().includes('incorrect');")
-                    if invalid_msg:
-                        log(f"[{email}] Mã OTP bị lỗi hoặc hết hạn! Yêu cầu gửi lại mã mới...", "WARN")
-                        resend_btn = _find(driver, By.XPATH, "//button[contains(., 'Resend')] | //a[contains(., 'Request a new one')] | //button[contains(., 'Request a new one')] | //span[contains(., 'Resend')]")
-                        if resend_btn:
-                            try_click(driver, resend_btn, "Resend")
-                            time.sleep(3)
-                        # Đặt lại trạng thái để lấy mã mới
-                        otp_fetched = False
-                        otp_entered = False
-                        confirm_retries = 0
-                        continue
-
-                    # Vẫn còn trên trang OTP sau khi đã nhập → thử click Confirm lại
-                    btn = _find(driver, By.XPATH, "//button[@type='submit' and contains(., 'Confirm email')]")
-                    if btn:
-                        confirm_retries += 1
-                        if confirm_retries > 3:
-                            log(f"[{email}] Lỗi xác nhận OTP nhiều lần (có thể mail lỗi/OTP sai)! Bỏ qua.", "ERR")
-                            return False
-                        log(f"[{email}] Click lại Confirm email... ({confirm_retries}/3)", "WARN")
-                        try_click(driver, btn, "Confirm email")
-                        time.sleep(3)
-
-            # --- Bước 2: Nhập email ---
-            elif _find(driver, By.CSS_SELECTOR, 'input[data-testid="email"], input[name="email"]'):
-                state = "STEP2_EMAIL"
-                if state != last_state:
-                    log(f"[{email}] Bước 2: Nhập email...", "INFO")
-                try:
-                    inp = _find(driver, By.CSS_SELECTOR, 'input[data-testid="email"], input[name="email"]')
-                    if inp:
-                        # Set value bằng JS React-compatible
-                        _set_react_value(driver, inp, email)
-                        time.sleep(0.5)
-                        # Click Sign up ngay sau khi nhập email
-                        btn = _find(driver, By.XPATH, "//button[@type='submit' and contains(., 'Sign up')]")
-                        if btn:
-                            log(f"[{email}] Click Sign up...", "INFO")
-                            try_click(driver, btn, "Sign up")
-                            time.sleep(3)
-                except Exception as ex:
-                    log(f"[{email}] Lỗi nhập email: {ex}", "WARN")
-
-            # --- Bước 1: Click "Sign up with email" ---
-            elif _find(driver, By.XPATH, "//button[.//text()[contains(., 'Sign up with email')]]"):
-                state = "STEP1_CHOOSE"
-                if state != last_state:
-                    log(f"[{email}] Bước 1: Click 'Sign up with email'...", "INFO")
-                btn = _find(driver, By.XPATH, "//button[.//text()[contains(., 'Sign up with email')]]")
-                if btn:
-                    try_click(driver, btn, "Sign up with email")
-                    time.sleep(2)
-
-            else:
-                # Đang loading / Cloudflare challenge
-                state = "WAITING"
-                if state != last_state:
-                    log(f"[{email}] Đang chờ trang load / bypass Cloudflare...", "INFO")
-                stuck_count += 1
-                if stuck_count > 60:  # 2 phút vẫn chưa vào được
-                    log(f"[{email}] Timeout chờ trang x.ai (blocked?)!", "ERR")
-                    return False
-
-        elif saved:
-            # Đã lưu, trang khác (redirect) → thành công
+        # ── 1. ĐÃ TỚI TRANG PLANS (HOÀN TẤT) ─────────────────
+        # CHỈ ĐƯỢC COI LÀ HOÀN TẤT KHI ĐÃ QUA BƯỚC ĐĂNG KÝ (account_created hoặc age_submitted)!
+        if (account_created or age_submitted) and ("/plans" in url or (saved and "grok.com" in url)):
+            if not saved:
+                save_account(email, password)
+                saved = True
+            log(f"[{email}] ✅ Đã tạo tài khoản và chuyển tới trang plans ({url})! Hoàn tất.", "OK")
+            masked_email = email[:3] + "***" + email[email.find("@"):] if "@" in email else email[:3] + "***"
+            send_telegram_message(f"🎉 Đăng ký Grok referral thành công!\nEmail: {masked_email}\nĐã tới grok.com/plans.\nTab trình duyệt đang được giữ nguyên.")
+            log(f"[{email}] Giữ nguyên tab trình duyệt để bạn thực hiện bước tiếp theo.", "OK")
             return True
 
-        else:
-            state = "OTHER"
-            stuck_count += 1
-            if stuck_count > 30:
-                log(f"[{email}] Timeout ở trang lạ: {url}", "ERR")
-                return False
+        # ── 2. NÚT 'Choose a plan' (Free trial not available) ──
+        # CHỈ ĐƯỢC BẤM KHI ĐÃ QUA BƯỚC TẠO TÀI KHOẢN
+        if account_created or age_submitted:
+            trial_title = _find(driver, By.CSS_SELECTOR, '[data-testid="referral-trial-title"]')
+            choose_plan_btn = _find(driver, By.CSS_SELECTOR, '[data-testid="referral-trial-choose-plan"]')
+            if not choose_plan_btn and trial_title:
+                choose_plan_btn = _find(driver, By.XPATH, "//a[contains(., 'Choose a plan')] | //button[contains(., 'Choose a plan')]")
+            if choose_plan_btn:
+                state = "CHOOSE_PLAN"
+                if state != last_state:
+                    log(f"[{email}] Màn hình thông báo Trial không khả dụng -> Click 'Choose a plan'...", "INFO")
+                try_click(driver, choose_plan_btn, "Choose a plan")
+                time.sleep(3)
+                last_state = state
+                stuck_count = 0
+                continue
 
-        if state != "WAITING" and state != "OTHER":
+        # ── 3. BƯỚC OTP ("Check your email") ──────────────────
+        otp_inp = _find(driver, By.CSS_SELECTOR, 'input[data-input-otp="true"], input[autocomplete="one-time-code"]')
+        if not otp_inp:
+            has_otp_text = _find(driver, By.XPATH, "//*[contains(text(), 'Check your email')]")
+            if has_otp_text:
+                otp_inp = _find(driver, By.CSS_SELECTOR, 'input[name="code"], input[inputmode="numeric"]')
+
+        if otp_inp:
+            state = "CHECK_EMAIL_OTP"
+            email_submitted = True
+            if state != last_state:
+                log(f"[{email}] Màn hình 'Check your email' -> Chờ lấy mã OTP mới...", "INFO")
+
+            if not otp_fetched:
+                # Đảm bảo chờ ít nhất 5s sau khi submit email để mail kịp tới
+                if email_sent_time > 0 and (time.time() - email_sent_time) < 5:
+                    time.sleep(4)
+
+                otp = wait_for_otp_hotmail(
+                    acc_info["email"], acc_info["password"],
+                    acc_info["refresh_token"], acc_info["client_id"],
+                    timeout=150, interval=4, mail_api_source=mail_api_source,
+                    min_timestamp=email_sent_time, ignored_codes=invalid_otps
+                )
+                if otp:
+                    clean_otp = re.sub(r'\D', '', str(otp))
+                    if len(clean_otp) == 6:
+                        otp = clean_otp
+                    otp_fetched = True
+                    last_tried_otp = otp
+                    log(f"[{email}] Nhận mã OTP mới: {otp}. Đang nhập vào form...", "OK")
+                    try:
+                        driver.execute_script("""
+                            var el = arguments[0];
+                            el.focus();
+                            el.click();
+                            el.value = '';
+                        """, otp_inp)
+                        time.sleep(0.2)
+                    except: pass
+                    for ch in otp:
+                        otp_inp.send_keys(ch)
+                        time.sleep(0.12)
+                    otp_entered = True
+                    time.sleep(0.5)
+
+                    try:
+                        driver.execute_script("""
+                            var el = arguments[0];
+                            el.dispatchEvent(new Event('input', { bubbles: true }));
+                            el.dispatchEvent(new Event('change', { bubbles: true }));
+                        """, otp_inp)
+                    except: pass
+                    time.sleep(1)
+
+                    v_btn = _find(driver, By.XPATH, "//button[@type='submit'] | //button[contains(., 'Verify') or contains(., 'Confirm') or contains(., 'Continue') or contains(., 'Xác minh') or contains(., 'Tiếp tục')]")
+                    if not v_btn:
+                        v_btn = _find(driver, By.CSS_SELECTOR, "form button[type='submit'], button[type='submit']")
+                    if v_btn:
+                        log(f"[{email}] Bấm nút Verify/Continue OTP...", "INFO")
+                        try_click(driver, v_btn, "Verify OTP")
+                        otp_submitted = True
+                        time.sleep(3)
+                else:
+                    log(f"[{email}] Không lấy được OTP sau 150s! Dừng.", "ERR")
+                    return False
+            elif otp_entered:
+                is_invalid = driver.execute_script("return document.body.innerText.toLowerCase().includes('invalid') || document.body.innerText.toLowerCase().includes('expired') || document.body.innerText.toLowerCase().includes('incorrect');")
+                if is_invalid:
+                    log(f"[{email}] Mã OTP {last_tried_otp} bị sai hoặc hết hạn! Bấm gửi lại mã mới...", "WARN")
+                    if last_tried_otp:
+                        invalid_otps.add(last_tried_otp)
+                    resend_btn = _find(driver, By.XPATH, "//button[contains(., 'Resend') or contains(., 'Request a new one')]")
+                    if resend_btn:
+                        try_click(driver, resend_btn, "Resend")
+                        email_sent_time = time.time()
+                        time.sleep(4)
+                    otp_fetched = False
+                    otp_entered = False
+                    continue
+
+                v_btn = _find(driver, By.XPATH, "//button[@type='submit'] | //button[contains(., 'Verify') or contains(., 'Confirm') or contains(., 'Continue') or contains(., 'Xác minh') or contains(., 'Tiếp tục')]")
+                if not v_btn:
+                    v_btn = _find(driver, By.CSS_SELECTOR, "form button[type='submit'], button[type='submit']")
+                if v_btn:
+                    confirm_retries += 1
+                    if confirm_retries > 3:
+                        log(f"[{email}] Lỗi xác nhận OTP nhiều lần! Dừng.", "ERR")
+                        return False
+                    log(f"[{email}] Click lại nút Verify ({confirm_retries}/3)...", "WARN")
+                    try_click(driver, v_btn, "Verify OTP")
+                    time.sleep(3)
+
+            last_state = state
             stuck_count = 0
+            continue
 
-        last_state = state
+        # ── 4. BƯỚC ĐIỀN TÊN + MẬT KHẨU ("Create account") ─────
+        pw_inp = _find(driver, By.CSS_SELECTOR, 'input#signup-password, input[autocomplete="new-password"], input[data-testid="password"], input[name="password"]')
+        first_inp = _find(driver, By.CSS_SELECTOR, 'input#signup-given-name, input[autocomplete="given-name"], input[data-testid="givenName"], input[name="givenName"]')
+        if pw_inp and first_inp:
+            state = "CREATE_ACCOUNT"
+            if state != last_state:
+                log(f"[{email}] Màn hình 'Create account' -> Điền tên, mật khẩu, chờ Turnstile...", "INFO")
+
+            if not first_inp.get_attribute("value"):
+                _set_react_value(driver, first_inp, _rand_name(5))
+                time.sleep(0.2)
+
+            last_inp = _find(driver, By.CSS_SELECTOR, 'input#signup-family-name, input[autocomplete="family-name"], input[data-testid="familyName"], input[name="familyName"]')
+            if last_inp and not last_inp.get_attribute("value"):
+                _set_react_value(driver, last_inp, _rand_name(6))
+                time.sleep(0.2)
+
+            if not pw_inp.get_attribute("value"):
+                _set_react_value(driver, pw_inp, password)
+                time.sleep(0.3)
+
+            # Chờ Cloudflare Turnstile hoặc form sẵn sàng
+            try:
+                cf_val = driver.execute_script(
+                    "var el = document.querySelector('input[name=\"cf-turnstile-response\"]'); return el ? el.value : '';"
+                )
+                create_btn = _find(driver, By.XPATH, "//button[@type='submit' and (contains(., 'Create account') or contains(., 'Complete sign up') or contains(., 'Tạo tài khoản'))]")
+                if not create_btn:
+                    create_btn = _find(driver, By.CSS_SELECTOR, "form button[type='submit'], button[type='submit']")
+
+                is_btn_ready = False
+                if create_btn:
+                    try:
+                        dis = create_btn.get_attribute("disabled")
+                        aria_dis = create_btn.get_attribute("aria-disabled")
+                        is_btn_ready = (dis is None or dis == "false") and aria_dis != "true"
+                    except:
+                        is_btn_ready = True
+
+                if (cf_val and len(cf_val) > 20) or is_btn_ready:
+                    if create_btn:
+                        log(f"[{email}] Turnstile OK / Nút submit sẵn sàng! Bấm 'Create account'...", "OK")
+                        try_click(driver, create_btn, "Create account")
+                        account_created = True
+                        time.sleep(4)
+                else:
+                    log(f"[{email}] Đang chờ Turnstile giải captcha...", "INFO")
+                    time.sleep(2)
+            except Exception as ex:
+                log(f"[{email}] Lỗi kiểm tra Turnstile: {ex}", "WARN")
+
+            last_state = state
+            stuck_count = 0
+            continue
+
+        # ── 5. BƯỚC AGE GATE ("How old are you?") ──────────────
+        # BẮT BUỘC nhận diện tiêu đề hoặc nhãn "How old are you"
+        how_old_title = _find(driver, By.XPATH, "//h1[contains(., 'How old are you') or contains(., 'bao nhiêu tuổi')] | //*[contains(text(), 'How old are you') or contains(text(), 'bao nhiêu tuổi')]")
+        if how_old_title:
+            age_inp = _find(driver, By.CSS_SELECTOR, 'input#_r_9_, input[maxlength="3"], input[inputmode="numeric"]')
+            if not age_inp:
+                age_inp = _find(driver, By.XPATH, "//label[contains(., 'Age')]/following::input[1]")
+            if age_inp:
+                state = "AGE_GATE"
+                account_created = True
+                if state != last_state:
+                    log(f"[{email}] Màn hình 'How old are you?' -> Điền tuổi trên 18...", "INFO")
+
+                name_inp = _find(driver, By.CSS_SELECTOR, 'input[autocomplete="name"], input#_r_8_')
+                if name_inp and not name_inp.get_attribute("value"):
+                    _set_react_value(driver, name_inp, f"{_rand_name(5)} {_rand_name(6)}")
+                    time.sleep(0.2)
+
+                rand_age = str(random.randint(21, 29))
+                _set_react_value(driver, age_inp, rand_age)
+                time.sleep(0.5)
+
+                cont_btn = _find(driver, By.XPATH, "//button[@type='submit' and (contains(., 'Continue') or contains(., 'Tiếp tục'))]")
+                if not cont_btn:
+                    cont_btn = _find(driver, By.CSS_SELECTOR, "form button[type='submit']")
+                if cont_btn:
+                    try_click(driver, cont_btn, "Age Continue")
+                    age_submitted = True
+                    time.sleep(3)
+                last_state = state
+                stuck_count = 0
+                continue
+
+        # ── 6. FORM NHẬP EMAIL ────────────────────────────────
+        email_inp = _find(driver, By.CSS_SELECTOR, 'input#auth-email, input[data-testid="email"], input[autocomplete="email"], input[type="email"]')
+        if email_inp:
+            state = "ENTER_EMAIL"
+            if state != last_state:
+                log(f"[{email}] Thấy form đăng ký -> Nhập email: {email}...", "INFO")
+            try:
+                _set_react_value(driver, email_inp, email)
+                time.sleep(0.5)
+                cont_btn = _find(driver, By.XPATH, "//form//button[@type='submit' and (contains(., 'Continue') or contains(., 'Sign up'))]")
+                if not cont_btn:
+                    cont_btn = _find(driver, By.CSS_SELECTOR, "form button[type='submit']")
+                if cont_btn:
+                    log(f"[{email}] Bấm nút Continue gửi email...", "INFO")
+                    try_click(driver, cont_btn, "Email Continue")
+                    email_submitted = True
+                    email_sent_time = time.time()
+                    time.sleep(4)
+            except Exception as ex:
+                log(f"[{email}] Lỗi nhập email: {ex}", "WARN")
+
+            last_state = state
+            stuck_count = 0
+            continue
+
+        # ── 7. NÚT 'Start your 14 day free trial' ─────────────
+        trial_btn = _find(driver, By.CSS_SELECTOR, '[data-testid="referral-trial-sign-up"]')
+        if not trial_btn:
+            trial_btn = _find(driver, By.XPATH, "//button[contains(., 'Start your 14 day free trial') or contains(., 'free trial')]")
+        if trial_btn:
+            state = "START_TRIAL"
+            if state != last_state:
+                log(f"[{email}] Thấy nút 'Start your 14 day free trial' -> Click...", "INFO")
+            try_click(driver, trial_btn, "Start trial")
+            time.sleep(3)
+            last_state = state
+            stuck_count = 0
+            continue
+
+        # ── 8. NÚT 'Sign up with email' (nếu có lựa chọn) ────
+        signup_email_btn = _find(driver, By.XPATH, "//button[.//text()[contains(., 'Sign up with email')]]")
+        if signup_email_btn:
+            state = "CHOOSE_EMAIL_METHOD"
+            if state != last_state:
+                log(f"[{email}] Click 'Sign up with email'...", "INFO")
+            try_click(driver, signup_email_btn, "Sign up with email")
+            time.sleep(2)
+            last_state = state
+            stuck_count = 0
+            continue
+
+        # ── 9. Dashboard (chỉ khi đã submit form và vào /account hoặc /dashboard) ──
+        if (account_created or age_submitted) and "accounts.x.ai" in url and (url.endswith("/account") or "/account/" in url or url.endswith("/dashboard") or "/dashboard/" in url):
+            state = "DASHBOARD"
+            if not saved:
+                save_account(email, password)
+                saved = True
+            log(f"[{email}] ✅ Đã vào dashboard! Đăng ký thành công.", "OK")
+            masked_email = email[:3] + "***" + email[email.find("@"):] if "@" in email else email[:3] + "***"
+            send_telegram_message(f"🎉 Đăng ký Grok thành công!\nEmail: {masked_email}\nĐã vào Dashboard. Giữ nguyên tab trình duyệt.")
+            return True
+
+        # Đang loading / chờ
+        stuck_count += 1
+        if stuck_count % 10 == 0:
+            log(f"[{email}] Đang chờ trang tải hoặc phản hồi ({stuck_count}s)...", "INFO")
+        if stuck_count > 60:
+            log(f"[{email}] Timeout chờ giao diện phản hồi (URL: {url})!", "ERR")
+            return False
+
         time.sleep(2)
 
 
@@ -762,28 +845,33 @@ def _set_react_value(driver, element, value):
     """Set value cho React controlled input bằng nativeInputValueSetter."""
     try:
         driver.execute_script("""
-            var nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-            nativeInputValueSetter.call(arguments[0], arguments[1]);
-            arguments[0].dispatchEvent(new Event('input', { bubbles: true }));
-            arguments[0].dispatchEvent(new Event('change', { bubbles: true }));
+            var el = arguments[0];
+            var val = arguments[1];
+            el.focus();
+            var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+            setter.call(el, val);
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
         """, element, str(value))
         time.sleep(0.1)
-    except:
-        # Fallback: gõ từng phím
-        from selenium.webdriver.common.keys import Keys
-        try:
+    except Exception:
+        pass
+    # Nếu React chưa nhận giá trị, fallback gõ bằng send_keys
+    try:
+        if element.get_attribute("value") != str(value):
+            from selenium.webdriver.common.keys import Keys
             element.click()
             element.send_keys(Keys.CONTROL + "a")
             element.send_keys(Keys.DELETE)
             for ch in str(value):
                 element.send_keys(ch)
-                time.sleep(0.03)
-        except:
-            pass
+                time.sleep(0.02)
+    except:
+        pass
 
 
 def register_one_account(index, keep_open=False, batch_size=3, headless=False,
-                         browser_type="uc", mail_api_source="mixmmo", use_proxy=False, open_payment=False, apple_pay=False, language="en-US", payment_mode="masa"):
+                         browser_type="uc", mail_api_source="mixmmo", use_proxy=False, open_payment=False, apple_pay=False, language="en-US", payment_mode="masa", refer_link=""):
     global ACTIVE_DRIVERS
     acc = None
     driver = None
@@ -798,24 +886,26 @@ def register_one_account(index, keep_open=False, batch_size=3, headless=False,
         password = PASSWORD
         log(f"[Worker {index}] Đăng ký Grok với: {email}", "INFO")
 
-        driver = setup_driver(index, keep_open=keep_open, batch_size=batch_size,
+        # Luôn giữ trình duyệt mở khi thành công để user thao tác bước tiếp theo
+        _keep_open = True
+        driver = setup_driver(index, keep_open=_keep_open, batch_size=batch_size,
                               headless=headless, browser_type=browser_type, use_proxy=use_proxy, language=language)
-        if keep_open or open_payment or apple_pay:
-            ACTIVE_DRIVERS[email] = driver
+        ACTIVE_DRIVERS[email] = driver
 
-        result = worker_loop(driver, email, password, acc, mail_api_source=mail_api_source, open_payment=open_payment, apple_pay=apple_pay, language=language, payment_mode=payment_mode)
+        result = worker_loop(driver, email, password, acc, mail_api_source=mail_api_source, open_payment=open_payment, apple_pay=apple_pay, language=language, payment_mode=payment_mode, refer_link=refer_link)
         if result:
             mark_hotmail_used(acc)
-            log(f"[{email}] ✅ Đăng ký Grok thành công!", "OK")
+            log(f"[{email}] ✅ Đăng ký Grok thành công! Giữ tab trình duyệt để bạn thao tác tiếp.", "OK")
         else:
             log(f"[{email}] ❌ Đăng ký Grok thất bại!", "ERR")
+            try:
+                driver.quit()
+                ACTIVE_DRIVERS.pop(email, None)
+            except:
+                pass
         return result
     except Exception as e:
         log(f"LỖI worker Grok {index}: {e}", "ERR")
         return False
     finally:
-        if driver and not (keep_open or open_payment or apple_pay):
-            try:
-                driver.quit()
-            except:
-                pass
+        pass

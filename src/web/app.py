@@ -2583,8 +2583,11 @@ def grok_task_start():
     cards = data.get("cards", [])
     # 'masa' = tự động qua Masa168 API | 'manual' = chỉ gửi link qua Telegram
     payment_mode = data.get("payment_mode", "masa")
+    refer_link = data.get("refer_link", "").strip()
 
     state_grok.task_stop.clear()
+    # Khi chạy luồng mới, tự động đóng các trình duyệt của phiên cũ (nếu có)
+    grok_close_browsers()
     while not state_grok.log_queue.empty():
         try: state_grok.log_queue.get_nowait()
         except: break
@@ -2601,7 +2604,7 @@ def grok_task_start():
     state_grok.is_running = True
     state_grok.task_thread = threading.Thread(
         target=_run_grok_task,
-        args=(count, threads, browser_type, headless, mail_type, mail_api_source, open_payment, apple_pay, language, cards, payment_mode),
+        args=(count, threads, browser_type, headless, mail_type, mail_api_source, open_payment, apple_pay, language, cards, payment_mode, refer_link),
         daemon=True
     )
     state_grok.task_thread.start()
@@ -2642,7 +2645,7 @@ def grok_task_stream():
     return Response(stream_with_context(generate()), mimetype="text/event-stream",
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
-def _run_grok_task(count, threads, browser_type, headless, mail_type, mail_api_source, open_payment, apple_pay, language, cards=None, payment_mode='masa'):
+def _run_grok_task(count, threads, browser_type, headless, mail_type, mail_api_source, open_payment, apple_pay, language, cards=None, payment_mode='masa', refer_link=""):
     import importlib
     try:
         root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -2657,6 +2660,7 @@ def _run_grok_task(count, threads, browser_type, headless, mail_type, mail_api_s
             mod_name = "src.bots.grok_billing"
             
         state_grok.module = importlib.import_module(mod_name)
+        state_grok.module = importlib.reload(state_grok.module)
         bot = state_grok.module
         bot.log = state_grok.log
         bot.GLOBAL_STOP_EVENT = state_grok.task_stop
@@ -2691,7 +2695,7 @@ def _run_grok_task(count, threads, browser_type, headless, mail_type, mail_api_s
                         i, keep_open=False, batch_size=threads,
                         headless=headless, browser_type=browser_type,
                         mail_api_source=mail_api_source, open_payment=open_payment, language=language,
-                        payment_mode=payment_mode
+                        payment_mode=payment_mode, refer_link=refer_link
                     )
                     state_grok.log_queue.put(json.dumps({"type": "result", "success": bool(res)}))
                     if res: done["ok"] += 1
@@ -2744,7 +2748,7 @@ def _run_grok_task(count, threads, browser_type, headless, mail_type, mail_api_s
                 res = bot.register_one_account(
                     i, count=count, keep_open=False, batch_size=threads,
                     headless=headless, browser_type=browser_type, open_payment=open_payment, language=language,
-                    payment_mode=payment_mode
+                    payment_mode=payment_mode, refer_link=refer_link
                 )
                 state_grok.log_queue.put(json.dumps({"type": "result", "success": bool(res)}))
                 if res: done["ok"] += 1
