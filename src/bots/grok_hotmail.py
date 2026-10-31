@@ -323,7 +323,7 @@ def get_rotated_proxy():
 
 def setup_driver(index=1, keep_open=False, batch_size=3, headless=False, browser_type="uc", use_proxy=False, language="en-US"):
     from .browser_utils import get_window_bounds
-    window_width, window_height, x, _ = get_window_bounds(index, batch_size, zero_based_index=False)
+    window_width, window_height, x, y = get_window_bounds(index, batch_size, zero_based_index=False)
 
     if browser_type.lower() == "firefox":
         from selenium import webdriver
@@ -339,7 +339,7 @@ def setup_driver(index=1, keep_open=False, batch_size=3, headless=False, browser
             from webdriver_manager.firefox import GeckoDriverManager
             from selenium.webdriver.firefox.service import Service as FxService
             driver = webdriver.Firefox(service=FxService(GeckoDriverManager().install()), options=options)
-        driver.set_window_position(x, 0)
+        driver.set_window_position(x, y)
         return driver
 
     # Chrome / UC (undetected_chromedriver) — bypass Cloudflare x.ai
@@ -360,7 +360,7 @@ def setup_driver(index=1, keep_open=False, batch_size=3, headless=False, browser
             options._uc_prefs = {}
         options.add_experimental_option('prefs', {'intl.accept_languages': lang_pref})
         options.add_argument(f"--window-size={window_width},{window_height}")
-        options.add_argument(f"--window-position={x},0")
+        options.add_argument(f"--window-position={x},{y}")
         if headless:
             options.add_argument("--headless=new")
         # Không dùng detach với undetected_chromedriver vì sẽ gây lỗi crash 'unrecognized chrome option: detach'
@@ -377,10 +377,10 @@ def setup_driver(index=1, keep_open=False, batch_size=3, headless=False, browser
                 else:
                     raise e
             try:
-                driver.set_window_rect(x=x, y=0, width=window_width, height=window_height)
+                driver.set_window_rect(x=x, y=y, width=window_width, height=window_height)
             except:
                 pass
-        log(f"[Worker {index}] Dùng Undetected Chrome", "INFO")
+        log(f"[Worker {index}] Dùng Undetected Chrome (Vị trí: x={x}, y={y}, kích thước={window_width}x{window_height})", "INFO")
     except ImportError:
         log("undetected_chromedriver chưa cài, dùng Selenium Chrome thường. Chạy: pip install undetected-chromedriver", "WARN")
         from selenium import webdriver
@@ -401,7 +401,7 @@ def setup_driver(index=1, keep_open=False, batch_size=3, headless=False, browser
         options.add_argument(f"--accept-lang={lang_pref}")
         options.add_experimental_option('prefs', {'intl.accept_languages': lang_pref})
         options.add_argument(f"--window-size={window_width},{window_height}")
-        options.add_argument(f"--window-position={x},0")
+        options.add_argument(f"--window-position={x},{y}")
         if headless:
             options.add_argument("--headless=new")
         if keep_open:
@@ -414,7 +414,7 @@ def setup_driver(index=1, keep_open=False, batch_size=3, headless=False, browser
             driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()), options=options)
         driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
         try:
-            driver.set_window_rect(x=x, y=0, width=window_width, height=window_height)
+            driver.set_window_rect(x=x, y=y, width=window_width, height=window_height)
         except:
             pass
     return driver
@@ -491,6 +491,10 @@ def worker_loop(driver, email, password, acc_info, mail_api_source="mixmmo", ope
         try:
             driver.get(target_url)
             time.sleep(3)
+            try:
+                driver.execute_script("document.body.style.zoom='90%';")
+            except:
+                pass
             break
         except:
             time.sleep(2)
@@ -750,15 +754,27 @@ def worker_loop(driver, email, password, acc_info, mail_api_source="mixmmo", ope
             stuck_count = 0
             continue
 
-        # ── 7. NÚT 'Start your 14 day free trial' ─────────────
-        trial_btn = _find(driver, By.CSS_SELECTOR, '[data-testid="referral-trial-sign-up"]')
+        # ── 7. NÚT 'Start your 14 day free trial' / Nhận ưu đãi Referral ────
+        trial_btn = _find(driver, By.CSS_SELECTOR, '[data-testid="referral-trial-sign-up"], [data-testid*="referral-trial"], [data-testid*="referral"]')
         if not trial_btn:
-            trial_btn = _find(driver, By.XPATH, "//button[contains(., 'Start your 14 day free trial') or contains(., 'free trial')]")
+            trial_btn = _find(driver, By.XPATH, 
+                "//button[contains(., 'Start your 14 day free trial') or contains(., 'free trial') or contains(., 'Free trial') or contains(., 'Claim') or contains(., 'claim') or contains(., 'ưu đãi') or contains(., 'dùng thử') or contains(., 'Get started') or contains(., 'Try Grok') or contains(., 'Accept invite') or contains(., 'Accept referral') or contains(., '14일')] "
+                "| //a[contains(., 'Start your 14 day free trial') or contains(., 'free trial') or contains(., 'Free trial') or contains(., 'Claim') or contains(., 'claim') or contains(., 'ưu đãi') or contains(., 'dùng thử') or contains(., 'Get started') or contains(., 'Try Grok') or contains(., 'Accept invite') or contains(., 'Accept referral') or contains(., '14일')] "
+                "| //*[@role='button' and (contains(., 'free trial') or contains(., 'Claim') or contains(., 'ưu đãi') or contains(., 'dùng thử') or contains(., 'trial'))]"
+            )
+        
+        # Nếu chưa thấy mà đang ở link refer, cuộn trang xuống nhẹ để kích hoạt tải phần tử
+        if not trial_btn and "refer" in url:
+            try:
+                driver.execute_script("window.scrollBy(0, 250);")
+            except:
+                pass
+
         if trial_btn:
             state = "START_TRIAL"
             if state != last_state:
-                log(f"[{email}] Thấy nút 'Start your 14 day free trial' -> Click...", "INFO")
-            try_click(driver, trial_btn, "Start trial")
+                log(f"[{email}] Thấy nút Nhận ưu đãi / Start free trial -> Click...", "INFO")
+            try_click(driver, trial_btn, "Start trial / Nhận ưu đãi")
             time.sleep(3)
             last_state = state
             stuck_count = 0

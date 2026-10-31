@@ -2774,6 +2774,37 @@ def _run_grok_task(count, threads, browser_type, headless, mail_type, mail_api_s
         state_grok.is_running = False
 
 
+# ─── API Săn Code Grok X.com (Twitter Live) ──────────────────────────────────
+@app.route("/api/x_hunter/status")
+def x_hunter_status():
+    from src.bots.x_grok_hunter import get_hunter_status
+    return jsonify(get_hunter_status())
+
+@app.route("/api/x_hunter/login", methods=["POST"])
+def x_hunter_login():
+    from src.bots.x_grok_hunter import open_login_window, set_web_log_callback
+    set_web_log_callback(state_grok.log)
+    ok, msg = open_login_window()
+    return jsonify({"success": ok, "message": msg})
+
+@app.route("/api/x_hunter/start", methods=["POST"])
+def x_hunter_start():
+    from src.bots.x_grok_hunter import start_hunter_background, set_web_log_callback
+    set_web_log_callback(state_grok.log)
+    data = request.get_json(silent=True) or {}
+    interval = int(data.get("interval", 35))
+    headless = bool(data.get("headless", True))
+    ok, msg = start_hunter_background(interval=interval, headless=headless)
+    return jsonify({"success": ok, "message": msg})
+
+@app.route("/api/x_hunter/stop", methods=["POST"])
+def x_hunter_stop():
+    from src.bots.x_grok_hunter import stop_hunter_background
+    ok, msg = stop_hunter_background()
+    return jsonify({"success": ok, "message": msg})
+
+
+
 def _auto_proxy_rotator():
     import time
     import requests

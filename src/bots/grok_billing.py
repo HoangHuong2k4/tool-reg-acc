@@ -105,12 +105,14 @@ def load_accounts_to_queue(limit=10):
 
 def setup_driver(index=1, batch_size=3, headless=False):
     from .browser_utils import get_window_bounds
-    window_width, window_height, x, _ = get_window_bounds(index, batch_size, zero_based_index=False)
+    window_width, window_height, x, y = get_window_bounds(index, batch_size, zero_based_index=False)
     
     options = uc.ChromeOptions()
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--lang=en-US")
+    options.add_argument(f"--window-size={window_width},{window_height}")
+    options.add_argument(f"--window-position={x},{y}")
     if headless:
         options.add_argument("--headless=new")
     
@@ -126,7 +128,7 @@ def setup_driver(index=1, batch_size=3, headless=False):
             else:
                 raise e
         try:
-            driver.set_window_rect(x=x, y=0, width=window_width, height=window_height)
+            driver.set_window_rect(x=x, y=y, width=window_width, height=window_height)
         except: pass
     ACTIVE_DRIVERS.append(driver)
     return driver

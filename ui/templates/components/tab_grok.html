@@ -155,6 +155,28 @@
             </div>
           </div>
         </div>
+
+        <!-- Panel Săn Code Grok X.com Live -->
+        <div class="panel" style="border: 1px solid rgba(29, 155, 240, 0.4);">
+          <div class="panel-header">
+            <span>🐦</span>
+            <h2>Săn Code X.com (Twitter Live)</h2>
+            <span id="x-hunter-badge" class="badge" style="margin-left:auto;font-size:11px;padding:3px 8px;border-radius:12px;background:#333;color:#aaa;">Chưa chạy</span>
+          </div>
+          <div class="panel-body">
+            <div style="font-size:11px;color:var(--muted);margin-bottom:12px;">
+              Tự động quét tweet mới nhất từ <code>x.com/search</code>, lưu code vào <code>data/grok_referral_codes.txt</code> và bắn Telegram ngay lập tức!
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;">
+              <button class="btn btn-secondary" onclick="xHunterLogin()" style="font-size:12px;padding:8px;">🔑 Đăng nhập X</button>
+              <button class="btn btn-start" id="x-hunter-start-btn" onclick="xHunterToggle()" style="font-size:12px;padding:8px;background:#1d9bf0;">▶ Săn code ngầm</button>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;color:var(--muted);">
+              <span>Tổng mã đã bắt: <b id="x-hunter-count" style="color:var(--accent);">0</b></span>
+              <a href="javascript:void(0)" onclick="xHunterCheckStatus()" style="color:var(--accent);text-decoration:none;">🔄 Làm mới</a>
+            </div>
+          </div>
+        </div>
       </div>
       <div style="display:flex;flex-direction:column;gap:16px;">
         <div class="panel" style="flex:1;">
