@@ -105,26 +105,33 @@ def load_accounts_to_queue(limit=10):
 
 def setup_driver(index=1, batch_size=3, headless=False):
     from .browser_utils import get_window_bounds
-    window_width, window_height, x, y = get_window_bounds(index, batch_size, zero_based_index=False)
+    window_width, window_height, x, y = get_window_bounds(index, batch_size, zero_based_index=False, grid_2x2=True)
     
-    options = uc.ChromeOptions()
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--lang=en-US")
-    options.add_argument(f"--window-size={window_width},{window_height}")
-    options.add_argument(f"--window-position={x},{y}")
-    if headless:
-        options.add_argument("--headless=new")
-    
+    def _build_options():
+        opts = uc.ChromeOptions()
+        opts.add_argument("--no-sandbox")
+        opts.add_argument("--disable-dev-shm-usage")
+        opts.add_argument("--lang=en-US")
+        opts.add_argument(f"--window-size={window_width},{window_height}")
+        opts.add_argument(f"--window-position={x},{y}")
+        if headless:
+            opts.add_argument("--headless=new")
+        return opts
+
     with DRIVER_LOCK:
+        from src.bots.x_grok_hunter import get_installed_chrome_version
+        v_main = get_installed_chrome_version()
         try:
-            driver = uc.Chrome(options=options, use_subprocess=True)
+            if v_main:
+                driver = uc.Chrome(options=_build_options(), use_subprocess=True, version_main=v_main)
+            else:
+                driver = uc.Chrome(options=_build_options(), use_subprocess=True)
         except Exception as e:
             match = re.search(r'Current browser version is (\d+)', str(e))
             if match:
                 v_main = int(match.group(1))
                 log(f"[Worker {index}] Lỗi version chrome, thử lại version_main={v_main}", "WARN")
-                driver = uc.Chrome(options=options, use_subprocess=True, version_main=v_main)
+                driver = uc.Chrome(options=_build_options(), use_subprocess=True, version_main=v_main)
             else:
                 raise e
         try:

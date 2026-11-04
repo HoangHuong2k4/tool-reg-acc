@@ -2,340 +2,109 @@
 <html lang="vi">
 <head>
   <meta charset="UTF-8">
-  <title>Grok Code Hunter</title>
-  <style>
-    :root {
-      --bg: #0f172a;
-      --card-bg: #1e293b;
-      --card-border: #334155;
-      --text: #f8fafc;
-      --text-muted: #94a3b8;
-      --primary: #38bdf8;
-      --primary-hover: #0284c7;
-      --accent: #22c55e;
-      --danger: #ef4444;
-    }
-
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    }
-
-    body {
-      width: 380px;
-      background: var(--bg);
-      color: var(--text);
-      font-size: 13px;
-      line-height: 1.4;
-      padding: 14px;
-    }
-
-    .header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding-bottom: 12px;
-      border-bottom: 1px solid var(--card-border);
-      margin-bottom: 12px;
-    }
-
-    .logo-area {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    .logo-area h1 {
-      font-size: 15px;
-      font-weight: 700;
-      color: var(--primary);
-    }
-
-    /* Toggle switch */
-    .switch {
-      position: relative;
-      display: inline-block;
-      width: 44px;
-      height: 24px;
-    }
-
-    .switch input {
-      opacity: 0;
-      width: 0;
-      height: 0;
-    }
-
-    .slider {
-      position: absolute;
-      cursor: pointer;
-      top: 0; left: 0; right: 0; bottom: 0;
-      background-color: #475569;
-      transition: .3s;
-      border-radius: 24px;
-    }
-
-    .slider:before {
-      position: absolute;
-      content: "";
-      height: 18px;
-      width: 18px;
-      left: 3px;
-      bottom: 3px;
-      background-color: white;
-      transition: .3s;
-      border-radius: 50%;
-    }
-
-    input:checked + .slider {
-      background-color: var(--accent);
-    }
-
-    input:checked + .slider:before {
-      transform: translateX(20px);
-    }
-
-    .btn-main {
-      width: 100%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 6px;
-      background: linear-gradient(135deg, #0284c7, #2563eb);
-      color: white;
-      border: none;
-      padding: 9px 12px;
-      border-radius: 8px;
-      font-weight: 600;
-      cursor: pointer;
-      margin-bottom: 12px;
-      transition: all 0.2s;
-    }
-
-    .btn-main:hover {
-      opacity: 0.92;
-      transform: translateY(-1px);
-    }
-
-    .section {
-      background: var(--card-bg);
-      border: 1px solid var(--card-border);
-      border-radius: 8px;
-      padding: 10px 12px;
-      margin-bottom: 10px;
-    }
-
-    .section-title {
-      font-size: 11px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      color: var(--text-muted);
-      margin-bottom: 8px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-
-    .form-group {
-      margin-bottom: 8px;
-    }
-
-    .form-group:last-child {
-      margin-bottom: 0;
-    }
-
-    label {
-      display: block;
-      font-size: 11px;
-      color: var(--text-muted);
-      margin-bottom: 3px;
-    }
-
-    input[type="text"], input[type="number"], input[type="password"] {
-      width: 100%;
-      background: #0f172a;
-      border: 1px solid var(--card-border);
-      color: var(--text);
-      padding: 6px 9px;
-      border-radius: 6px;
-      font-size: 12px;
-      outline: none;
-      transition: border-color 0.2s;
-    }
-
-    input:focus {
-      border-color: var(--primary);
-    }
-
-    .btn-row {
-      display: flex;
-      gap: 6px;
-      margin-top: 8px;
-    }
-
-    .btn-secondary {
-      flex: 1;
-      background: #334155;
-      color: var(--text);
-      border: none;
-      padding: 6px 10px;
-      border-radius: 6px;
-      font-size: 11px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: background 0.2s;
-    }
-
-    .btn-secondary:hover {
-      background: #475569;
-    }
-
-    .btn-save {
-      background: #059669;
-      color: white;
-    }
-    .btn-save:hover {
-      background: #10b981;
-    }
-
-    /* History list */
-    .history-list {
-      max-height: 180px;
-      overflow-y: auto;
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-    }
-
-    .history-item {
-      background: #0f172a;
-      border: 1px solid var(--card-border);
-      border-radius: 6px;
-      padding: 7px 9px;
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-    }
-
-    .history-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
-
-    .code-badge {
-      font-family: monospace;
-      font-weight: 700;
-      color: var(--accent);
-      background: rgba(34, 197, 94, 0.12);
-      border: 1px solid rgba(34, 197, 94, 0.3);
-      padding: 1px 6px;
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 12px;
-    }
-
-    .code-badge:hover {
-      background: rgba(34, 197, 94, 0.25);
-    }
-
-    .history-time {
-      font-size: 10px;
-      color: var(--text-muted);
-    }
-
-    .history-meta {
-      font-size: 11px;
-      color: var(--text-muted);
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-
-    .history-links {
-      display: flex;
-      gap: 8px;
-      font-size: 11px;
-    }
-
-    .history-links a {
-      color: var(--primary);
-      text-decoration: none;
-    }
-
-    .history-links a:hover {
-      text-decoration: underline;
-    }
-
-    .empty-state {
-      text-align: center;
-      color: var(--text-muted);
-      padding: 16px 0;
-      font-size: 12px;
-    }
-
-    #status-msg {
-      font-size: 11px;
-      text-align: center;
-      margin-top: 6px;
-      color: var(--accent);
-      display: none;
-    }
-  </style>
+  <title>Grok Auto Opener Pro</title>
+  <link rel="stylesheet" href="popup.css">
 </head>
 <body>
 
+  <!-- Header -->
   <div class="header">
     <div class="logo-area">
-      <img src="icons/icon48.png" width="22" height="22" alt="logo">
-      <h1>Grok Hunter</h1>
+      <img src="icons/icon48.png" width="24" height="24" alt="logo">
+      <div>
+        <h1>Grok Auto Opener <span class="badge-version">v3.1</span></h1>
+        <div style="font-size:10px;color:var(--text-muted);">Tự mở link Grok & bấm Nhận Trial 14 ngày</div>
+      </div>
     </div>
-    <label class="switch" title="Bật/Tắt tự động quét">
-      <input type="checkbox" id="toggle-enabled" checked>
+    <label class="switch" title="Bật/Tắt tự động mở link Grok">
+      <input type="checkbox" id="enabled" checked>
       <span class="slider"></span>
     </label>
   </div>
 
-  <button class="btn-main" id="btn-open-search">
-    <span>🌐 Mở trang Live Search X.com</span>
-  </button>
+  <!-- Khối Đồng Bộ Trực Tiếp với Tool Python -->
+  <div class="sync-card">
+    <div class="sync-card-header">
+      <div class="sync-card-title">
+        <span class="sync-pulse off" id="sync-pulse-dot"></span>
+        <span>ĐỒNG BỘ TOOL PYTHON</span>
+      </div>
+      <span id="tool-status-badge" class="status-pill off">ĐANG KIỂM TRA...</span>
+    </div>
+    
+    <div style="display:flex;flex-direction:column;gap:5px;margin-bottom:8px;">
+      <div class="sync-row">
+        <span style="color:var(--text-muted);">Mã mới nhất từ Tool:</span>
+        <span id="sync-latest-code" class="sync-code-val">--</span>
+      </div>
+      <div class="sync-row" style="font-size:10px;color:var(--text-muted);">
+        <span id="sync-code-time">Thời gian: --</span>
+        <span id="sync-total-codes" style="color:var(--primary);font-weight:600;">0 mã đã quét</span>
+      </div>
+      <div class="sync-row" style="font-size:10px;color:var(--text-muted);">
+        <span>Relay kết nối:</span>
+        <span id="sync-receivers" style="color:#10b981;font-weight:600;">--</span>
+      </div>
+    </div>
 
+    <div class="sync-actions">
+      <button class="btn-sync-action" id="btn-sync-open-latest" title="Chuyển ngay tab Grok tới mã mới nhất vừa bắt được">
+        ⚡ Mở ngay mã này trên Grok
+      </button>
+      <button class="btn-sync-icon" id="btn-sync-refresh" title="Đồng bộ ngay với Tool">
+        🔄
+      </button>
+    </div>
+  </div>
+
+  <!-- Quản lý Tab Grok -->
   <div class="section">
-    <div class="section-title">
-      <span>Cài đặt Telegram & Tần suất</span>
+    <div class="section-title">Tab Grok nhận ưu đãi</div>
+    <div class="info-box highlight" id="bound-tab">Chưa ghim tab Grok nào.</div>
+
+    <div class="btn-row" style="margin-top:0;margin-bottom:8px;">
+      <button class="btn-secondary" id="btn-bind-tab">📌 Ghim tab Grok đang mở</button>
+      <button class="btn-secondary" id="btn-open-grok">🌐 Mở tab Grok mới</button>
     </div>
+
+    <label style="display:flex;align-items:center;gap:6px;margin-bottom:8px;cursor:pointer;">
+      <input type="checkbox" id="auto-bind" checked>
+      <span>Tự chọn / mở tab Grok khi chưa ghim</span>
+    </label>
+
+    <label style="display:flex;align-items:center;gap:6px;margin-bottom:8px;cursor:pointer;">
+      <input type="checkbox" id="auto-click-trial" checked>
+      <span>🎁 Tự động bấm Nhận Trial 14 ngày khi mở link</span>
+    </label>
+
     <div class="form-group">
-      <label for="reload-interval">Tự động tải lại trang sau (giây):</label>
-      <input type="number" id="reload-interval" min="10" max="600" value="45">
+      <label for="delay">Khoảng nghỉ giữa 2 lần mở link (giây):</label>
+      <input type="number" id="delay" min="3" max="30" step="1" value="5">
     </div>
-    <div class="form-group">
-      <label for="bot-token">Telegram Bot Token:</label>
-      <input type="password" id="bot-token" placeholder="8855096263:AAHuhzdQVm...">
-    </div>
-    <div class="form-group">
-      <label for="chat-ids">Telegram Chat ID (phân cách bằng dấu phẩy):</label>
-      <input type="text" id="chat-ids" placeholder="7353915691, 1007974270">
-    </div>
+
     <div class="btn-row">
-      <button class="btn-secondary" id="btn-test-telegram">📩 Test Telegram</button>
       <button class="btn-secondary btn-save" id="btn-save">💾 Lưu cài đặt</button>
+      <button class="btn-secondary" id="btn-test-open" style="background:#2563eb;color:white;">🧪 Test mở thử link</button>
+      <button class="btn-secondary btn-danger" id="btn-stop">🛑 Dừng</button>
     </div>
+
     <div id="status-msg"></div>
   </div>
 
+  <!-- Lịch sử nhận link Grok -->
   <div class="section">
     <div class="section-title">
-      <span>Mã vừa quét được (<span id="total-count">0</span>)</span>
-      <button class="btn-secondary" id="btn-clear-history" style="padding: 2px 6px; font-size: 10px;">Xóa lịch sử</button>
+      <span>Lịch sử mở link Grok <span id="pending-count" style="color:var(--primary);"></span></span>
     </div>
     <div class="history-list" id="history-container">
-      <div class="empty-state">Chưa quét được mã nào. Hãy mở trang X.com Live Search để bắt đầu!</div>
+      <div class="empty-state">Đang chờ mã mới từ Tool Python... Bạn chỉ cần đăng nhập sẵn Grok!</div>
     </div>
+  </div>
+
+  <div style="font-size:10px;color:var(--text-muted);text-align:center;padding:4px 0;">
+    💡 Profile này <b>KHÔNG CẦN</b> đăng nhập X.com. Chỉ cần mở tab Grok!
   </div>
 
   <script src="popup.js"></script>
 </body>
 </html>
-

@@ -52,7 +52,14 @@
               <div class="radio-group">
                 <div class="radio-btn active" id="grk-mailHotmail" onclick="grkSetMailType('hotmail')">📧 Hotmail</div>
                 <div class="radio-btn" id="grk-mailDomain" onclick="grkSetMailType('domain')">🌐 Mail Domain</div>
+                <div class="radio-btn" id="grk-mailGmail94" onclick="grkSetMailType('gmail94')">🟢 Gmail94 (OTP)</div>
                 <div class="radio-btn" id="grk-mailBilling" onclick="grkSetMailType('billing')">💳 Lấy Link Billing</div>
+              </div>
+            </div>
+            <div class="form-group" id="grk-gmail94Group" style="display:none;">
+              <div style="font-size:11px;color:var(--text);background:rgba(34,197,94,0.08);padding:9px 12px;border:1px solid rgba(34,197,94,0.25);border-radius:8px;line-height:1.5;">
+                🟢 <b>Gmail94 API (Service 50 - Grok):</b> Tự động mua Gmail và nhận mã OTP trực tiếp từ gmail94.com.<br>
+                💡 Token Gmail94 được lấy từ mục <a href="javascript:void(0)" onclick="switchTab('settings')" style="color:var(--accent);text-decoration:underline;">Cài đặt</a>.
               </div>
             </div>
             <div class="form-group" id="grk-apiSourceGroup">
@@ -67,7 +74,6 @@
             <div class="form-group" id="grk-referLinkGroup">
               <label>🔗 Referral Link (Grok)</label>
               <input type="text" id="grk-referLink" value="https://grok.com/refer/bot?code=GMED5B6WV9GC" placeholder="https://grok.com/refer/bot?code=GMED5B6WV9GC" style="font-size:12px;">
-              <div style="font-size:10px;color:var(--muted);margin-top:4px;">💡 Sau khi tạo xong và chuyển tới grok.com/plans, trình duyệt sẽ <b>giữ nguyên tab</b> để bạn thao tác tiếp. Khi bấm Bắt đầu luồng mới tab cũ sẽ tự đóng.</div>
             </div>
             <div class="form-group">
               <label>Trình duyệt</label>
@@ -84,32 +90,6 @@
               <div class="radio-group">
                 <div class="radio-btn active" id="grk-langUs" onclick="grkSetLanguage('en-US')">🇺🇸 English (US)</div>
                 <div class="radio-btn" id="grk-langVi" onclick="grkSetLanguage('vi-VN')">🇻🇳 Tiếng Việt</div>
-              </div>
-            </div>
-            
-            <div class="form-group" id="grk-openPaymentGroup" style="display:none">
-              <div class="toggle-btn" id="grk-openPaymentToggle" onclick="grkToggleOpenPayment()">
-                <div class="toggle-switch"></div>
-                <span>Mở link thanh toán sau khi ĐK (giữ Tab)</span>
-              </div>
-            </div>
-
-            <!-- Chế độ thanh toán KakaoPay — chỉ hiện khi open_payment bật -->
-            <div class="form-group" id="grk-paymentModeGroup" style="display:none; margin-left:16px; border-left:2px solid var(--accent); padding-left:12px;">
-              <label style="font-size:11px; color:var(--muted); margin-bottom:6px;">Chế độ thanh toán KakaoPay</label>
-              <div class="radio-group">
-                <div class="radio-btn active" id="grk-payModeMasa" onclick="grkSetPaymentMode('masa')">🤖 Masa168 (tự động)</div>
-                <div class="radio-btn" id="grk-payModeManual" onclick="grkSetPaymentMode('manual')">👤 Quét tay (Telegram)</div>
-              </div>
-              <div style="font-size:10px; color:var(--muted); margin-top:4px;" id="grk-payModeHint">
-                Link NicePay sẽ được gửi lên Masa168 để quét tự động
-              </div>
-            </div>
-
-            <div class="form-group" id="grk-applePayGroup" style="display:none">
-              <div class="toggle-btn" id="grk-applePayToggle" onclick="grkToggleApplePay()">
-                <div class="toggle-switch"></div>
-                <span>Chỉ lấy link checkout (Để pay Apple Pay)</span>
               </div>
             </div>
 
@@ -174,6 +154,10 @@
             <div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;color:var(--muted);">
               <span>Tổng mã đã bắt: <b id="x-hunter-count" style="color:var(--accent);">0</b></span>
               <a href="javascript:void(0)" onclick="xHunterCheckStatus()" style="color:var(--accent);text-decoration:none;">🔄 Làm mới</a>
+            </div>
+            <div style="margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,0.08);display:flex;justify-content:space-between;align-items:center;font-size:11px;">
+              <span>🌐 Chrome Ext: <b id="x-hunter-receivers" style="color:#10b981;">Đang kết nối...</b></span>
+              <button class="btn btn-secondary" onclick="xHunterSyncProfiles()" style="font-size:11px;padding:3px 8px;width:auto;">⚡ Phát mã tới Profile</button>
             </div>
           </div>
         </div>

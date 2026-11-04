@@ -323,7 +323,7 @@ def get_rotated_proxy():
 
 def setup_driver(index=1, keep_open=False, batch_size=3, headless=False, browser_type="uc", use_proxy=False, language="en-US"):
     from .browser_utils import get_window_bounds
-    window_width, window_height, x, y = get_window_bounds(index, batch_size, zero_based_index=False)
+    window_width, window_height, x, y = get_window_bounds(index, batch_size, zero_based_index=False, grid_2x2=True)
 
     if browser_type.lower() == "firefox":
         from selenium import webdriver
@@ -345,35 +345,42 @@ def setup_driver(index=1, keep_open=False, batch_size=3, headless=False, browser
     # Chrome / UC (undetected_chromedriver) — bypass Cloudflare x.ai
     try:
         import undetected_chromedriver as uc
-        options = uc.ChromeOptions()
-        options.add_argument("--no-sandbox")
-        options.add_argument("--disable-dev-shm-usage")
-        if "vi" in language:
-            lang_pref = "vi-VN,vi,en-US,en"
-        elif "ko" in language:
-            lang_pref = "ko-KR,ko,en-US,en"
-        else:
-            lang_pref = "en-US,en"
-        options.add_argument(f"--lang={language}")
-        options.add_argument(f"--accept-lang={lang_pref}")
-        if not hasattr(options, "_uc_prefs"):
-            options._uc_prefs = {}
-        options.add_experimental_option('prefs', {'intl.accept_languages': lang_pref})
-        options.add_argument(f"--window-size={window_width},{window_height}")
-        options.add_argument(f"--window-position={x},{y}")
-        if headless:
-            options.add_argument("--headless=new")
-        # Không dùng detach với undetected_chromedriver vì sẽ gây lỗi crash 'unrecognized chrome option: detach'
+        def _build_uc_options():
+            opts = uc.ChromeOptions()
+            opts.add_argument("--no-sandbox")
+            opts.add_argument("--disable-dev-shm-usage")
+            if "vi" in language:
+                lang_pref = "vi-VN,vi,en-US,en"
+            elif "ko" in language:
+                lang_pref = "ko-KR,ko,en-US,en"
+            else:
+                lang_pref = "en-US,en"
+            opts.add_argument(f"--lang={language}")
+            opts.add_argument(f"--accept-lang={lang_pref}")
+            if not hasattr(opts, "_uc_prefs"):
+                opts._uc_prefs = {}
+            opts.add_experimental_option('prefs', {'intl.accept_languages': lang_pref})
+            opts.add_argument(f"--window-size={window_width},{window_height}")
+            opts.add_argument(f"--window-position={x},{y}")
+            if headless:
+                opts.add_argument("--headless=new")
+            return opts
+
         with DRIVER_LOCK:
+            from src.bots.x_grok_hunter import get_installed_chrome_version
+            v_main = get_installed_chrome_version()
             try:
-                driver = uc.Chrome(options=options, use_subprocess=True)
+                if v_main:
+                    driver = uc.Chrome(options=_build_uc_options(), use_subprocess=True, version_main=v_main)
+                else:
+                    driver = uc.Chrome(options=_build_uc_options(), use_subprocess=True)
             except Exception as e:
                 import re
                 match = re.search(r'Current browser version is (\d+)', str(e))
                 if match:
                     v_main = int(match.group(1))
                     log(f"[Worker {index}] Lỗi version chrome, thử lại với version_main={v_main}", "WARN")
-                    driver = uc.Chrome(options=options, use_subprocess=True, version_main=v_main)
+                    driver = uc.Chrome(options=_build_uc_options(), use_subprocess=True, version_main=v_main)
                 else:
                     raise e
             try:
@@ -461,7 +468,7 @@ def is_element_present(driver, By, selector):
         return None
 
 
-def worker_loop(driver, email, password, acc_info, mail_api_source="mixmmo", open_payment=False, apple_pay=False, language="en-US", payment_mode="masa", refer_link=""):
+def worker_loop(driver, email, password, acc_info, mail_api_source="mixmmo", open_payment=False, apple_pay=False, language="en-US", payment_mode="masa", refer_link="", **kwargs):
     from selenium.webdriver.common.by import By
     from selenium.webdriver.common.keys import Keys
     log(f"[{email}] Bắt đầu đăng ký Grok referral...", "INFO")
@@ -521,10 +528,9 @@ def worker_loop(driver, email, password, acc_info, mail_api_source="mixmmo", ope
             if not saved:
                 save_account(email, password)
                 saved = True
-            log(f"[{email}] ✅ Đã tạo tài khoản và chuyển tới trang plans ({url})! Hoàn tất.", "OK")
+            log(f"[{email}] ✅ Đã tạo tài khoản thành công ({url})! Hoàn tất.", "OK")
             masked_email = email[:3] + "***" + email[email.find("@"):] if "@" in email else email[:3] + "***"
-            send_telegram_message(f"🎉 Đăng ký Grok referral thành công!\nEmail: {masked_email}\nĐã tới grok.com/plans.\nTab trình duyệt đang được giữ nguyên.")
-            log(f"[{email}] Giữ nguyên tab trình duyệt để bạn thực hiện bước tiếp theo.", "OK")
+            send_telegram_message(f"🎉 Đăng ký Grok referral thành công!\nEmail: {masked_email}")
             return True
 
         # ── 2. NÚT 'Choose a plan' (Free trial not available) ──
@@ -887,7 +893,7 @@ def _set_react_value(driver, element, value):
 
 
 def register_one_account(index, keep_open=False, batch_size=3, headless=False,
-                         browser_type="uc", mail_api_source="mixmmo", use_proxy=False, open_payment=False, apple_pay=False, language="en-US", payment_mode="masa", refer_link=""):
+                         browser_type="uc", mail_api_source="mixmmo", use_proxy=False, open_payment=False, apple_pay=False, language="en-US", payment_mode="masa", refer_link="", **kwargs):
     global ACTIVE_DRIVERS
     acc = None
     driver = None
@@ -902,23 +908,21 @@ def register_one_account(index, keep_open=False, batch_size=3, headless=False,
         password = PASSWORD
         log(f"[Worker {index}] Đăng ký Grok với: {email}", "INFO")
 
-        # Luôn giữ trình duyệt mở khi thành công để user thao tác bước tiếp theo
-        _keep_open = True
-        driver = setup_driver(index, keep_open=_keep_open, batch_size=batch_size,
+        driver = setup_driver(index, keep_open=False, batch_size=batch_size,
                               headless=headless, browser_type=browser_type, use_proxy=use_proxy, language=language)
         ACTIVE_DRIVERS[email] = driver
 
-        result = worker_loop(driver, email, password, acc, mail_api_source=mail_api_source, open_payment=open_payment, apple_pay=apple_pay, language=language, payment_mode=payment_mode, refer_link=refer_link)
+        result = worker_loop(driver, email, password, acc, mail_api_source=mail_api_source, language=language, refer_link=refer_link)
         if result:
             mark_hotmail_used(acc)
-            log(f"[{email}] ✅ Đăng ký Grok thành công! Giữ tab trình duyệt để bạn thao tác tiếp.", "OK")
+            log(f"[{email}] ✅ Đăng ký Grok thành công! Đã lưu tài khoản.", "OK")
         else:
             log(f"[{email}] ❌ Đăng ký Grok thất bại!", "ERR")
-            try:
-                driver.quit()
-                ACTIVE_DRIVERS.pop(email, None)
-            except:
-                pass
+        try:
+            driver.quit()
+            ACTIVE_DRIVERS.pop(email, None)
+        except:
+            pass
         return result
     except Exception as e:
         log(f"LỖI worker Grok {index}: {e}", "ERR")

@@ -1,31 +1,28 @@
 {
   "manifest_version": 3,
-  "name": "Grok Code Hunter (X.com -> Telegram)",
-  "version": "1.0.0",
-  "description": "Tự động quét mã referral Grok mới nhất từ tìm kiếm X.com (Twitter) và gửi thông báo ngay về Telegram.",
+  "name": "Grok Auto Link Opener (Receiver Pro)",
+  "version": "3.1.0",
+  "minimum_chrome_version": "120",
+  "description": "Tự động nhận mã referral từ Tool Python ngầm, mở link ưu đãi trên tab Grok và tự động bấm nhận Trial 14 ngày. Không cần đăng nhập X.com.",
   "permissions": [
     "storage",
-    "alarms"
+    "alarms",
+    "tabs"
   ],
   "host_permissions": [
-    "https://x.com/*",
-    "https://twitter.com/*",
-    "https://api.telegram.org/*"
+    "https://grok.com/*",
+    "http://127.0.0.1/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["https://grok.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
   ],
   "background": {
     "service_worker": "background.js"
   },
-  "content_scripts": [
-    {
-      "matches": [
-        "https://x.com/*",
-        "https://twitter.com/*"
-      ],
-      "js": ["content.js"],
-      "css": ["content.css"],
-      "run_at": "document_idle"
-    }
-  ],
   "action": {
     "default_popup": "popup.html",
     "default_icon": {
@@ -40,4 +37,3 @@
     "128": "icons/icon128.png"
   }
 }
-

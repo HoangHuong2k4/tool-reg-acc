@@ -1,267 +1,298 @@
 // =========================================================================
-// Grok Code Hunter - Content Script for X.com (Twitter)
+// Grok Auto Link Opener - Content Script (content.js)
+// Tự động phát hiện và BẤM nút "Start your 14 day free trial" / Nhận ưu đãi / Tiếp tục
+// Chạy trực tiếp trên tab grok.com
 // =========================================================================
 
-(function () {
-  let isEnabled = true;
-  let reloadInterval = 45; // giây mặc định
-  let countdown = 45;
-  let timerId = null;
-  let isPaused = false;
-  let totalDetectedSession = 0;
-  let lastFoundCode = "";
+(() => {
+  let isScanning = false;
+  let clickedElements = new WeakSet();
+  let lastClickedTime = 0;
+  let bannerEl = null;
 
-  // Kiểm tra xem trang hiện tại có phải trang tìm kiếm Grok referral không
-  function isTargetPage() {
-    const url = window.location.href.toLowerCase();
-    return url.includes("x.com/search") || url.includes("twitter.com/search");
-  }
-
-  // Khởi động
-  async function init() {
-    const store = await chrome.storage.local.get(["enabled", "reloadInterval"]);
-    isEnabled = store.enabled !== false;
-    reloadInterval = store.reloadInterval || 45;
-    countdown = reloadInterval;
-
-    if (!isTargetPage()) {
-      return;
-    }
-
-    createFloatingWidget();
-    scanTweets();
-
-    // Theo dõi DOM thay đổi (khi Twitter load thêm tweet mới)
-    const observer = new MutationObserver(() => {
-      scanTweets();
-    });
-    observer.observe(document.body, { childList: true, subtree: true });
-
-    startCountdown();
-  }
-
-  // Quét các tweet hiển thị trên trang
-  function scanTweets() {
-    if (!isEnabled) return;
-
-    const tweetArticles = document.querySelectorAll('article[data-testid="tweet"]');
-    tweetArticles.forEach(article => {
-      processTweetArticle(article);
-    });
-  }
-
-  // Xử lý 1 phần tử tweet
-  function processTweetArticle(article) {
+  // Hiển thị thông báo góc màn hình
+  function showBanner(text, type = "info") {
     try {
-      // 1. Trích xuất text của tweet
-      const tweetTextEl = article.querySelector('div[data-testid="tweetText"]');
-      const tweetText = tweetTextEl ? tweetTextEl.innerText : "";
+      if (!bannerEl) {
+        bannerEl = document.createElement("div");
+        bannerEl.id = "grok-auto-opener-banner";
+        Object.assign(bannerEl.style, {
+          position: "fixed",
+          top: "16px",
+          right: "16px",
+          zIndex: "2147483647",
+          padding: "10px 16px",
+          borderRadius: "8px",
+          fontSize: "13px",
+          fontWeight: "600",
+          fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+          boxShadow: "0 4px 16px rgba(0,0,0,0.4)",
+          transition: "all 0.3s ease",
+          display: "flex",
+          alignItems: "center",
+          gap: "8px",
+          maxWidth: "380px",
+          lineHeight: "1.4"
+        });
+        document.body.appendChild(bannerEl);
+      }
 
-      // 2. Tìm tất cả các link trong tweet (bao gồm text, href, title)
-      const links = Array.from(article.querySelectorAll("a"));
-      let foundCode = null;
-      let referUrl = null;
-
-      // Regex tìm kiếm code Grok referral
-      const codeRegex = /grok\.com\/refer\/bot\?code=([A-Za-z0-9_-]{6,24})/i;
-      const genericCodeRegex = /code=([A-Za-z0-9_-]{6,24})/i;
-
-      // Check trong toàn bộ nội dung text của tweet và các thẻ a
-      const fullTextToScan = [
-        tweetText,
-        ...links.map(a => `${a.href || ""} ${a.innerText || ""} ${a.title || ""}`)
-      ].join(" ");
-
-      const matchFull = fullTextToScan.match(codeRegex);
-      if (matchFull && matchFull[1]) {
-        foundCode = matchFull[1].trim();
+      if (type === "success") {
+        bannerEl.style.background = "#059669";
+        bannerEl.style.color = "#ffffff";
+        bannerEl.style.border = "1px solid #10b981";
+      } else if (type === "warn") {
+        bannerEl.style.background = "#d97706";
+        bannerEl.style.color = "#ffffff";
+        bannerEl.style.border = "1px solid #f59e0b";
       } else {
-        const matchGeneric = fullTextToScan.match(genericCodeRegex);
-        if (matchGeneric && matchGeneric[1]) {
-          foundCode = matchGeneric[1].trim();
-        }
+        bannerEl.style.background = "#1e293b";
+        bannerEl.style.color = "#38bdf8";
+        bannerEl.style.border = "1px solid #38bdf8";
       }
 
-      if (!foundCode) return;
+      bannerEl.innerHTML = text;
+      bannerEl.style.opacity = "1";
+      bannerEl.style.transform = "translateY(0)";
 
-      referUrl = `https://grok.com/refer/bot?code=${foundCode}`;
-
-      // 3. Trích xuất thông tin người đăng & link bài viết
-      const userNameEl = article.querySelector('div[data-testid="User-Name"]');
-      let author = "X User";
-      let handle = "@user";
-      let tweetUrl = "";
-
-      if (userNameEl) {
-        const textParts = userNameEl.innerText.split("\n").map(s => s.trim()).filter(Boolean);
-        if (textParts.length > 0) author = textParts[0];
-        const handleMatch = userNameEl.innerText.match(/@([A-Za-z0-9_]+)/);
-        if (handleMatch) handle = `@${handleMatch[1]}`;
-      }
-
-      // Tìm link status của tweet
-      const statusLink = links.find(a => a.href && a.href.includes("/status/"));
-      let tweetId = "";
-      if (statusLink) {
-        tweetUrl = statusLink.href;
-        const idMatch = tweetUrl.match(/\/status\/(\d+)/);
-        if (idMatch) tweetId = idMatch[1];
-      }
-
-      // Gửi sang background.js để kiểm tra trùng lặp & phát thông báo Telegram
-      chrome.runtime.sendMessage(
-        {
-          action: "NEW_CODE_FOUND",
-          data: {
-            code: foundCode,
-            referUrl,
-            author,
-            handle,
-            tweetUrl,
-            tweetId,
-            text: tweetText
-          }
-        },
-        response => {
-          if (response && response.isNew) {
-            totalDetectedSession++;
-            lastFoundCode = foundCode;
-            updateWidgetUI();
-            flashWidget();
-          }
-        }
-      );
-    } catch (e) {
-      console.warn("[GrokHunter] Lỗi khi xử lý tweet:", e);
-    }
-  }
-
-  // Đếm ngược tự động reload trang
-  function startCountdown() {
-    if (timerId) clearInterval(timerId);
-
-    timerId = setInterval(() => {
-      if (isPaused || !isEnabled) return;
-
-      countdown--;
-      updateWidgetCountdown();
-
-      if (countdown <= 0) {
-        countdown = reloadInterval;
-        // Thực hiện tải lại trang để nạp các bài tweet Live mới nhất
-        window.location.reload();
-      }
-    }, 1000);
-  }
-
-  // Tạo UI Widget nổi trên góc trang web
-  function createFloatingWidget() {
-    if (document.getElementById("grok-hunter-widget")) return;
-
-    const widget = document.createElement("div");
-    widget.id = "grok-hunter-widget";
-    widget.innerHTML = `
-      <div class="gh-header">
-        <div class="gh-title">
-          <span class="gh-dot"></span>
-          <span>Grok Hunter</span>
-        </div>
-        <div class="gh-controls">
-          <button id="gh-btn-pause" title="Tạm dừng / Tiếp tục">⏸</button>
-          <button id="gh-btn-reload" title="Tải lại ngay">🔄</button>
-          <button id="gh-btn-toggle" title="Thu nhỏ / Mở rộng">_</button>
-        </div>
-      </div>
-      <div class="gh-body" id="gh-body-content">
-        <div class="gh-row">
-          <span class="gh-label">Tự reload sau:</span>
-          <span class="gh-value" id="gh-timer">${countdown}s</span>
-        </div>
-        <div class="gh-row">
-          <span class="gh-label">Đã bắt trong phiên:</span>
-          <span class="gh-value gh-count" id="gh-count">${totalDetectedSession}</span>
-        </div>
-        <div class="gh-row" id="gh-latest-row" style="display: none;">
-          <span class="gh-label">Mã mới nhất:</span>
-          <span class="gh-value gh-code" id="gh-latest-code" title="Bấm để copy">--</span>
-        </div>
-      </div>
-    `;
-
-    document.body.appendChild(widget);
-
-    // Bắt sự kiện các nút trên widget
-    const btnPause = document.getElementById("gh-btn-pause");
-    const btnReload = document.getElementById("gh-btn-reload");
-    const btnToggle = document.getElementById("gh-btn-toggle");
-    const latestCodeEl = document.getElementById("gh-latest-code");
-
-    btnPause.addEventListener("click", () => {
-      isPaused = !isPaused;
-      btnPause.innerText = isPaused ? "▶" : "⏸";
-      btnPause.title = isPaused ? "Tiếp tục" : "Tạm dừng";
-      const dot = widget.querySelector(".gh-dot");
-      if (dot) dot.style.backgroundColor = isPaused ? "#f59e0b" : "#22c55e";
-    });
-
-    btnReload.addEventListener("click", () => {
-      window.location.reload();
-    });
-
-    btnToggle.addEventListener("click", () => {
-      const body = document.getElementById("gh-body-content");
-      if (body.style.display === "none") {
-        body.style.display = "block";
-        btnToggle.innerText = "_";
-      } else {
-        body.style.display = "none";
-        btnToggle.innerText = "+";
-      }
-    });
-
-    latestCodeEl.addEventListener("click", () => {
-      if (lastFoundCode) {
-        navigator.clipboard.writeText(lastFoundCode);
-        const orig = latestCodeEl.innerText;
-        latestCodeEl.innerText = "ĐÃ COPY!";
+      if (type === "success" || type === "warn") {
         setTimeout(() => {
-          latestCodeEl.innerText = orig;
-        }, 1500);
+          if (bannerEl) {
+            bannerEl.style.opacity = "0";
+            bannerEl.style.transform = "translateY(-10px)";
+          }
+        }, 5000);
       }
-    });
+    } catch {}
   }
 
-  function updateWidgetCountdown() {
-    const el = document.getElementById("gh-timer");
-    if (el) el.innerText = `${countdown}s`;
+  // Giả lập click chuột thực tế (Next.js/React thân thiện)
+  function simulateClick(el) {
+    if (!el || clickedElements.has(el)) return false;
+    clickedElements.add(el);
+    lastClickedTime = Date.now();
+
+    try {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+    } catch {}
+
+    const mouseEvents = ["mouseover", "mouseenter", "mousedown", "mouseup", "click"];
+    for (const evtName of mouseEvents) {
+      try {
+        const evt = new MouseEvent(evtName, {
+          bubbles: true,
+          cancelable: true,
+          view: window,
+          buttons: 1
+        });
+        el.dispatchEvent(evt);
+      } catch {}
+    }
+
+    if (typeof el.click === "function") {
+      try { el.click(); } catch {}
+    }
+
+    return true;
   }
 
-  function updateWidgetUI() {
-    const countEl = document.getElementById("gh-count");
-    const latestRow = document.getElementById("gh-latest-row");
-    const latestCodeEl = document.getElementById("gh-latest-code");
+  // Danh sách từ khóa ưu tiên tìm nút
+  const TRIAL_KEYWORDS = [
+    "start your 14 day free trial",
+    "start 14 day free trial",
+    "start 14-day free trial",
+    "14 day free trial",
+    "14-day free trial",
+    "2 weeks free",
+    "2 week free",
+    "free trial",
+    "start trial",
+    "start free trial",
+    "claim 2 weeks",
+    "claim trial",
+    "claim free",
+    "claim",
+    "dùng thử 14 ngày",
+    "dùng thử miễn phí",
+    "dùng thử",
+    "nhận ưu đãi",
+    "accept invite",
+    "accept referral",
+    "try grok bot for free",
+    "try grok",
+    "try for free",
+    "get started",
+    "choose a plan" // Dự phòng khi tài khoản không đủ điều kiện trial trực tiếp
+  ];
 
-    if (countEl) countEl.innerText = totalDetectedSession;
-    if (lastFoundCode && latestRow && latestCodeEl) {
-      latestRow.style.display = "flex";
-      latestCodeEl.innerText = lastFoundCode;
+  // Tìm nút Trial hoặc Continue tốt nhất trên trang
+  function findTrialButton() {
+    // 1. Tìm theo data-testid chính xác trước
+    const testIdSelectors = [
+      '[data-testid="referral-trial-sign-up"]',
+      '[data-testid="referral-trial-claim"]',
+      '[data-testid*="referral-trial"]',
+      '[data-testid*="trial-button"]',
+      '[data-testid="referral-trial-choose-plan"]'
+    ];
+
+    for (const sel of testIdSelectors) {
+      const el = document.querySelector(sel);
+      if (el && isElementClickable(el)) {
+        return { el, label: el.textContent?.trim() || sel, priority: 1 };
+      }
+    }
+
+    // 2. Tìm tất cả các button, a, role=button
+    const candidates = Array.from(document.querySelectorAll('button, a, [role="button"], input[type="button"], input[type="submit"]'));
+    let bestMatch = null;
+    let highestScore = -1;
+
+    for (const el of candidates) {
+      if (!isElementClickable(el)) continue;
+
+      const text = (el.textContent || el.value || "").toLowerCase().trim();
+      if (!text) continue;
+
+      for (let i = 0; i < TRIAL_KEYWORDS.length; i++) {
+        const kw = TRIAL_KEYWORDS[i];
+        if (text.includes(kw)) {
+          // Điểm càng cao khi từ khóa ở đầu danh sách (ưu tiên 14 day trial > choose plan)
+          const score = 100 - i;
+          if (score > highestScore) {
+            highestScore = score;
+            bestMatch = { el, label: el.textContent?.trim() || kw, priority: score };
+          }
+          break;
+        }
+      }
+    }
+
+    return bestMatch;
+  }
+
+  function isElementClickable(el) {
+    if (!el || el.disabled || el.getAttribute("aria-disabled") === "true") return false;
+    const style = window.getComputedStyle(el);
+    if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") return false;
+    const rect = el.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  }
+
+  // Quét và tự động bấm
+  async function scanAndAutoClick() {
+    if (isScanning) return;
+    isScanning = true;
+
+    try {
+      // Kiểm tra cài đặt người dùng
+      const { settings } = await chrome.storage.local.get("settings");
+      if (settings && settings.autoClickTrial === false) {
+        isScanning = false;
+        return;
+      }
+
+      // Chỉ thực hiện trên trang referral hoặc plans hoặc có code
+      const currentUrl = window.location.href;
+      const isReferPage = currentUrl.includes("/refer") || currentUrl.includes("code=") || currentUrl.includes("/plans");
+      if (!isReferPage) {
+        isScanning = false;
+        return;
+      }
+
+      // Không bấm liên tục nếu vừa bấm cách đây < 3 giây
+      if (Date.now() - lastClickedTime < 3000) {
+        isScanning = false;
+        return;
+      }
+
+      const match = findTrialButton();
+      if (match && match.el && !clickedElements.has(match.el)) {
+        showBanner(`⚡ <b>Grok Auto</b>: Đã phát hiện nút <b>${escapeHtml(match.label)}</b>. Đang tự động bấm...`);
+        const clicked = simulateClick(match.el);
+        if (clicked) {
+          showBanner(`✅ <b>Grok Auto</b>: Đã bấm <b>${escapeHtml(match.label)}</b> thành công!`, "success");
+
+          // Sau khi bấm nút chính, theo dõi tiếp 4 giây xem có popup/modal xác nhận "Continue" hay "Start" xuất hiện không
+          checkFollowUpModal();
+        }
+      }
+    } catch (e) {
+      console.warn("[GrokAutoOpener]", e);
+    } finally {
+      isScanning = false;
     }
   }
 
-  function flashWidget() {
-    const widget = document.getElementById("grok-hunter-widget");
-    if (!widget) return;
-    widget.classList.add("gh-flash");
-    setTimeout(() => {
-      widget.classList.remove("gh-flash");
-    }, 1200);
+  // Kiểm tra popup modal xác nhận tiếp theo (ví dụ: nút "Continue", "Confirm", "Tiếp tục")
+  function checkFollowUpModal() {
+    let attempts = 0;
+    const modalInterval = setInterval(() => {
+      attempts++;
+      if (attempts > 8) {
+        clearInterval(modalInterval);
+        return;
+      }
+
+      const modalButtons = Array.from(document.querySelectorAll('div[role="dialog"] button, [data-testid*="modal"] button, button'));
+      for (const btn of modalButtons) {
+        if (!isElementClickable(btn) || clickedElements.has(btn)) continue;
+        const txt = (btn.textContent || "").toLowerCase().trim();
+        if (txt === "continue" || txt === "tiếp tục" || txt === "confirm" || txt === "xác nhận" || txt === "start" || txt === "claim") {
+          simulateClick(btn);
+          showBanner(`✅ <b>Grok Auto</b>: Đã bấm xác nhận <b>${escapeHtml(btn.textContent.trim())}</b>!`, "success");
+          clearInterval(modalInterval);
+          return;
+        }
+      }
+    }, 500);
   }
 
-  // Khởi chạy khi DOM sẵn sàng
+  function escapeHtml(str) {
+    if (!str) return "";
+    return String(str).replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[m]);
+  }
+
+  // Khởi chạy theo dõi liên tục
+  function initObserver() {
+    // 1. Quét ngay khi script load
+    scanAndAutoClick();
+
+    // 2. Định kỳ quét mỗi 600ms trong 15s đầu
+    let ticks = 0;
+    const poller = setInterval(() => {
+      ticks++;
+      scanAndAutoClick();
+      if (ticks > 25) clearInterval(poller);
+    }, 600);
+
+    // 3. MutationObserver theo dõi DOM thay đổi khi React/Next.js render
+    const observer = new MutationObserver(() => {
+      scanAndAutoClick();
+    });
+
+    if (document.body) {
+      observer.observe(document.body, { childList: true, subtree: true });
+    } else {
+      document.addEventListener("DOMContentLoaded", () => {
+        if (document.body) observer.observe(document.body, { childList: true, subtree: true });
+      });
+    }
+
+    // 4. Bắt thay đổi route URL của Next.js (pushState / popstate)
+    window.addEventListener("popstate", () => setTimeout(scanAndAutoClick, 400));
+    const origPush = history.pushState;
+    history.pushState = function (...args) {
+      const res = origPush.apply(this, args);
+      setTimeout(scanAndAutoClick, 400);
+      return res;
+    };
+  }
+
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", init);
+    document.addEventListener("DOMContentLoaded", initObserver);
   } else {
-    init();
+    initObserver();
   }
 })();
 

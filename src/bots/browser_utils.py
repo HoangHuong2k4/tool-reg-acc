@@ -1,48 +1,48 @@
-def get_window_bounds(index, batch_size=3, max_cols=4, screen_w=1800, screen_h=1000, zero_based_index=False):
+def get_window_bounds(index, batch_size=3, max_cols=4, screen_w=1800, screen_h=1000, zero_based_index=False, grid_2x2=False):
     """
     Tính toán kích thước và vị trí của trình duyệt để chia đều màn hình.
-    Hỗ trợ chia lưới 2 hàng (ví dụ: 4 tab chia 2 trên, 2 dưới; 6 tab chia 3 trên, 3 dưới).
+    - Mặc định (grid_2x2=False cho CapCut, Higgsfield, Dreamina...): 1 hàng ngang (ví dụ 4 tab là 4 cột trên 1 hàng 4-1 full chiều cao).
+    - Riêng Grok (grid_2x2=True): 4 tab chia 2 hàng x 2 cột (2 trên, 2 dưới).
     Trả về: (window_width, window_height, x, y)
     """
     idx = index if zero_based_index else (index - 1)
     
-    # ── Trường hợp 4 tab: Chia lưới 2x2 (2 trên, 2 dưới) ──
-    if batch_size == 4:
-        cols = 2
-        rows = 2
-        window_width = screen_w // cols
-        window_height = screen_h // rows
-        col = idx % cols
-        row = (idx // cols) % rows
-        x = col * window_width
-        y = row * window_height
-        return window_width, window_height, x, y
+    # ── Chế độ dành riêng cho Grok: Chia lưới 2x2 (2 trên, 2 dưới) ──
+    if grid_2x2:
+        if batch_size == 4:
+            cols = 2
+            rows = 2
+            window_width = screen_w // cols
+            window_height = screen_h // rows
+            col = idx % cols
+            row = (idx // cols) % rows
+            x = col * window_width
+            y = row * window_height
+            return window_width, window_height, x, y
 
-    # ── Trường hợp 5 hoặc 6 tab: Chia lưới 3x2 (3 trên, 3 dưới) ──
-    if batch_size in (5, 6):
-        cols = 3
-        rows = 2
-        window_width = screen_w // cols
-        window_height = screen_h // rows
-        col = idx % cols
-        row = (idx // cols) % rows
-        x = col * window_width
-        y = row * window_height
-        return window_width, window_height, x, y
+        if batch_size in (5, 6):
+            cols = 3
+            rows = 2
+            window_width = screen_w // cols
+            window_height = screen_h // rows
+            col = idx % cols
+            row = (idx // cols) % rows
+            x = col * window_width
+            y = row * window_height
+            return window_width, window_height, x, y
 
-    # ── Trường hợp > 6 tab: Chia lưới 4x2 (4 trên, 4 dưới) ──
-    if batch_size > 6:
-        cols = min(max_cols, 4)
-        rows = 2
-        window_width = screen_w // cols
-        window_height = screen_h // rows
-        col = idx % cols
-        row = (idx // cols) % rows
-        x = col * window_width
-        y = row * window_height
-        return window_width, window_height, x, y
+        if batch_size > 6:
+            cols = min(max_cols, 4)
+            rows = 2
+            window_width = screen_w // cols
+            window_height = screen_h // rows
+            col = idx % cols
+            row = (idx // cols) % rows
+            x = col * window_width
+            y = row * window_height
+            return window_width, window_height, x, y
 
-    # ── Trường hợp 1, 2 hoặc 3 tab: 1 hàng ngang full chiều cao ──
+    # ── Mặc định cho tất cả các bot khác (CapCut, Higgsfield...): 1 hàng ngang (4-1) full chiều cao ──
     cols = min(batch_size, max_cols)
     window_width = screen_w // cols
     window_height = screen_h

@@ -496,6 +496,33 @@ def capcut_accounts_raw_trial_7day():
                 pass
     return text, 200, {"Content-Type": "text/plain; charset=utf-8"}
 
+@app.route("/api/capcut/accounts/raw_paid")
+def capcut_accounts_raw_paid():
+    text = ""
+    session_only = request.args.get('session', 'false').lower() == 'true'
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            if session_only:
+                cursor.execute("SELECT email, password, join_link, uudai FROM accounts WHERE app='capcut' AND uudai IS NOT NULL AND uudai != '' AND uudai != 'trial_7day' AND id > ? ORDER BY id ASC", (state_capcut.last_start_id,))
+            else:
+                cursor.execute("SELECT email, password, join_link, uudai FROM accounts WHERE app='capcut' AND uudai IS NOT NULL AND uudai != '' AND uudai != 'trial_7day' ORDER BY id ASC")
+            for row in cursor.fetchall():
+                jl = row.get('join_link', '') or ''
+                uu = row.get('uudai', '') or ''
+                text += f"{row['email']}\t{row['password']}\t{jl}\t{uu}\n"
+    except Exception:
+        pass
+    if not text.strip() and not session_only:
+        paid_file = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "paid_accounts.txt"))
+        if os.path.exists(paid_file):
+            try:
+                with open(paid_file, "r", encoding="utf-8") as f:
+                    text = f.read()
+            except:
+                pass
+    return text, 200, {"Content-Type": "text/plain; charset=utf-8"}
+
 @app.route("/api/capcut/accounts/raw_status_prices")
 def capcut_accounts_raw_status_prices():
     text = ""
@@ -2656,6 +2683,8 @@ def _run_grok_task(count, threads, browser_type, headless, mail_type, mail_api_s
             mod_name = "src.bots.grok_hotmail"
         elif mail_type == "domain":
             mod_name = "src.bots.grok_domain"
+        elif mail_type == "gmail94":
+            mod_name = "src.bots.grok_gmail94"
         else:
             mod_name = "src.bots.grok_billing"
             
@@ -2664,6 +2693,22 @@ def _run_grok_task(count, threads, browser_type, headless, mail_type, mail_api_s
         bot = state_grok.module
         bot.log = state_grok.log
         bot.GLOBAL_STOP_EVENT = state_grok.task_stop
+
+        if mail_type == "gmail94":
+            cfg = {}
+            try:
+                with get_db() as conn:
+                    for row in conn.execute("SELECT key, value FROM settings"):
+                        cfg[row["key"]] = row["value"]
+            except:
+                pass
+            token = cfg.get("GMAIL94_TOKEN", "").strip()
+            if not token:
+                state_grok.log("❌ Chưa cấu hình GMAIL94_TOKEN trong Cài đặt!", "ERR")
+                state_grok.log_queue.put(json.dumps({"type": "done", "ok": 0, "fail": 0}))
+                return
+            bot.GMAIL94_TOKEN = token
+            bot.GMAIL94_PASSWORD = cfg.get("GMAIL94_PASSWORD", "") or "grokai123"
 
         # Patch save_account to use DB
         def grok_save_db(email, password):
@@ -2782,19 +2827,24 @@ def x_hunter_status():
 
 @app.route("/api/x_hunter/login", methods=["POST"])
 def x_hunter_login():
-    from src.bots.x_grok_hunter import open_login_window, set_web_log_callback
-    set_web_log_callback(state_grok.log)
-    ok, msg = open_login_window()
+    import importlib
+    import src.bots.x_grok_hunter as xh
+    xh = importlib.reload(xh)
+    xh.set_web_log_callback(state_grok.log)
+    ok, msg = xh.open_login_window()
     return jsonify({"success": ok, "message": msg})
 
 @app.route("/api/x_hunter/start", methods=["POST"])
 def x_hunter_start():
-    from src.bots.x_grok_hunter import start_hunter_background, set_web_log_callback
-    set_web_log_callback(state_grok.log)
+    import importlib
+    import src.bots.x_grok_hunter as xh
+    xh = importlib.reload(xh)
+    xh.set_web_log_callback(state_grok.log)
     data = request.get_json(silent=True) or {}
-    interval = int(data.get("interval", 35))
+    interval = int(data.get("interval", 30))
     headless = bool(data.get("headless", True))
-    ok, msg = start_hunter_background(interval=interval, headless=headless)
+    max_age_minutes = int(data.get("max_age_minutes", 15))
+    ok, msg = xh.start_hunter_background(interval=interval, headless=headless, max_age_minutes=max_age_minutes)
     return jsonify({"success": ok, "message": msg})
 
 @app.route("/api/x_hunter/stop", methods=["POST"])
@@ -2802,6 +2852,97 @@ def x_hunter_stop():
     from src.bots.x_grok_hunter import stop_hunter_background
     ok, msg = stop_hunter_background()
     return jsonify({"success": ok, "message": msg})
+
+@app.route("/api/x_hunter/debug")
+def x_hunter_debug():
+    import src.bots.x_grok_hunter as xh
+    if not xh.ACTIVE_HUNTER_DRIVER:
+        return jsonify({"error": "No active driver"})
+    try:
+        drv = xh.ACTIVE_HUNTER_DRIVER
+        url = drv.current_url
+        title = drv.title
+        arts = drv.find_elements("css selector", 'article[data-testid="tweet"]')
+        body_text = drv.find_element("css selector", "body").text[:2500]
+        return jsonify({
+            "url": url,
+            "title": title,
+            "article_count": len(arts),
+            "body_snippet": body_text
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+@app.route("/api/grok/live_latest_code")
+def api_grok_live_latest_code():
+    import src.bots.x_grok_hunter as xh
+    import os, re, requests
+    latest = xh.RECENT_CODES_FOUND[0] if xh.RECENT_CODES_FOUND else None
+    if not latest:
+        txt_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "grok_referral_codes.txt"))
+        if os.path.exists(txt_path):
+            try:
+                with open(txt_path, "r", encoding="utf-8") as f:
+                    lines = [line.strip() for line in f if line.strip()]
+                    if lines:
+                        last_line = lines[-1]
+                        m_code = re.search(r'CODE:\s*([A-Za-z0-9_-]+)', last_line)
+                        m_time = re.search(r'\[(.*?)\]', last_line)
+                        if m_code:
+                            code = m_code.group(1).strip()
+                            latest = {
+                                "code": code,
+                                "refer_url": f"https://grok.com/refer/bot?code={code}",
+                                "time": m_time.group(1) if m_time else "",
+                                "source": "file_sync"
+                            }
+            except Exception:
+                pass
+
+    receivers = 0
+    relay_running = False
+    try:
+        r = requests.get("http://127.0.0.1:17865/status", headers={"Authorization": "Bearer 7IgWBPSxd1GTOzjLQUurK1kR8nvZrLF_vycX-Fc61-w"}, timeout=0.6)
+        if r.status_code == 200:
+            relay_running = True
+            receivers = r.json().get("receivers", 0)
+    except Exception:
+        pass
+
+    return jsonify({
+        "success": True,
+        "latest": latest,
+        "is_running": xh.is_hunter_running(),
+        "total_seen": len(xh.load_seen_codes()),
+        "relay_running": relay_running,
+        "receivers": receivers
+    })
+
+@app.route("/api/grok/sync_now", methods=["POST", "GET"])
+def api_grok_sync_now():
+    import src.bots.x_grok_hunter as xh
+    import os, re
+    code = request.args.get("code") or (request.get_json(silent=True) or {}).get("code")
+    if not code:
+        if xh.RECENT_CODES_FOUND:
+            code = xh.RECENT_CODES_FOUND[0].get("code")
+        else:
+            txt_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "grok_referral_codes.txt"))
+            if os.path.exists(txt_path):
+                try:
+                    with open(txt_path, "r", encoding="utf-8") as f:
+                        lines = [line.strip() for line in f if line.strip()]
+                        if lines:
+                            m_code = re.search(r'CODE:\s*([A-Za-z0-9_-]+)', lines[-1])
+                            if m_code:
+                                code = m_code.group(1).strip()
+                except Exception:
+                    pass
+    if not code:
+        return jsonify({"success": False, "error": "Chưa có mã Grok nào được quét"})
+
+    ok = xh.publish_to_relay(code)
+    return jsonify({"success": ok, "code": code, "refer_url": f"https://grok.com/refer/bot?code={code}"})
 
 
 
@@ -2820,6 +2961,12 @@ def _auto_proxy_rotator():
             pass
 
 threading.Thread(target=_auto_proxy_rotator, daemon=True).start()
+
+try:
+    from src.bots.x_grok_hunter import ensure_relay_running
+    threading.Thread(target=ensure_relay_running, daemon=True).start()
+except Exception:
+    pass
 
 
 if __name__ == "__main__":

@@ -1947,20 +1947,6 @@ def _do_get_payment_link(driver, email, password, attempt=0, save_trial_7day=Fal
                 record_pricing_status(email, price_label)
                 update_account_payment_link(email, None, has_trial=is_0d, uudai=price_label)
 
-                # [BƯỚC 3] Nếu bật chế độ CHỈ LẤY TRIAL 7 NGÀY (save_trial_7day=True) mà KHÔNG PHẢI 0đ
-                if save_trial_7day and not is_0d:
-                    log(f"[{email}] ℹ️ [CHẾ ĐỘ CHỈ LẤY TRIAL 7 NGÀY] Gói là {price_label} -> BỎ QUA không lấy link (đã lưu phân loại giá)!", "INFO")
-                    # Đóng modal
-                    try:
-                        close_btns = driver.find_elements(By.CSS_SELECTOR, '.lv-modal-close-icon, button[aria-label="close"], .skip-mrkR37')
-                        for cb in close_btns:
-                            if cb.is_displayed():
-                                try_click(driver, cb, "Đóng modal Nâng cấp")
-                                break
-                    except Exception:
-                        pass
-                    return None
-
                 # [BƯỚC 4] Tìm nút bấm Nâng cấp trong thẻ Pro đã xác nhận
                 upgrade_btn = None
                 if target_pro_card:
@@ -2040,7 +2026,7 @@ def _do_get_payment_link(driver, email, password, attempt=0, save_trial_7day=Fal
             time.sleep(1)
             
         if payment_url:
-            # 1. NẾU LÀ TRIAL 7 NGÀY (is_0d): BẮT BUỘC xác minh trang checkout thật sự là 0đ
+            # 1. NẾU LÀ TRIAL 7 NGÀY (is_0d): Xác minh trang checkout thật sự là 0đ
             if is_0d:
                 log(f"[{email}] Đang quét DOM cashier Pipopay để xác minh số tiền đến hạn hôm nay là 0đ...", "INFO")
                 is_verified_0d = verify_trial_checkout_dom(driver, timeout=12)
@@ -2049,22 +2035,25 @@ def _do_get_payment_link(driver, email, password, attempt=0, save_trial_7day=Fal
                         f.write(f"{email}\t{password}\t{payment_url}\n")
                     with open("data/success_links.txt", "a", encoding="utf-8") as f:
                         f.write(f"{email}\t{password}\t{payment_url}\n")
-                    log(f"🎉 [{email}] ĐÃ XÁC MINH VÀ LƯU VÀO data/trial_7day.txt: {payment_url}", "OK")
+                    log(f"🎉 [{email}] ĐÃ XÁC MINH VÀ LƯU VÀO data/trial_7day.txt (0đ Trial 7 ngày): {payment_url}", "OK")
                     update_account_payment_link(email, payment_url, has_trial=True, uudai="trial_7day")
                     return payment_url
                 else:
-                    log(f"⚠️ [{email}] Trang checkout Pipopay KHÔNG PHẢI 0đ! Không lưu vào trial_7day.txt.", "WARN")
+                    log(f"⚠️ [{email}] Trang checkout Pipopay KHÔNG PHẢI 0đ! Lưu vào data/paid_accounts.txt.", "WARN")
                     record_pricing_status(email, "checkout không phải 0đ")
                     update_account_payment_link(email, payment_url, has_trial=False, uudai="checkout_not_0d")
-                    if not save_trial_7day:
-                        with open("data/success_links.txt", "a", encoding="utf-8") as f:
-                            f.write(f"{email}\t{password}\t{payment_url}\n")
+                    with open("data/paid_accounts.txt", "a", encoding="utf-8") as f:
+                        f.write(f"{email}\t{password}\t{payment_url}\tcheckout_not_0d\n")
+                    with open("data/success_links.txt", "a", encoding="utf-8") as f:
+                        f.write(f"{email}\t{password}\t{payment_url}\n")
                     return payment_url
 
-            # 2. GÓI TRẢ PHÍ (22.000đ hoặc giá khác):
+            # 2. GÓI TRẢ PHÍ (22.000đ hoặc giá khác): Lưu tách riêng vào data/paid_accounts.txt và data/success_links.txt
+            with open("data/paid_accounts.txt", "a", encoding="utf-8") as f:
+                f.write(f"{email}\t{password}\t{payment_url}\t{price_label}\n")
             with open("data/success_links.txt", "a", encoding="utf-8") as f:
                 f.write(f"{email}\t{password}\t{payment_url}\n")
-            log(f"✅ [{email}] Đã lưu link thanh toán ({price_label}) vào data/success_links.txt: {payment_url}", "OK")
+            log(f"✅ [{email}] Đã lưu link thanh toán ({price_label}) vào data/paid_accounts.txt và data/success_links.txt: {payment_url}", "OK")
             update_account_payment_link(email, payment_url, has_trial=False, uudai=price_label)
             return payment_url
 

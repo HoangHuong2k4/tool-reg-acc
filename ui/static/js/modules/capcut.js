@@ -150,8 +150,16 @@ async function ccCopyTrial7day(){
     const r=await fetch('/api/capcut/accounts/raw_trial_7day?session=' + (ccAccountsTab==='session'));
     const t=await r.text();
     if(!t.trim()){showToast('⚠️','Chưa có link Trial 7 ngày nào!');return;}
-    await navigator.clipboard.writeText(t);showToast('🎉','Đã copy danh sách link Trial 7 ngày!');
+    await navigator.clipboard.writeText(t);showToast('🎉','Đã copy danh sách link Trial 7 ngày (0đ)!');
   }catch(e){showToast('❌','Lỗi copy link Trial!');}
+}
+async function ccCopyPaidAccounts(){
+  try{
+    const r=await fetch('/api/capcut/accounts/raw_paid?session=' + (ccAccountsTab==='session'));
+    const t=await r.text();
+    if(!t.trim()){showToast('⚠️','Chưa có link gói trả phí nào!');return;}
+    await navigator.clipboard.writeText(t);showToast('💳','Đã copy danh sách gói tính phí!');
+  }catch(e){showToast('❌','Lỗi copy gói tính phí!');}
 }
 async function ccCopyStatusPrices(){
   try{
@@ -171,10 +179,9 @@ async function ccStartTask(){
   const count=parseInt(document.getElementById('cc-count').value)||1;
   const threads=parseInt(document.getElementById('cc-threads').value)||1;
   const jl=document.getElementById('cc-joinLink').value.trim();
-  const saveTrial7day = document.getElementById('cc-saveTrial7day') ? document.getElementById('cc-saveTrial7day').checked : ccSaveTrial7day;
   if((ccMode===2||ccMode===4) && !jl){showToast('⚠️','Vui lòng nhập Link Join Team!');return;}
   try{
-    const r=await fetch('/api/capcut/task/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:ccMode,count,threads,join_link:jl,mail_type:ccMailType,mail_api_source:ccMailApiSource,mail_domain_source:ccDomainSource,browser_type:ccBrowser,headless:ccHeadless,incognito:ccIncognito,save_trial_7day:saveTrial7day})});
+    const r=await fetch('/api/capcut/task/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:ccMode,count,threads,join_link:jl,mail_type:ccMailType,mail_api_source:ccMailApiSource,mail_domain_source:ccDomainSource,browser_type:ccBrowser,headless:ccHeadless,incognito:ccIncognito})});
     const d=await r.json();
     if(!d.success){showToast('❌',d.error);return;}
     ccIsRunning=true;ccSetUI(true);ccStartSSE();

@@ -15,26 +15,26 @@ let grkTotal = 0, grkOk = 0, grkFail = 0;
 
 function grkSetMailType(t) {
   grkMailType = t;
-  ['grk-mailHotmail','grk-mailDomain','grk-mailBilling'].forEach(id => {
+  ['grk-mailHotmail','grk-mailDomain','grk-mailGmail94','grk-mailBilling'].forEach(id => {
       let el = document.getElementById(id);
       if(el) el.classList.remove('active');
   });
   
-  const map = {hotmail: 'grk-mailHotmail', domain: 'grk-mailDomain', billing: 'grk-mailBilling'};
+  const map = {hotmail: 'grk-mailHotmail', domain: 'grk-mailDomain', gmail94: 'grk-mailGmail94', billing: 'grk-mailBilling'};
   let activeEl = document.getElementById(map[t]);
   if(activeEl) activeEl.classList.add('active');
 
   const hGroup = document.getElementById('grk-hotmailGroup');
   const dGroup = document.getElementById('grk-domainGroup');
+  const g94Group = document.getElementById('grk-gmail94Group');
   const apiGroup = document.getElementById('grk-apiSourceGroup');
   const bGroup = document.getElementById('grk-billingGroup');
-  const paymentGroup = document.getElementById('grk-openPaymentGroup');
   
   if (hGroup) hGroup.style.display = t === 'hotmail' ? '' : 'none';
   if (dGroup) dGroup.style.display = t === 'domain' ? '' : 'none';
+  if (g94Group) g94Group.style.display = t === 'gmail94' ? '' : 'none';
   if (apiGroup) apiGroup.style.display = t === 'hotmail' ? '' : 'none';
   if (bGroup) bGroup.style.display = t === 'billing' ? '' : 'none';
-  if (paymentGroup) paymentGroup.style.display = t === 'billing' ? 'none' : '';
 }
 
 function grkSetApiSource(s) {
@@ -425,8 +425,33 @@ async function xHunterCheckStatus() {
         startBtn.style.background = '#1d9bf0';
       }
     }
+
+    // Kiểm tra Chrome Extension Profile receivers
+    const syncRes = await fetch('/api/grok/live_latest_code');
+    const syncData = await syncRes.json();
+    const receiversEl = document.getElementById('x-hunter-receivers');
+    if (receiversEl) {
+      const rec = syncData.receivers || 0;
+      receiversEl.textContent = `${rec} Profile đã kết nối`;
+      receiversEl.style.color = rec > 0 ? '#10b981' : '#f59e0b';
+    }
   } catch (e) {
     console.error('Error fetching X Hunter status:', e);
+  }
+}
+
+async function xHunterSyncProfiles() {
+  showToast('⚡', 'Đang phát mã mới nhất tới các Profile Chrome...');
+  try {
+    const res = await fetch('/api/grok/sync_now', { method: 'POST' });
+    const data = await res.json();
+    if (data.success) {
+      showToast('✅', `Đã mở mã ${data.code} trên tất cả tab Grok!`);
+    } else {
+      showToast('⚠️', data.error || 'Chưa có mã để phát');
+    }
+  } catch (e) {
+    showToast('❌', 'Lỗi kết nối server');
   }
 }
 
@@ -461,7 +486,7 @@ async function xHunterToggle() {
       const res = await fetch('/api/x_hunter/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ interval: 35, headless: true })
+        body: JSON.stringify({ interval: 30, headless: true })
       });
       const data = await res.json();
       showToast(data.success ? '🚀' : '⚠️', data.message);
