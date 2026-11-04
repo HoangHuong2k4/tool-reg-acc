@@ -96,7 +96,7 @@
     return true;
   }
 
-  // Danh sách từ khóa ưu tiên tìm nút
+  // Danh sách từ khóa ưu tiên tìm nút Trial (CHỈ bấm Start 14-day free trial, KHÔNG bấm Choose a plan)
   const TRIAL_KEYWORDS = [
     "start your 14 day free trial",
     "start 14 day free trial",
@@ -114,36 +114,34 @@
     "claim",
     "dùng thử 14 ngày",
     "dùng thử miễn phí",
-    "dùng thử",
     "nhận ưu đãi",
     "accept invite",
-    "accept referral",
-    "try grok bot for free",
-    "try grok",
-    "try for free",
-    "get started",
-    "choose a plan" // Dự phòng khi tài khoản không đủ điều kiện trial trực tiếp
+    "accept referral"
   ];
 
-  // Tìm nút Trial hoặc Continue tốt nhất trên trang
+  // Tìm nút Trial tốt nhất trên trang
   function findTrialButton() {
-    // 1. Tìm theo data-testid chính xác trước
+    // 1. Ưu tiên số 1: data-testid="referral-trial-sign-up" (Start your 14 day free trial)
+    const exactSignUpBtn = document.querySelector('[data-testid="referral-trial-sign-up"]');
+    if (exactSignUpBtn && isElementClickable(exactSignUpBtn)) {
+      return { el: exactSignUpBtn, label: "Start your 14 day free trial", priority: 100 };
+    }
+
+    // 2. Tìm theo data-testid trial hợp lệ khác (BỎ QUA referral-trial-choose-plan)
     const testIdSelectors = [
-      '[data-testid="referral-trial-sign-up"]',
       '[data-testid="referral-trial-claim"]',
-      '[data-testid*="referral-trial"]',
       '[data-testid*="trial-button"]',
-      '[data-testid="referral-trial-choose-plan"]'
+      '[data-testid*="referral-trial-sign"]'
     ];
 
     for (const sel of testIdSelectors) {
       const el = document.querySelector(sel);
       if (el && isElementClickable(el)) {
-        return { el, label: el.textContent?.trim() || sel, priority: 1 };
+        return { el, label: el.textContent?.trim() || sel, priority: 90 };
       }
     }
 
-    // 2. Tìm tất cả các button, a, role=button
+    // 3. Tìm tất cả các button, a, role=button khớp từ khóa trial (BỎ QUA choose a plan)
     const candidates = Array.from(document.querySelectorAll('button, a, [role="button"], input[type="button"], input[type="submit"]'));
     let bestMatch = null;
     let highestScore = -1;
@@ -152,12 +150,11 @@
       if (!isElementClickable(el)) continue;
 
       const text = (el.textContent || el.value || "").toLowerCase().trim();
-      if (!text) continue;
+      if (!text || text.includes("choose a plan") || text.includes("choose plan")) continue;
 
       for (let i = 0; i < TRIAL_KEYWORDS.length; i++) {
         const kw = TRIAL_KEYWORDS[i];
         if (text.includes(kw)) {
-          // Điểm càng cao khi từ khóa ở đầu danh sách (ưu tiên 14 day trial > choose plan)
           const score = 100 - i;
           if (score > highestScore) {
             highestScore = score;
@@ -173,6 +170,13 @@
 
   function isElementClickable(el) {
     if (!el || el.disabled || el.getAttribute("aria-disabled") === "true") return false;
+
+    // Bỏ qua tuyệt đối nút "Choose a plan" theo yêu cầu người dùng
+    const text = (el.textContent || el.value || "").toLowerCase().trim();
+    if (text.includes("choose a plan") || text.includes("choose plan") || el.getAttribute("data-testid") === "referral-trial-choose-plan") {
+      return false;
+    }
+
     const style = window.getComputedStyle(el);
     if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") return false;
     const rect = el.getBoundingClientRect();

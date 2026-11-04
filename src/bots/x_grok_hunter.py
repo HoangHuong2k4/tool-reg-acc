@@ -187,7 +187,9 @@ def publish_to_relay(code):
         payload = {
             "code": code,
             "timestamp": int(time.time() * 1000),
-            "eventId": str(uuid.uuid4())
+            "eventId": str(uuid.uuid4()),
+            "retry": True,
+            "force": True
         }
         res = requests.post(url, json=payload, headers=headers, timeout=2)
         if res.status_code == 200:
@@ -455,14 +457,34 @@ def run_hunter(interval=30, headless=False, stop_event=None, max_age_minutes=15)
             log(f"--- [Chu kỳ #{cycle}] Quét các bài đăng Live mới nhất ({HUNTER_STATS['last_scan']}) ---", "INFO")
 
             articles = []
+            session_broken = False
             for _ in range(4):
                 try:
                     articles = driver.find_elements("css selector", 'article[data-testid="tweet"]')
                     if articles:
                         break
+                except Exception as ex:
+                    if "invalid session id" in str(ex).lower():
+                        session_broken = True
+                        break
+                time.sleep(2)
+
+            if session_broken:
+                log("⚠️ Phát hiện Chrome Hunter mất kết nối (invalid session id)! Khởi động lại Chrome...", "WARN")
+                try:
+                    driver.quit()
                 except Exception:
                     pass
-                time.sleep(2)
+                try:
+                    driver = get_browser(headless=headless)
+                    ACTIVE_HUNTER_DRIVER = driver
+                    driver.get(SEARCH_URL)
+                    time.sleep(5)
+                    continue
+                except Exception as ex_re:
+                    log(f"Không thể khởi động lại Chrome: {ex_re}", "ERR")
+                    time.sleep(5)
+                    continue
 
             log(f"Đã tìm thấy {len(articles)} bài đăng trên dòng thời gian Live.", "INFO")
             new_codes_this_round = 0

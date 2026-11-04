@@ -56,7 +56,7 @@ HOTMAIL_API_URL = 'https://tools.dongvanfb.net/api/get_messages_oauth2'
 GROK_HOTMAIL_FILE = "data/hotmails_grok.txt"
 GROK_URL = "https://accounts.x.ai/sign-up"
 OUTPUT_FILE = "data/grok_accounts.txt"
-PASSWORD = "grokai123"
+PASSWORD = get_db_setting("GROK_PASSWORD", "grokai123") or "grokai123"
 
 DRIVER_LOCK = threading.Lock()
 HOTMAIL_QUEUE = queue.Queue()
@@ -533,8 +533,7 @@ def worker_loop(driver, email, password, acc_info, mail_api_source="mixmmo", ope
             send_telegram_message(f"🎉 Đăng ký Grok referral thành công!\nEmail: {masked_email}")
             return True
 
-        # ── 2. NÚT 'Choose a plan' (Free trial not available) ──
-        # CHỈ ĐƯỢC BẤM KHI ĐÃ QUA BƯỚC TẠO TÀI KHOẢN
+        # ── 2. NÚT 'Choose a plan' (Free trial not available - KHÔNG BẤM) ──
         if account_created or age_submitted:
             trial_title = _find(driver, By.CSS_SELECTOR, '[data-testid="referral-trial-title"]')
             choose_plan_btn = _find(driver, By.CSS_SELECTOR, '[data-testid="referral-trial-choose-plan"]')
@@ -543,12 +542,11 @@ def worker_loop(driver, email, password, acc_info, mail_api_source="mixmmo", ope
             if choose_plan_btn:
                 state = "CHOOSE_PLAN"
                 if state != last_state:
-                    log(f"[{email}] Màn hình thông báo Trial không khả dụng -> Click 'Choose a plan'...", "INFO")
-                try_click(driver, choose_plan_btn, "Choose a plan")
-                time.sleep(3)
-                last_state = state
-                stuck_count = 0
-                continue
+                    log(f"[{email}] Thông báo Trial không khả dụng (Choose a plan) -> Bỏ qua không bấm.", "INFO")
+                if not saved:
+                    save_account(email, password)
+                    saved = True
+                return True
 
         # ── 3. BƯỚC OTP ("Check your email") ──────────────────
         otp_inp = _find(driver, By.CSS_SELECTOR, 'input[data-input-otp="true"], input[autocomplete="one-time-code"]')
@@ -761,14 +759,16 @@ def worker_loop(driver, email, password, acc_info, mail_api_source="mixmmo", ope
             continue
 
         # ── 7. NÚT 'Start your 14 day free trial' / Nhận ưu đãi Referral ────
-        trial_btn = _find(driver, By.CSS_SELECTOR, '[data-testid="referral-trial-sign-up"], [data-testid*="referral-trial"], [data-testid*="referral"]')
+        trial_btn = _find(driver, By.CSS_SELECTOR, '[data-testid="referral-trial-sign-up"]')
         if not trial_btn:
             trial_btn = _find(driver, By.XPATH, 
-                "//button[contains(., 'Start your 14 day free trial') or contains(., 'free trial') or contains(., 'Free trial') or contains(., 'Claim') or contains(., 'claim') or contains(., 'ưu đãi') or contains(., 'dùng thử') or contains(., 'Get started') or contains(., 'Try Grok') or contains(., 'Accept invite') or contains(., 'Accept referral') or contains(., '14일')] "
-                "| //a[contains(., 'Start your 14 day free trial') or contains(., 'free trial') or contains(., 'Free trial') or contains(., 'Claim') or contains(., 'claim') or contains(., 'ưu đãi') or contains(., 'dùng thử') or contains(., 'Get started') or contains(., 'Try Grok') or contains(., 'Accept invite') or contains(., 'Accept referral') or contains(., '14일')] "
-                "| //*[@role='button' and (contains(., 'free trial') or contains(., 'Claim') or contains(., 'ưu đãi') or contains(., 'dùng thử') or contains(., 'trial'))]"
+                "//button[contains(., 'Start your 14 day free trial') or contains(., '14 day free trial') or contains(., '14-day free trial') or contains(., '14일')] "
+                "| //a[contains(., 'Start your 14 day free trial') or contains(., '14 day free trial') or contains(., '14-day free trial') or contains(., '14일')] "
+                "| //*[@role='button' and (contains(., '14 day') or contains(., '14-day'))]"
             )
-        
+        if not trial_btn:
+            trial_btn = _find(driver, By.CSS_SELECTOR, '[data-testid="referral-trial-claim"], [data-testid*="trial-button"]')
+
         # Nếu chưa thấy mà đang ở link refer, cuộn trang xuống nhẹ để kích hoạt tải phần tử
         if not trial_btn and "refer" in url:
             try:
@@ -779,8 +779,8 @@ def worker_loop(driver, email, password, acc_info, mail_api_source="mixmmo", ope
         if trial_btn:
             state = "START_TRIAL"
             if state != last_state:
-                log(f"[{email}] Thấy nút Nhận ưu đãi / Start free trial -> Click...", "INFO")
-            try_click(driver, trial_btn, "Start trial / Nhận ưu đãi")
+                log(f"[{email}] Thấy nút 'Start your 14 day free trial' -> Bấm luôn...", "OK")
+            try_click(driver, trial_btn, "Start your 14 day free trial")
             time.sleep(3)
             last_state = state
             stuck_count = 0
@@ -905,7 +905,7 @@ def register_one_account(index, keep_open=False, batch_size=3, headless=False,
             return False
 
         email = acc["email"]
-        password = PASSWORD
+        password = getattr(sys.modules[__name__], "PASSWORD", None) or get_db_setting("GROK_PASSWORD", "grokai123") or "grokai123"
         log(f"[Worker {index}] Đăng ký Grok với: {email}", "INFO")
 
         driver = setup_driver(index, keep_open=False, batch_size=batch_size,

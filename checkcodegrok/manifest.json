@@ -10,8 +10,7 @@
     "tabs"
   ],
   "host_permissions": [
-    "https://grok.com/*",
-    "http://127.0.0.1/*"
+    "<all_urls>"
   ],
   "content_scripts": [
     {

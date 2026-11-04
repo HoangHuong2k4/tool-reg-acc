@@ -52,7 +52,7 @@ def send_telegram_message(text):
 GMAIL94_TOKEN = ""
 GMAIL94_PASSWORD = ""
 OUTPUT_FILE = "data/grok_accounts.txt"
-PASSWORD = "grokai123"
+PASSWORD = get_db_setting("GROK_PASSWORD", "grokai123") or "grokai123"
 
 from src.utils.masa_api import submit_to_masa_api
 
@@ -352,7 +352,7 @@ def worker_loop(driver, email, password, order_id="", open_payment=False, apple_
             send_telegram_message(f"🎉 Đăng ký Grok referral thành công!\nEmail: {masked_email}")
             return True
 
-        # ── 2. NÚT 'Choose a plan' (Free trial not available) ──
+        # ── 2. NÚT 'Choose a plan' (Free trial not available - KHÔNG BẤM) ──
         if account_created or age_submitted:
             trial_title = _find(driver, By.CSS_SELECTOR, '[data-testid="referral-trial-title"]')
             choose_plan_btn = _find(driver, By.CSS_SELECTOR, '[data-testid="referral-trial-choose-plan"]')
@@ -361,12 +361,11 @@ def worker_loop(driver, email, password, order_id="", open_payment=False, apple_
             if choose_plan_btn:
                 state = "CHOOSE_PLAN"
                 if state != last_state:
-                    log(f"[{email}] Màn hình thông báo Trial không khả dụng -> Click 'Choose a plan'...", "INFO")
-                try_click(driver, choose_plan_btn, "Choose a plan")
-                time.sleep(3)
-                last_state = state
-                stuck_count = 0
-                continue
+                    log(f"[{email}] Thông báo Trial không khả dụng (Choose a plan) -> Bỏ qua không bấm.", "INFO")
+                if not saved:
+                    save_account(email, password)
+                    saved = True
+                return True
 
         # ── 3. BƯỚC OTP ("Check your email") ──────────────────
         otp_inp = _find(driver, By.CSS_SELECTOR, 'input[data-input-otp="true"], input[autocomplete="one-time-code"]')
@@ -479,7 +478,7 @@ def worker_loop(driver, email, password, order_id="", open_payment=False, apple_
                 _set_react_value(driver, last_inp, _rand_name(6))
                 time.sleep(0.2)
 
-            reg_pass = password or GMAIL94_PASSWORD or PASSWORD
+            reg_pass = password or getattr(sys.modules[__name__], "PASSWORD", None) or get_db_setting("GROK_PASSWORD", "grokai123") or "grokai123"
             if not pw_inp.get_attribute("value"):
                 _set_react_value(driver, pw_inp, reg_pass)
                 time.sleep(0.3)
@@ -577,13 +576,15 @@ def worker_loop(driver, email, password, order_id="", open_payment=False, apple_
 
         # ── 7. NÚT 'Start your 14 day free trial' / Nhận ưu đãi Referral ────
         if not email_submitted:
-            trial_btn = _find(driver, By.CSS_SELECTOR, '[data-testid="referral-trial-sign-up"], [data-testid*="referral-trial"], [data-testid*="referral"]')
+            trial_btn = _find(driver, By.CSS_SELECTOR, '[data-testid="referral-trial-sign-up"]')
             if not trial_btn:
                 trial_btn = _find(driver, By.XPATH, 
-                    "//button[contains(., 'Start your 14 day free trial') or contains(., 'free trial') or contains(., 'Free trial') or contains(., 'Claim') or contains(., 'claim') or contains(., 'ưu đãi') or contains(., 'dùng thử') or contains(., 'Get started') or contains(., 'Try Grok') or contains(., 'Accept invite') or contains(., 'Accept referral') or contains(., '14일')] "
-                    "| //a[contains(., 'Start your 14 day free trial') or contains(., 'free trial') or contains(., 'Free trial') or contains(., 'Claim') or contains(., 'claim') or contains(., 'ưu đãi') or contains(., 'dùng thử') or contains(., 'Get started') or contains(., 'Try Grok') or contains(., 'Accept invite') or contains(., 'Accept referral') or contains(., '14일')] "
-                    "| //*[@role='button' and (contains(., 'free trial') or contains(., 'Claim') or contains(., 'ưu đãi') or contains(., 'dùng thử') or contains(., 'trial'))]"
+                    "//button[contains(., 'Start your 14 day free trial') or contains(., '14 day free trial') or contains(., '14-day free trial') or contains(., '14일')] "
+                    "| //a[contains(., 'Start your 14 day free trial') or contains(., '14 day free trial') or contains(., '14-day free trial') or contains(., '14일')] "
+                    "| //*[@role='button' and (contains(., '14 day') or contains(., '14-day'))]"
                 )
+            if not trial_btn:
+                trial_btn = _find(driver, By.CSS_SELECTOR, '[data-testid="referral-trial-claim"], [data-testid*="trial-button"]')
 
             if not trial_btn and "refer" in url:
                 try:
@@ -594,7 +595,7 @@ def worker_loop(driver, email, password, order_id="", open_payment=False, apple_
             if trial_btn:
                 state = "START_TRIAL"
                 if state != last_state:
-                    log(f"[{email}] Thấy nút Nhận ưu đãi / Start free trial -> Click...", "INFO")
+                    log(f"[{email}] Thấy nút 'Start your 14 day free trial' -> Bấm luôn...", "OK")
                 try_click(driver, trial_btn, "Start trial / Nhận ưu đãi")
                 time.sleep(3)
                 last_state = state
@@ -648,7 +649,7 @@ def register_one_account(index, count=1, keep_open=False, batch_size=3, headless
 
         email = purchase["email"]
         order_id = purchase["order_id"]
-        password = GMAIL94_PASSWORD or PASSWORD
+        password = getattr(sys.modules[__name__], "PASSWORD", None) or get_db_setting("GROK_PASSWORD", "grokai123") or "grokai123"
         log(f"[Worker {index}] Bắt đầu đăng ký Grok với: {email} (order: {order_id})", "INFO")
 
         driver = setup_driver(index, keep_open=False, batch_size=batch_size,

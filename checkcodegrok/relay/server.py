@@ -81,7 +81,7 @@ class Hub:
         with self.lock:
             # Same event retried after an HTTP timeout must not be broadcast again.
             for previous in self.events:
-                if previous["eventId"] == event_id or (raw.get("retry") is not True and previous["code"] == code and now_ms() - previous["timestamp"] <= MAX_AGE_MS):
+                if previous["eventId"] == event_id or (raw.get("retry") is not True and raw.get("force") is not True and previous["code"] == code and now_ms() - previous["timestamp"] <= 15000):
                     return {"success": True, "duplicate": True, "receivers": len(self.clients), "sequence": previous["sequence"]}
             self.sequence += 1
             event = {"type": "code", "version": 1, "epoch": self.epoch, "sequence": self.sequence,

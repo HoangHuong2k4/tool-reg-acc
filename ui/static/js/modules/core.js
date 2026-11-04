@@ -56,6 +56,9 @@ async function loadSettings() {
     if(document.getElementById('setting-capcut-password')) {
         document.getElementById('setting-capcut-password').value = d.CAPCUT_PASSWORD || 'capcut123';
     }
+    if(document.getElementById('setting-grok-password')) {
+        document.getElementById('setting-grok-password').value = d.GROK_PASSWORD || 'grokai123';
+    }
     if(document.getElementById('setting-gpm-api-url')) {
         document.getElementById('setting-gpm-api-url').value = d.GPM_API_URL || 'http://127.0.0.1:19995';
     }
@@ -115,6 +118,9 @@ async function saveSettings() {
   if(staticListEl) data.PROXY_STATIC_LIST = staticListEl.value.trim();
   if(document.getElementById('setting-capcut-password')) {
       data.CAPCUT_PASSWORD = document.getElementById('setting-capcut-password').value.trim() || 'capcut123';
+  }
+  if(document.getElementById('setting-grok-password')) {
+      data.GROK_PASSWORD = document.getElementById('setting-grok-password').value.trim() || 'grokai123';
   }
   if(document.getElementById('setting-gpm-api-url')) {
       data.GPM_API_URL = document.getElementById('setting-gpm-api-url').value.trim() || 'http://127.0.0.1:19995';

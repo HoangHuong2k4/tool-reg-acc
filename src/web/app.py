@@ -108,6 +108,7 @@ def setup_db_if_not_exists():
             "PROXYXOAY_KEY": "",
             "PROXY_STATIC_LIST": "",
             "CAPCUT_PASSWORD": "capcut123",
+            "GROK_PASSWORD": "grokai123",
             "GPM_API_URL": "http://127.0.0.1:19995",
             "GMAIL94_TOKEN": ""
         }
@@ -126,6 +127,7 @@ def load_settings():
         "PROXYXOAY_KEY": "",
         "PROXY_STATIC_LIST": "",
         "CAPCUT_PASSWORD": "capcut123",
+        "GROK_PASSWORD": "grokai123",
         "GPM_API_URL": "http://127.0.0.1:19995",
         "GMAIL94_TOKEN": "",
         "GMAIL94_PASSWORD": ""
@@ -2662,7 +2664,10 @@ def grok_close_browsers():
 @app.route("/api/grok/task/stream")
 def grok_task_stream():
     def generate():
-        yield f"data: {json.dumps({'type':'log','level':'INFO','time':datetime.now().strftime('%H:%M:%S'),'msg':'Kết nối log stream Grok...'})}\n\n"
+        yield f"data: {json.dumps({'type':'log','level':'INFO','time':datetime.now().strftime('%H:%M:%S'),'msg':'Đã kết nối luồng nhật ký Grok...'})}\n\n"
+        if hasattr(state_grok, "recent_logs"):
+            for old_log in list(state_grok.recent_logs)[-25:]:
+                yield f"data: {old_log}\n\n"
         while True:
             try:
                 msg = state_grok.log_queue.get(timeout=25)
@@ -2694,21 +2699,26 @@ def _run_grok_task(count, threads, browser_type, headless, mail_type, mail_api_s
         bot.log = state_grok.log
         bot.GLOBAL_STOP_EVENT = state_grok.task_stop
 
+        cfg = {}
+        try:
+            with get_db() as conn:
+                for row in conn.execute("SELECT key, value FROM settings"):
+                    cfg[row["key"]] = row["value"]
+        except:
+            pass
+
+        grok_pwd = (cfg.get("GROK_PASSWORD") or "").strip() or "grokai123"
+        bot.PASSWORD = grok_pwd
+
         if mail_type == "gmail94":
-            cfg = {}
-            try:
-                with get_db() as conn:
-                    for row in conn.execute("SELECT key, value FROM settings"):
-                        cfg[row["key"]] = row["value"]
-            except:
-                pass
             token = cfg.get("GMAIL94_TOKEN", "").strip()
             if not token:
                 state_grok.log("❌ Chưa cấu hình GMAIL94_TOKEN trong Cài đặt!", "ERR")
                 state_grok.log_queue.put(json.dumps({"type": "done", "ok": 0, "fail": 0}))
                 return
             bot.GMAIL94_TOKEN = token
-            bot.GMAIL94_PASSWORD = cfg.get("GMAIL94_PASSWORD", "") or "grokai123"
+            bot.GMAIL94_PASSWORD = grok_pwd
+            bot.PASSWORD = grok_pwd
 
         # Patch save_account to use DB
         def grok_save_db(email, password):

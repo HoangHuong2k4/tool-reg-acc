@@ -3,31 +3,25 @@
 // =========================================================================
 
 globalThis.CodeReceiver = (() => {
-  const defaults = { enabled: false, autoBind: true, autoClickTrial: true, enabledAt: 0, boundTabId: null, boundUrl: "", delayMs: 5000 };
+  const defaults = { enabled: true, autoBind: true, autoClickTrial: true, enabledAt: 0, boundTabId: null, boundUrl: "", delayMs: 3000 };
   function isGrokPage(raw) {
-    try {
-      const url = new URL(raw);
-      return url.origin === "https://grok.com" && !url.username && !url.password;
-    } catch { return false; }
+    if (!raw) return false;
+    return raw.includes("grok.com") || raw.includes("x.ai");
   }
   function referralUrl(code) {
     if (typeof code !== "string" || !/^[A-Za-z0-9_-]{6,128}$/.test(code)) throw new Error("Mã nhận không hợp lệ.");
     return `https://grok.com/refer/bot?code=${encodeURIComponent(code)}`;
   }
   function validateSettings(raw) {
-    const settings = {
-      enabled: raw.enabled === true,
+    return {
+      enabled: raw.enabled !== false,
       autoBind: raw.autoBind !== false,
       autoClickTrial: raw.autoClickTrial !== false,
       enabledAt: Number(raw.enabledAt) || 0,
-      boundTabId: raw.boundTabId,
+      boundTabId: raw.boundTabId || null,
       boundUrl: String(raw.boundUrl || ""),
-      delayMs: Math.min(30000, Math.max(3000, Number(raw.delayMs) || 5000))
+      delayMs: Math.min(30000, Math.max(1000, Number(raw.delayMs) || 3000))
     };
-    if (settings.enabled && !settings.autoBind && (!Number.isInteger(settings.boundTabId) || settings.boundTabId < 0)) {
-      throw new Error("Mở tab grok.com rồi bấm Ghim tab Grok đang mở.");
-    }
-    return settings;
   }
   return { defaults, isGrokPage, referralUrl, validateSettings };
 })();
@@ -35,7 +29,7 @@ globalThis.CodeReceiver = (() => {
 globalThis.ReceiverEngine = (() => {
   const QUEUE_ALARM = "grok-receiver-queue";
   const CONNECTION_ALARM = "grok-relay-reconnect";
-  const MAX_AGE_MS = 120000;
+  const MAX_AGE_MS = 600000;
   let tasks = Promise.resolve();
   let draining = false;
   let relaySocket = null;
@@ -52,10 +46,7 @@ globalThis.ReceiverEngine = (() => {
 
   async function getSettings() {
     const { settings } = await chrome.storage.local.get("settings");
-    const current = { ...CodeReceiver.defaults, ...settings };
-    const { boundTabId } = await chrome.storage.session.get("boundTabId");
-    if (boundTabId !== current.boundTabId) return { ...current, boundTabId: null, boundUrl: "" };
-    return current;
+    return { ...CodeReceiver.defaults, ...settings };
   }
 
   function cancelPending(log) {
@@ -72,31 +63,32 @@ globalThis.ReceiverEngine = (() => {
 
   async function checkTab(tabId) {
     if (!Number.isInteger(tabId)) throw new Error("Chưa chọn tab Grok.");
-    let tab;
-    try { tab = await chrome.tabs.get(tabId); } catch { throw new Error("Tab Grok đã đóng."); }
-    const openingGrok = CodeReceiver.isGrokPage(tab.pendingUrl) && (!tab.url || tab.url === "about:blank");
-    if ((!CodeReceiver.isGrokPage(tab.url) && !openingGrok) || (tab.pendingUrl && !CodeReceiver.isGrokPage(tab.pendingUrl))) {
-      throw new Error("Tab đã rời grok.com. Đăng nhập Grok và ghim lại tab để tiếp tục.");
-    }
+    const tab = await chrome.tabs.get(tabId);
+    if (!tab) throw new Error("Tab Grok đã đóng.");
     return tab;
   }
 
   async function ensureBoundTab(settings) {
     if (Number.isInteger(settings.boundTabId)) {
       try {
-        return await checkTab(settings.boundTabId);
+        const tab = await checkTab(settings.boundTabId);
+        if (tab && tab.id) return tab;
       } catch {}
     }
     const allTabs = await chrome.tabs.query({});
-    const grokTabs = allTabs.filter(tab => CodeReceiver.isGrokPage(tab.url) || CodeReceiver.isGrokPage(tab.pendingUrl));
-    let tab = grokTabs.find(t => t.active) || grokTabs[0];
+    let tab = allTabs.find(t => t.url && (t.url.includes("grok.com") || t.url.includes("x.ai")) && t.active);
+    if (!tab) {
+      tab = allTabs.find(t => t.url && (t.url.includes("grok.com") || t.url.includes("x.ai")));
+    }
+    if (!tab) {
+      tab = allTabs.find(t => t.active);
+    }
     if (!tab) {
       tab = await chrome.tabs.create({ url: "https://grok.com/", active: true });
     }
     settings.boundTabId = tab.id;
     settings.boundUrl = tab.url || "https://grok.com/";
     try {
-      await chrome.storage.session.set({ boundTabId: tab.id });
       await chrome.storage.local.set({ settings });
     } catch {}
     return tab;
@@ -117,15 +109,6 @@ globalThis.ReceiverEngine = (() => {
   async function probeReadiness(probeId, socket) {
     const settings = await exclusive(getSettings);
     let ready = settings.enabled, note = "Sẵn sàng mở link Grok.";
-    try {
-      if (!settings.enabled) throw new Error("Receiver đang tắt.");
-      if (Number.isInteger(settings.boundTabId)) await checkTab(settings.boundTabId);
-      else if (!settings.autoBind) throw new Error("Chưa ghim tab Grok.");
-      else {
-        const tabs = await chrome.tabs.query({ url: "https://grok.com/*" });
-        if (tabs.length > 1) throw new Error("Có nhiều tab Grok, cần ghim một tab.");
-      }
-    } catch (error) { ready = false; note = error.message; }
     if (relaySocket === socket && socket.readyState === WebSocket.OPEN) {
       socket.send(JSON.stringify({ type: "probe_result", probeId, ready, note }));
     }
@@ -135,35 +118,64 @@ globalThis.ReceiverEngine = (() => {
     return exclusive(async () => {
       const settings = await getSettings();
       if (!settings.enabled) return { success: false, skipped: true };
-      if (message.type !== "code" || message.version !== 1 || typeof message.epoch !== "string"
-        || !Number.isInteger(message.sequence) || message.sequence < 1) throw new Error("Thông điệp relay không hợp lệ.");
+      if (message.type !== "code") return { success: false, skipped: true };
       const code = typeof message.code === "string" ? message.code.trim() : "";
-      const url = CodeReceiver.referralUrl(code);
-      const timestamp = message.timestamp;
-      if (!Number.isFinite(timestamp) || timestamp < settings.enabledAt || Date.now() - timestamp > MAX_AGE_MS || timestamp - Date.now() > 30000) {
+      if (!code || !/^[A-Za-z0-9_-]{6,128}$/.test(code)) {
         return { success: false, skipped: true };
       }
+      const url = CodeReceiver.referralUrl(code);
+
       const { deliveryLog = [], relayCursor = {} } = await chrome.storage.local.get(["deliveryLog", "relayCursor"]);
-      if (relayCursor.epoch === message.epoch && message.sequence <= relayCursor.sequence) return { success: true, duplicate: true };
-      const cursor = { epoch: message.epoch, sequence: message.sequence };
-      const previous = deliveryLog.find(item => item.code === code);
-      if (previous && !(message.retry === true && ["failed", "cancelled"].includes(previous.status))) {
-        await chrome.storage.local.set({ relayCursor: cursor });
+
+      // Tránh mở trùng lặp mã nếu vừa mở trong 10 giây qua
+      const recentSame = deliveryLog.find(item => item.code === code && (Date.now() - (item.receivedAt || item.timestamp || 0) < 10000));
+      if (recentSame && message.retry !== true && message.force !== true) {
         return { success: true, duplicate: true };
       }
-      const entry = {
-        id: crypto.randomUUID(), code, url, timestamp, receivedAt: Date.now(), status: "queued",
-        relayEpoch: message.epoch, relaySequence: message.sequence
-      };
+
+      const cursor = { epoch: message.epoch, sequence: message.sequence };
+
       try {
-        if (deliveryLog.filter(item => ["queued", "processing"].includes(item.status)).length >= 30) throw new Error("Hàng đợi đủ 30 mã; bỏ qua mã này.");
-        await ensureBoundTab(settings);
-      } catch (error) { Object.assign(entry, { status: "failed", error: error.message }); }
-      deliveryLog.unshift(entry);
-      await chrome.storage.local.set({ deliveryLog: deliveryLog.slice(0, 100), relayCursor: cursor });
-      if (entry.status === "failed") return { success: false, error: entry.error };
-      await chrome.alarms.create(QUEUE_ALARM, { periodInMinutes: 0.5 });
-      return { success: true, accepted: true };
+        const targetTab = await ensureBoundTab(settings);
+        await chrome.tabs.update(targetTab.id, { url, active: true });
+        if (targetTab.windowId) {
+          try { await chrome.windows.update(targetTab.windowId, { focused: true }); } catch {}
+        }
+        const entry = {
+          id: crypto.randomUUID(),
+          code,
+          url,
+          timestamp: message.timestamp || Date.now(),
+          receivedAt: Date.now(),
+          finishedAt: Date.now(),
+          status: "opened",
+          relayEpoch: message.epoch,
+          relaySequence: message.sequence,
+          source: "relay"
+        };
+        deliveryLog.unshift(entry);
+        await chrome.storage.local.set({ deliveryLog: deliveryLog.slice(0, 100), relayCursor: cursor });
+        sendRelayReport(entry, "opened");
+        return { success: true, accepted: true, status: "opened", url };
+      } catch (err) {
+        const entry = {
+          id: crypto.randomUUID(),
+          code,
+          url,
+          timestamp: message.timestamp || Date.now(),
+          receivedAt: Date.now(),
+          finishedAt: Date.now(),
+          status: "failed",
+          error: err.message,
+          relayEpoch: message.epoch,
+          relaySequence: message.sequence,
+          source: "relay"
+        };
+        deliveryLog.unshift(entry);
+        await chrome.storage.local.set({ deliveryLog: deliveryLog.slice(0, 100), relayCursor: cursor });
+        sendRelayReport(entry, "failed", err.message);
+        return { success: false, error: err.message };
+      }
     });
   }
 
@@ -175,25 +187,35 @@ globalThis.ReceiverEngine = (() => {
       const validCode = typeof code === "string" ? code.trim() : "";
       if (!/^[A-Za-z0-9_-]{6,128}$/.test(validCode)) return { success: false, skipped: true };
       const url = CodeReceiver.referralUrl(validCode);
+
       const { deliveryLog = [] } = await chrome.storage.local.get("deliveryLog");
-      const previous = deliveryLog.find(item => item.code === validCode);
-      if (previous && ["opened", "queued", "processing"].includes(previous.status)) {
+      const recentSame = deliveryLog.find(item => item.code === validCode && (Date.now() - (item.receivedAt || item.timestamp || 0) < 10000));
+      if (recentSame) {
         return { success: true, duplicate: true };
       }
-      const entry = {
-        id: crypto.randomUUID(), code: validCode, url, timestamp: Date.now(),
-        receivedAt: Date.now(), status: "queued", source: "local_hunter"
-      };
+
       try {
-        if (deliveryLog.filter(item => ["queued", "processing"].includes(item.status)).length >= 30) throw new Error("Hàng đợi đủ 30 mã; bỏ qua mã này.");
-        await ensureBoundTab(settings);
-      } catch (error) { Object.assign(entry, { status: "failed", error: error.message }); }
-      deliveryLog.unshift(entry);
-      await chrome.storage.local.set({ deliveryLog: deliveryLog.slice(0, 100) });
-      if (entry.status === "failed") return { success: false, error: entry.error };
-      await chrome.alarms.create(QUEUE_ALARM, { periodInMinutes: 0.5 });
-      void drainQueue().catch(console.error);
-      return { success: true, accepted: true };
+        const targetTab = await ensureBoundTab(settings);
+        await chrome.tabs.update(targetTab.id, { url, active: true });
+        if (targetTab.windowId) {
+          try { await chrome.windows.update(targetTab.windowId, { focused: true }); } catch {}
+        }
+        const entry = {
+          id: crypto.randomUUID(),
+          code: validCode,
+          url,
+          timestamp: Date.now(),
+          receivedAt: Date.now(),
+          finishedAt: Date.now(),
+          status: "opened",
+          source: "flask_sync"
+        };
+        deliveryLog.unshift(entry);
+        await chrome.storage.local.set({ deliveryLog: deliveryLog.slice(0, 100) });
+        return { success: true, accepted: true, status: "opened", url };
+      } catch (err) {
+        return { success: false, error: err.message };
+      }
     });
   }
 
@@ -207,10 +229,19 @@ globalThis.ReceiverEngine = (() => {
       try {
         const targetTab = await ensureBoundTab(settings);
         await chrome.tabs.update(targetTab.id, { url, active: true });
+        if (targetTab.windowId) {
+          try { await chrome.windows.update(targetTab.windowId, { focused: true }); } catch {}
+        }
         const { deliveryLog = [] } = await chrome.storage.local.get("deliveryLog");
         const entry = {
-          id: crypto.randomUUID(), code: validCode, url, timestamp: Date.now(),
-          receivedAt: Date.now(), status: "opened", source: "manual_sync", finishedAt: Date.now()
+          id: crypto.randomUUID(),
+          code: validCode,
+          url,
+          timestamp: Date.now(),
+          receivedAt: Date.now(),
+          finishedAt: Date.now(),
+          status: "opened",
+          source: "manual_sync"
         };
         deliveryLog.unshift(entry);
         await chrome.storage.local.set({ deliveryLog: deliveryLog.slice(0, 100) });
@@ -332,10 +363,7 @@ globalThis.ReceiverEngine = (() => {
         else if (message.type === "heartbeat") socket.send(JSON.stringify({ type: "ping" }));
         else if (message.type === "probe") await probeReadiness(message.probeId, socket);
         else if (message.type === "code") {
-          const result = await acceptRelayCode(message);
-          if (result.accepted) void drainQueue().catch(console.error);
-          else if (result.error) sendRelayReport(message, "failed", result.error);
-          else if (result.duplicate) sendRelayReport(message, "duplicate");
+          await acceptRelayCode(message);
         }
       }).catch(error => { console.warn("[GrokReceiver]", error.message); });
     };

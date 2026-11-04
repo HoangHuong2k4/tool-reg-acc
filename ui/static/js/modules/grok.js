@@ -420,6 +420,7 @@ async function xHunterCheckStatus() {
       if (xHunterRunning) {
         startBtn.textContent = '⏹ Dừng săn code';
         startBtn.style.background = '#f4212e';
+        if (!grkEvt) grkStartStream();
       } else {
         startBtn.textContent = '▶ Săn code ngầm';
         startBtn.style.background = '#1d9bf0';
@@ -490,6 +491,7 @@ async function xHunterToggle() {
       });
       const data = await res.json();
       showToast(data.success ? '🚀' : '⚠️', data.message);
+      if (data.success && !grkEvt) grkStartStream();
       setTimeout(xHunterCheckStatus, 1500);
     } catch (e) {
       showToast('❌', 'Lỗi khởi chạy tool!');
@@ -497,7 +499,11 @@ async function xHunterToggle() {
   }
 }
 
-// Tự động kiểm tra trạng thái X Hunter khi mở tab Grok
+// Tự động kết nối log và kiểm tra trạng thái X Hunter khi mở tab Grok
 if (typeof window !== 'undefined') {
-  setTimeout(xHunterCheckStatus, 2000);
+  setTimeout(() => {
+    grkStartStream();
+    xHunterCheckStatus();
+  }, 1000);
+  setInterval(xHunterCheckStatus, 4000);
 }
