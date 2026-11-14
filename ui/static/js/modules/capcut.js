@@ -5,16 +5,22 @@ function ccSetMailType(m){
   ccMailType=m;
   document.getElementById('cc-mailHotmail').classList.toggle('active',m==='hotmail');
   document.getElementById('cc-mailDomain').classList.toggle('active',m==='domain');
+  const gm94Btn = document.getElementById('cc-mailGmail94');
+  if(gm94Btn) gm94Btn.classList.toggle('active',m==='gmail94');
+  
   document.getElementById('cc-hotmailGroup').style.display=m==='hotmail'?'block':'none';
   if(document.getElementById('cc-apiSourceGroup')) document.getElementById('cc-apiSourceGroup').style.display=m==='hotmail'?'block':'none';
   // Show/hide domain source selector
   const domainSourceGroup = document.getElementById('cc-domainSourceGroup');
   if(domainSourceGroup) domainSourceGroup.style.display=m==='domain'?'block':'none';
-  // Ẩn nút API Mode nếu chọn Hotmail (vì API Mode chỉ dùng Mail Domain)
+  // Show/hide gmail94 info
+  const gmail94Group = document.getElementById('cc-gmail94Group');
+  if(gmail94Group) gmail94Group.style.display=m==='gmail94'?'block':'none';
+  // Ẩn nút API Mode nếu chọn Hotmail hoặc Gmail94 (vì API Mode chỉ dùng Mail Domain)
   const mode4Btn = document.getElementById('cc-mode4');
-  if(mode4Btn) mode4Btn.style.display = m==='hotmail'?'none':'block';
-  // Nếu đang ở mode 4 mà chuyển sang hotmail, reset về mode 1
-  if(m==='hotmail' && ccMode===4) ccSetMode(1);
+  if(mode4Btn) mode4Btn.style.display = (m==='hotmail'||m==='gmail94')?'none':'block';
+  // Nếu đang ở mode 4 mà chuyển sang hotmail/gmail94, reset về mode 1
+  if((m==='hotmail'||m==='gmail94') && ccMode===4) ccSetMode(1);
 }
 function ccSetDomainSource(src){
   ccDomainSource=src;
@@ -181,7 +187,7 @@ async function ccStartTask(){
   const jl=document.getElementById('cc-joinLink').value.trim();
   if((ccMode===2||ccMode===4) && !jl){showToast('⚠️','Vui lòng nhập Link Join Team!');return;}
   try{
-    const r=await fetch('/api/capcut/task/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:ccMode,count,threads,join_link:jl,mail_type:ccMailType,mail_api_source:ccMailApiSource,mail_domain_source:ccDomainSource,browser_type:ccBrowser,headless:ccHeadless,incognito:ccIncognito})});
+    const r=await fetch('/api/capcut/task/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:ccMode,count,threads,join_link:jl,mail_type:ccMailType,mail_api_source:ccMailApiSource,mail_domain_source:ccDomainSource,browser_type:ccBrowser,headless:ccHeadless,incognito:ccIncognito,save_trial_7day:ccSaveTrial7day})});
     const d=await r.json();
     if(!d.success){showToast('❌',d.error);return;}
     ccIsRunning=true;ccSetUI(true);ccStartSSE();

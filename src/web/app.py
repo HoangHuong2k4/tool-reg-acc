@@ -884,7 +884,12 @@ def capcut_task_stream():
 def _run_capcut_task(mode, count, threads, join_link, mail_type, mail_api_source, browser_type, headless, incognito=False, mail_domain_source="phhinfi", save_trial_7day=False):
     import importlib
     try:
-        mod_name = "src.bots.capcut_hotmail" if mail_type == "hotmail" else "src.bots.capcut_domain"
+        if mail_type == "hotmail":
+            mod_name = "src.bots.capcut_hotmail"
+        elif mail_type == "gmail94":
+            mod_name = "src.bots.capcut_gmail94"
+        else:
+            mod_name = "src.bots.capcut_domain"
         root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
         if root_dir not in sys.path:
             sys.path.insert(0, root_dir)
@@ -897,6 +902,20 @@ def _run_capcut_task(mode, count, threads, join_link, mail_type, mail_api_source
         # Patch để dừng OTP ngang
         import src.bots.capcut_hotmail as ch
         ch.GLOBAL_STOP_EVENT = state_capcut.task_stop
+        if hasattr(bot, 'GLOBAL_STOP_EVENT'):
+            bot.GLOBAL_STOP_EVENT = state_capcut.task_stop
+
+        # Đọc GMAIL94_TOKEN nếu dùng Gmail94
+        if mail_type == "gmail94":
+            try:
+                with get_db() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT value FROM settings WHERE key='GMAIL94_TOKEN'")
+                    row = cursor.fetchone()
+                    if row and row[0]:
+                        bot.GMAIL94_TOKEN = row[0].strip()
+            except Exception as e:
+                state_capcut.log(f"Lỗi nạp GMAIL94_TOKEN: {e}", "WARN")
         
         bot.get_rotated_proxy = patched_get_proxy
         
@@ -1036,7 +1055,8 @@ def _run_capcut_task(mode, count, threads, join_link, mail_type, mail_api_source
                 if curr_batch <= 0:
                     break
 
-                state_capcut.log(f"🔄 === BẮT ĐẦU LƯỢT {batch_num}: Chạy song song {curr_batch} tài khoản Domain Mail ===", "INFO")
+                label_source = "Gmail94" if mail_type == "gmail94" else "Domain Mail"
+                state_capcut.log(f"🔄 === BẮT ĐẦU LƯỢT {batch_num}: Chạy song song {curr_batch} tài khoản {label_source} ===", "INFO")
 
                 def batch_worker(slot_idx):
                     if state_capcut.task_stop.is_set():

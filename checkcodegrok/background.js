@@ -29,7 +29,7 @@ chrome.runtime.onInstalled.addListener(async () => {
       settings: {
         enabled: true, // Mặc định BẬT sẵn để người dùng mở là chạy luôn
         autoBind: true,
-        autoClickTrial: true,
+        autoClickTrial: false,
         enabledAt: Date.now(),
         boundTabId: null,
         boundUrl: "",

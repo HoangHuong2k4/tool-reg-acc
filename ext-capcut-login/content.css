@@ -1,0 +1,207 @@
+/* =========================================================================
+   CapCut Auto Login Helper - Ultra-Simple Floating Widget CSS
+   ========================================================================= */
+
+#__ccl_root__ {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 2147483647;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  color: #f1f5f9;
+  user-select: none;
+  font-size: 12px;
+  box-sizing: border-box;
+}
+
+#__ccl_root__ * {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+#__ccl_card__ {
+  width: 310px;
+  background: rgba(15, 23, 42, 0.96);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(0, 240, 254, 0.35);
+  border-radius: 12px;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.6), 0 0 10px rgba(0, 240, 254, 0.2);
+  overflow: hidden;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+#__ccl_card__.collapsed #__ccl_body__ {
+  display: none;
+}
+
+/* Header */
+#__ccl_header__ {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: linear-gradient(135deg, rgba(30, 41, 59, 0.95) 0%, rgba(15, 23, 42, 0.98) 100%);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  cursor: move;
+}
+
+#__ccl_brand__ {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+  font-size: 12.5px;
+  color: #fff;
+  letter-spacing: 0.3px;
+}
+
+.ccl-icon-btn {
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+  font-size: 12px;
+}
+
+.ccl-icon-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+}
+
+/* Body */
+#__ccl_body__ {
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ccl-input-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ccl-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  display: flex;
+  justify-content: space-between;
+}
+
+#__ccl_inp__ {
+  width: 100%;
+  height: 36px;
+  background: #0f172a;
+  border: 1.5px solid rgba(255, 255, 255, 0.15);
+  border-radius: 8px;
+  padding: 0 10px;
+  font-size: 12px;
+  color: #f1f5f9;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  outline: none;
+  transition: all 0.2s ease;
+}
+
+#__ccl_inp__::placeholder {
+  color: #64748b;
+  font-size: 11px;
+}
+
+#__ccl_inp__:focus {
+  border-color: #00f0fe;
+  box-shadow: 0 0 0 3px rgba(0, 240, 254, 0.18);
+  background: #131d31;
+}
+
+/* Login Button */
+#__ccl_btn_login__ {
+  width: 100%;
+  padding: 9px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: none;
+  background: linear-gradient(135deg, #00f0fe 0%, #0099ff 100%);
+  color: #0b1120;
+  transition: all 0.15s ease;
+}
+
+#__ccl_btn_login__:hover {
+  filter: brightness(1.12);
+  transform: translateY(-1px);
+}
+
+#__ccl_btn_login__:active {
+  transform: translateY(0);
+}
+
+#__ccl_btn_login__:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* Status message */
+#__ccl_status__ {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background: rgba(15, 23, 42, 0.7);
+  border-radius: 6px;
+  font-size: 10.5px;
+  color: #cbd5e1;
+  border-left: 3px solid #00f0fe;
+  line-height: 1.35;
+}
+
+#__ccl_status__.success {
+  border-left-color: #10b981;
+  color: #6ee7b7;
+  background: rgba(16, 185, 129, 0.12);
+}
+
+#__ccl_status__.error {
+  border-left-color: #ef4444;
+  color: #fca5a5;
+  background: rgba(239, 68, 68, 0.12);
+}
+
+#__ccl_status__.working {
+  border-left-color: #f59e0b;
+  color: #fde68a;
+  background: rgba(245, 158, 11, 0.12);
+}
+
+/* Spinner */
+.ccl-spin {
+  width: 11px;
+  height: 11px;
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: ccl-rotate 0.6s linear infinite;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+@keyframes ccl-rotate {
+  to { transform: rotate(360deg); }
+}

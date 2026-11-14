@@ -8,6 +8,7 @@ Tích hợp vào Web UI (app.py).
 import time
 import re
 import os
+import sys
 import requests
 import random
 import string
@@ -98,6 +99,7 @@ def gmail94_buy(token):
         return None
 
     url = "https://gmail94.com/api/otp/create"
+    last_err = ""
     # Thử service "grok" trước (chuẩn API của gmail94), nếu không được thử "50"
     for s in ["grok", "50"]:
         try:
@@ -113,13 +115,14 @@ def gmail94_buy(token):
                     order_id = str(data["data"].get("order_id", ""))
                     log(f"Gmail94 mua thành công: {email} (order: {order_id})", "OK")
                     return {"email": email, "order_id": order_id}
-                elif data.get("message") and "not available" in data.get("message").lower():
-                    continue
                 else:
-                    err = data.get("msg") or data.get("message") or data.get("error") or str(data)
-                    log(f"Gmail94 mua thất bại ({s}): {err}", "WARN")
+                    last_err = data.get("msg") or data.get("message") or data.get("error") or str(data)
+                    log(f"Gmail94 mua ({s}): {last_err}", "WARN")
         except Exception as e:
+            last_err = str(e)
             log(f"Gmail94 mua lỗi exception ({s}): {e}", "WARN")
+    if last_err:
+        log(f"Gmail94 phản hồi: {last_err}", "ERR")
     return None
 
 
@@ -641,6 +644,8 @@ def register_one_account(index, count=1, keep_open=False, batch_size=3, headless
     email = None
     driver = None
     try:
+        if index > 1:
+            time.sleep((index - 1) * 1.5)
         log(f"[Worker {index}] Đang kết nối Gmail94 để mua Gmail mới...", "INFO")
         purchase = gmail94_buy(GMAIL94_TOKEN)
         if not purchase:

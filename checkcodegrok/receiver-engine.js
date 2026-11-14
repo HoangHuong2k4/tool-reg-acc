@@ -3,7 +3,7 @@
 // =========================================================================
 
 globalThis.CodeReceiver = (() => {
-  const defaults = { enabled: true, autoBind: true, autoClickTrial: true, enabledAt: 0, boundTabId: null, boundUrl: "", delayMs: 3000 };
+  const defaults = { enabled: true, autoBind: true, autoClickTrial: false, enabledAt: 0, boundTabId: null, boundUrl: "", delayMs: 3000 };
   function isGrokPage(raw) {
     if (!raw) return false;
     return raw.includes("grok.com") || raw.includes("x.ai");

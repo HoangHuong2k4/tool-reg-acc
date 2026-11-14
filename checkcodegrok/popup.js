@@ -59,7 +59,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     if (syncInputs) {
       autoBind.checked = currentSettings.autoBind !== false;
-      autoClickTrial.checked = currentSettings.autoClickTrial !== false;
+      if (autoClickTrial) autoClickTrial.checked = currentSettings.autoClickTrial === true;
       delay.value = (currentSettings.delayMs || 5000) / 1000;
     }
   }
@@ -242,7 +242,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       ...currentSettings,
       enabled: enabled.checked,
       autoBind: autoBind.checked,
-      autoClickTrial: autoClickTrial.checked,
+      autoClickTrial: false,
       delayMs: Math.max(3, parseInt(delay.value, 10) || 5) * 1000
     };
     chrome.runtime.sendMessage({ action: "SAVE_SETTINGS", settings: newSettings }, res => {

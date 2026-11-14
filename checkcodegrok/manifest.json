@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "name": "Grok Auto Link Opener (Receiver Pro)",
-  "version": "3.1.0",
+  "version": "3.2.0",
   "minimum_chrome_version": "120",
-  "description": "Tự động nhận mã referral từ Tool Python ngầm, mở link ưu đãi trên tab Grok và tự động bấm nhận Trial 14 ngày. Không cần đăng nhập X.com.",
+  "description": "Tự động nhận mã referral từ Tool Python ngầm và mở ngay link ưu đãi trên tab Grok. Bạn tự thao tác thanh toán.",
   "permissions": [
     "storage",
     "alarms",

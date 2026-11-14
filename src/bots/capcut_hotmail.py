@@ -371,10 +371,11 @@ def _fetch_messages_webmail(refresh_token, client_id, limit=10):
     except Exception as e:
         return [], str(e)
 
-def _fetch_messages_direct_microsoft(refresh_token, client_id):
+def _fetch_messages_direct_microsoft(refresh_token, client_id, expected_email=None):
     """
     Đọc trực tiếp từ Microsoft Graph API chính chủ bằng refresh_token và client_id.
-    Tốc độ ~0.5s, hỗ trợ cả Live OAuth endpoint (login.live.com) lẫn Microsoft Online v2.0 endpoint.
+    Tốc độ ~0.5s - 1.5s, không phụ thuộc vào bất kỳ webmail 3rd-party nào.
+    Tự động đối chiếu hòm thư thực tế với expected_email để phát hiện lệch tài khoản.
     """
     global _MS_TOKEN_CACHE
     try:
@@ -396,7 +397,7 @@ def _fetch_messages_direct_microsoft(refresh_token, client_id):
                         "refresh_token": refresh_token
                     },
                     headers={"Content-Type": "application/x-www-form-urlencoded"},
-                    timeout=10
+                    timeout=15
                 )
                 data = r.json()
                 if data.get("access_token"):
@@ -421,7 +422,7 @@ def _fetch_messages_direct_microsoft(refresh_token, client_id):
                             "refresh_token": refresh_token,
                             "scope": "https://graph.microsoft.com/Mail.Read offline_access"
                         },
-                        timeout=10
+                        timeout=15
                     )
                     data = r.json()
                     if data.get("access_token"):
@@ -436,15 +437,28 @@ def _fetch_messages_direct_microsoft(refresh_token, client_id):
             return [], "Không lấy được access_token từ Microsoft OAuth"
 
         headers = {"Authorization": f"Bearer {access_token}"}
-        g_res = requests.get(
-            "https://graph.microsoft.com/v1.0/me/messages?$top=15&$orderby=receivedDateTime desc",
-            headers=headers,
-            timeout=10
-        )
-        if g_res.status_code != 200:
-            return [], f"Microsoft Graph API lỗi HTTP {g_res.status_code}: {g_res.text[:120]}"
+        
+        # Thử lấy danh sách messages từ Graph API:
+        # Bỏ $orderby=receivedDateTime desc vì trên consumer outlook.com, query này ép Exchange build index sorting dẫn đến timeout hoặc lỗi 504.
+        # Mặc định endpoint /messages đã trả về thư mới nhất theo thứ tự thời gian.
+        try:
+            g_res = requests.get("https://graph.microsoft.com/v1.0/me/messages?$top=10", headers=headers, timeout=16)
+        except Exception as e:
+            return [], f"Microsoft Graph timeout: {e}"
 
-        raw_msgs = g_res.json().get("value", [])
+        if not g_res or g_res.status_code != 200:
+            status = g_res.status_code if g_res else "timeout"
+            err_text = g_res.text[:120] if g_res else "Mất kết nối tới Microsoft Graph"
+            return [], f"Microsoft Graph API lỗi ({status}): {err_text}"
+
+        data = g_res.json()
+        context = data.get("@odata.context", "")
+        m_ctx = re.search(r"users\('([^']+)'\)", context)
+        actual_mailbox = m_ctx.group(1).replace("%40", "@") if m_ctx else ""
+        if expected_email and actual_mailbox and expected_email.strip().lower() != actual_mailbox.strip().lower():
+            log(f"⚠️ [CẢNH BÁO LỆCH EMAIL] Email nhập CapCut ({expected_email}) KHÁC với hòm thư của Token ({actual_mailbox})! Cần cập nhật file về email thật.", "WARN")
+
+        raw_msgs = data.get("value", [])
         normalized = []
         for m in raw_msgs:
             sender_addr = m.get("from", {}).get("emailAddress", {}).get("address", "")
@@ -452,10 +466,11 @@ def _fetch_messages_direct_microsoft(refresh_token, client_id):
             subj = m.get("subject", "")
             date_str = m.get("receivedDateTime", "")
             body_content = m.get("body", {}).get("content", "")
+            body_preview = m.get("bodyPreview", "")
             uid = m.get("id", "")
             
             otp = ""
-            m_code = re.search(r'\b(\d{6})\b', subj + ' ' + body_content)
+            m_code = re.search(r'\b(\d{6})\b', subj + ' ' + body_preview + ' ' + body_content)
             if m_code:
                 otp = m_code.group(1)
                 
@@ -466,8 +481,8 @@ def _fetch_messages_direct_microsoft(refresh_token, client_id):
                 "from_address": sender_addr,
                 "subject": subj,
                 "date": date_str,
-                "message": body_content,
-                "bodyText": body_content,
+                "message": body_content or body_preview,
+                "bodyText": body_preview or body_content,
                 "code": otp,
                 "uid": uid,
                 "id": uid
@@ -477,38 +492,35 @@ def _fetch_messages_direct_microsoft(refresh_token, client_id):
         return [], str(e)
 
 def _fetch_messages_from_api(email, password, refresh_token, client_id, mail_api_source):
-    """Lấy danh sách messages từ API (webmail, direct, smail1s, dongvanfb, mixmmo). Trả về (list, error)."""
+    """Lấy danh sách messages từ API (direct Microsoft Graph, smail1s, webmail, dongvanfb, mixmmo). Trả về (list, error)."""
     try:
-        # 1. Nguồn WebMail (Web Mail Reader Vercel API): Cực nhanh, ổn định và tự bóc tách OTP
-        if mail_api_source in ("webmail", "web_mail_reader", "web-mail-reader", "vercel"):
-            if refresh_token and client_id:
-                msgs, err = _fetch_messages_webmail(refresh_token, client_id)
-                if not err:
-                    return msgs, None
-                # Fallback sang direct Microsoft Graph
-                direct_msgs, direct_err = _fetch_messages_direct_microsoft(refresh_token, client_id)
-                if not direct_err:
-                    return direct_msgs, None
-                return msgs, err
+        # Nếu có refresh_token & client_id:
+        if refresh_token and client_id:
+            # 1. Đọc trực tiếp Microsoft Graph chính chủ
+            direct_msgs, direct_err = _fetch_messages_direct_microsoft(refresh_token, client_id, expected_email=email)
+            if not direct_err:
+                return direct_msgs, None
 
-        # 2. Nguồn Direct Microsoft Graph API
-        if mail_api_source in ("direct", "microsoft"):
-            if refresh_token and client_id:
-                msgs, err = _fetch_messages_direct_microsoft(refresh_token, client_id)
-                if not err:
-                    return msgs, None
-                return _fetch_messages_webmail(refresh_token, client_id)
+            # 2. Fallback sang Smail1s OAuth (server US trung gian kết nối Microsoft Graph cực nhanh, bypass nghẽn mạng VN)
+            try:
+                s_url = "https://smail1s.com/get_messages"
+                s_payload = {"mode": "oauth", "data": f"{email}|{refresh_token}|{client_id}"}
+                s_resp = requests.post(s_url, headers={"Content-Type": "application/json"}, json=s_payload, timeout=12)
+                if s_resp.status_code == 200:
+                    d_list = s_resp.json().get("data", [])
+                    if d_list:
+                        s_msgs = d_list[0].get("messages") or []
+                        s_err = d_list[0].get("error")
+                        if not s_err:
+                            return s_msgs, None
+            except Exception:
+                pass
 
-        # 3. Nguồn Smail1s:
-        # Nếu có refresh_token & client_id: ưu tiên WebMail Reader / Direct Graph
+            return direct_msgs, direct_err
+
+        # Dành cho tài khoản không có refresh_token (chỉ có email|pass):
+        # 1. Nguồn Smail1s:
         if mail_api_source == "smail1s":
-            if refresh_token and client_id:
-                msgs, err = _fetch_messages_webmail(refresh_token, client_id)
-                if not err:
-                    return msgs, None
-                direct_msgs, direct_err = _fetch_messages_direct_microsoft(refresh_token, client_id)
-                if not direct_err:
-                    return direct_msgs, None
 
             api_url = "https://smail1s.com/get_messages"
             headers = {"Content-Type": "application/json"}
@@ -612,12 +624,13 @@ def snapshot_mail_before_register(email, password, refresh_token, client_id, mai
         capcut_found = 0
         for msg in messages:
             sender = str(msg.get("from") or msg.get("sender") or "").lower()
-            if "admin@mail.capcut.com" not in sender and "capcut" not in sender:
+            msg_subj = str(msg.get("subject") or "")
+            subj = msg_subj.lower()
+            if "admin@mail.capcut.com" not in sender and "capcut" not in sender and "capcut" not in subj and "bytedance" not in sender:
                 continue
             capcut_found += 1
             msg_id = str(msg.get("id") or msg.get("uid") or "").strip()
             msg_date = str(msg.get("date") or "")
-            msg_subj = str(msg.get("subject") or "")
             sig = msg_id if msg_id else f"{msg_date}_{msg_subj}"
             result["existing_ids"].add(sig)
             otp = _extract_otp_from_message(msg)
@@ -667,11 +680,14 @@ def wait_for_otp(email, password, refresh_token, client_id, timeout=90, interval
                 consecutive_api_errors += 1
                 raw_err = str(err).lower()
                 is_fatal = any(k in raw_err for k in fatal_keywords) and ("scopes requested are unauthorized" not in raw_err)
-                log(f"API Hotmail trả về lỗi ({consecutive_api_errors}/{max_api_errors}): {err}", "WARN")
+                log(f"API Hotmail ({elapsed}/{timeout}s): {err}", "WARN")
                 if is_fatal and consecutive_api_errors >= 2:
                     log(f"⚠️ Lỗi Token/Hotmail chết. Bỏ qua mail {email}!", "ERR")
                     return None
-                if consecutive_api_errors >= max_api_errors:
+                if not is_fatal:
+                    # Lỗi mạng tạm thời / timeout: Không tính vào max_api_errors để không hủy đăng ký oan
+                    consecutive_api_errors = 0
+                elif consecutive_api_errors >= max_api_errors:
                     log(f"⚠️ API lỗi liên tiếp {consecutive_api_errors} lần. Bỏ qua mail {email}!", "ERR")
                     return None
             else:
@@ -681,11 +697,12 @@ def wait_for_otp(email, password, refresh_token, client_id, timeout=90, interval
                 sorted_msgs = sorted(messages, key=lambda m: str(m.get("date") or ""), reverse=True)
                 for msg in sorted_msgs:
                     sender = str(msg.get("from") or msg.get("sender") or "").lower()
-                    if "admin@mail.capcut.com" not in sender and "capcut" not in sender:
+                    msg_subj = str(msg.get("subject") or "")
+                    subj = msg_subj.lower()
+                    if "admin@mail.capcut.com" not in sender and "capcut" not in sender and "capcut" not in subj and "bytedance" not in sender:
                         continue
                     msg_id = str(msg.get("id") or msg.get("uid") or "").strip()
                     msg_date = str(msg.get("date") or "")
-                    msg_subj = str(msg.get("subject") or "")
                     sig = msg_id if msg_id else f"{msg_date}_{msg_subj}"
                     # Bỏ qua thư cũ đã có trước khi đăng ký
                     if sig in ignore_ids or (msg_id and msg_id in ignore_ids):
@@ -2408,8 +2425,15 @@ def register_one_account(index, join_link=None, keep_open=False, batch_size=3, p
     client_id = acc["client_id"]
     password = get_settings_from_db().get("CAPCUT_PASSWORD", "capcut123") or "capcut123"
 
-    # [TỐI ƯU Tool 2] Chụp snapshot hòm thư trước khi đăng ký để lọc sạch OTP cũ
-    snapshot = snapshot_mail_before_register(email, email_pass, refresh_token, client_id, mail_api_source)
+    # [TỐI ƯU] Chụp snapshot hòm thư ngầm trong background để KHÔNG block khởi động Chrome
+    snapshot_container = {"snapshot": {"existing_ids": set(), "existing_otps": set()}}
+    def _do_snapshot():
+        try:
+            snapshot_container["snapshot"] = snapshot_mail_before_register(email, email_pass, refresh_token, client_id, mail_api_source)
+        except Exception:
+            pass
+    _t_snap = _threading.Thread(target=_do_snapshot, daemon=True)
+    _t_snap.start()
 
     driver = None
     should_keep_open = keep_open and not get_link and not save_trial_7day
@@ -2448,6 +2472,10 @@ def register_one_account(index, join_link=None, keep_open=False, batch_size=3, p
         step2_enter_password(driver, password)
         bday_status = step3_enter_birthday(driver)
         if bday_status != "ALREADY_LOGGED_IN":
+            try:
+                _t_snap.join(timeout=1.0)
+            except: pass
+            snapshot = snapshot_container.get("snapshot") or {"existing_ids": set(), "existing_otps": set()}
             if not step4_enter_otp(driver, email, email_pass, refresh_token, client_id, mail_api_source, snapshot=snapshot):
                 log(f"[{email}] Bỏ qua email này do không lấy được OTP / lỗi Hotmail API!", "WARN")
                 mark_hotmail_failed(acc, reason="OTP_FAILED_OR_TOKEN_ERROR")

@@ -80,6 +80,13 @@
               <div class="radio-group">
                 <div class="radio-btn active" id="cc-mailHotmail" onclick="ccSetMailType('hotmail')">📧 Hotmail</div>
                 <div class="radio-btn" id="cc-mailDomain" onclick="ccSetMailType('domain')">🌐 Mail Domain</div>
+                <div class="radio-btn" id="cc-mailGmail94" onclick="ccSetMailType('gmail94')">🟢 Gmail94 (OTP)</div>
+              </div>
+            </div>
+            <!-- Thông tin Gmail94 (chỉ hiện khi chọn Gmail94) -->
+            <div class="form-group" id="cc-gmail94Group" style="display:none;">
+              <div style="padding:8px 12px;background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.3);border-radius:6px;font-size:12px;color:var(--text);">
+                🟢 <strong>Gmail94 API</strong> (Service CapCut / 29) — Tự động mua Gmail và nhận mã OTP 6 số qua API. Token cấu hình trong Cài đặt.
               </div>
             </div>
             <!-- Chọn nguồn Mail Domain (chỉ hiện khi chọn Mail Domain) -->
@@ -219,6 +226,8 @@
                 onclick="ccCopyPaidAccounts()">💳 Copy Gói Có Phí</button>
               <button class="btn-secondary btn" style="width:auto;padding:6px 12px;font-size:11px;border-color:#38bdf8;color:#38bdf8;"
                 onclick="ccCopyStatusPrices()">💰 Copy Bảng Giá</button>
+              <button class="btn-secondary btn" style="width:auto;padding:6px 12px;font-size:11px;border-color:#00f0fe;color:#00f0fe;"
+                onclick="alert('🚀 EXTENSION AUTO LOGIN CAPCUT:\n\nThư mục: ext-capcut-login\n\nCách cài đặt:\n1. Mở chrome://extensions/ trên trình duyệt\n2. Bật Developer mode (Chế độ nhà phát triển)\n3. Bấm [Tải tiện ích đã giải nén] (Load unpacked)\n4. Chọn thư mục ext-capcut-login\n\nExtension hỗ trợ tự động lấy acc từ tool (Port 5050) và tự điền login siêu tốc!')">⚡ Ext Auto Login</button>
               <button class="btn-secondary btn" style="width:auto;padding:6px 12px;font-size:11px;"
                 onclick="ccClearAccounts()">🗑️ Xóa</button>
               <button class="btn-secondary btn" style="width:auto;padding:6px 12px;font-size:11px;"
