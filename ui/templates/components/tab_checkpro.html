@@ -1,0 +1,215 @@
+  <div class="wrap" id="tab-checkpro">
+    <!-- Header -->
+    <div class="header">
+      <div class="logo">
+        <div class="logo-icon" style="background:linear-gradient(135deg,#059669,#10b981);">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="44" height="44">
+            <rect width="100" height="100" rx="24" fill="#059669" />
+            <path d="M28 52 L42 66 L74 34" stroke="#fff" stroke-width="12" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+          </svg>
+        </div>
+        <div>
+          <h1>CapCut Pro Checker</h1><span>AtomicMail & Hotmail OAuth2 • Quét thư xác nhận gói Pro & trạng thái Hoàn tiền</span>
+        </div>
+      </div>
+      <div class="status-pill">
+        <div class="dot" id="cp-statusDot"></div><span id="cp-statusText">Idle</span>
+      </div>
+    </div>
+
+    <!-- 5 Thẻ Thống kê Tinh gọn (Click để lọc bảng kết quả) -->
+    <div class="stats stats-5" style="grid-template-columns: repeat(5, minmax(0, 1fr));">
+      <div class="stat-card" style="cursor:pointer;" onclick="cpSetTableStatusFilter('ALL')" title="Bấm để xem tất cả">
+        <div class="stat-label">Tổng tài khoản</div>
+        <div class="stat-value accent" id="cp-statTotal">0</div>
+        <div class="stat-sub">trong danh sách</div>
+      </div>
+      <div class="stat-card" style="cursor:pointer;" onclick="cpSetTableStatusFilter('ALL')" title="Bấm để xem tất cả đã chạy">
+        <div class="stat-label">Đã kiểm tra</div>
+        <div class="stat-value" style="color:#38bdf8;" id="cp-statDone">0</div>
+        <div class="stat-sub">tài khoản đã chạy</div>
+      </div>
+      <div class="stat-card" style="cursor:pointer;border-color:rgba(16,185,129,0.35);background:linear-gradient(180deg,rgba(16,185,129,0.08),transparent);" onclick="cpSetTableStatusFilter('FOUND')" title="Bấm để chỉ lọc tài khoản Có Pro">
+        <div class="stat-label" style="color:#34d399;">🟢 Có Pro Active</div>
+        <div class="stat-value green" id="cp-statFound">0</div>
+        <div class="stat-sub">gói hợp lệ đang dùng</div>
+      </div>
+      <div class="stat-card" style="cursor:pointer;border-color:rgba(245,158,11,0.35);background:linear-gradient(180deg,rgba(245,158,11,0.08),transparent);" onclick="cpSetTableStatusFilter('REFUNDED')" title="Bấm để chỉ lọc tài khoản Bị Hoàn Tiền">
+        <div class="stat-label" style="color:#fbbf24;">⚠️ Đã hoàn tiền</div>
+        <div class="stat-value" style="color:#f59e0b;" id="cp-statRefunded">0</div>
+        <div class="stat-sub">bị hủy / hoàn tiền</div>
+      </div>
+      <div class="stat-card" style="cursor:pointer;" onclick="cpSetTableStatusFilter('FAIL')" title="Bấm để chỉ lọc tài khoản Lỗi">
+        <div class="stat-label">❌ Lỗi / Không có</div>
+        <div class="stat-value red" id="cp-statFail">0</div>
+        <div class="stat-sub">không thấy thư Pro</div>
+      </div>
+    </div>
+
+    <div class="main-grid">
+      <!-- Cột Trái: Cấu hình & Danh sách tài khoản gọn gàng -->
+      <div style="display:flex;flex-direction:column;gap:16px;">
+        <div class="panel">
+          <div class="panel-header">
+            <span>⚙️</span>
+            <h2>Cấu hình & Nhập Liệu</h2>
+            <span style="font-size:11px;color:var(--accent);margin-left:auto;font-weight:600;" id="cp-accCountLabel">0 tài khoản</span>
+          </div>
+          <div class="panel-body">
+            <!-- 1 hàng cấu hình chế độ kiểm tra & luồng -->
+            <div style="display:flex;gap:10px;margin-bottom:10px;">
+              <div style="flex:1;">
+                <label style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:5px;display:block;">Phương thức kiểm tra</label>
+                <select id="cp-checkMode" style="width:100%;height:34px;background:var(--bg2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:0 8px;font-size:11.5px;outline:none;" onchange="cpToggleMode()">
+                  <option value="mail" selected>📧 Hộp thư (Hotmail/AtomicMail API ngầm)</option>
+                  <option value="web">🌐 Đăng nhập CapCut Web (Chrome - Check VIP trực tiếp)</option>
+                </select>
+              </div>
+              <div style="width:75px;">
+                <label style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:5px;display:block;">Số luồng</label>
+                <input type="number" id="cp-threads" value="3" min="1" max="20" style="width:100%;height:34px;background:var(--bg2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:0 8px;font-size:12px;outline:none;text-align:center;">
+              </div>
+            </div>
+
+            <!-- Hàng cấu hình bổ sung: Từ khóa hoặc Mật khẩu mặc định -->
+            <div id="cp-mailConfigRow" style="display:flex;gap:10px;margin-bottom:12px;">
+              <div style="flex:1;">
+                <label style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:5px;display:block;">Từ khóa trong thư</label>
+                <input type="text" id="cp-keyword" value="Pro monthly" placeholder="Pro monthly" style="width:100%;height:32px;background:var(--bg2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:0 10px;font-size:11.5px;outline:none;">
+              </div>
+            </div>
+
+            <div id="cp-webConfigRow" style="display:none;margin-bottom:12px;">
+              <label style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:5px;display:block;">Mật khẩu CapCut mặc định (Auto chạy ngầm 100%)</label>
+              <input type="text" id="cp-defaultPassword" value="capcut123" placeholder="capcut123" style="width:100%;height:32px;background:var(--bg2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:0 10px;font-size:11.5px;outline:none;">
+            </div>
+
+            <!-- Toolbar nạp danh sách -->
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+              <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                <button class="btn btn-secondary" style="height:28px;padding:0 9px;font-size:11px;border-radius:5px;" onclick="document.getElementById('cp-fileInput').click()">
+                  📂 Nạp TXT
+                </button>
+                <input type="file" id="cp-fileInput" style="display:none" accept=".txt" onchange="cpLoadFromFile(this)">
+
+                <button class="btn btn-secondary" style="height:28px;padding:0 9px;font-size:11px;border-radius:5px;border-color:#f59e0b;color:#f59e0b;" onclick="cpLoadFromHotmailsTxt()">
+                  📧 Hotmails.txt
+                </button>
+
+                <button class="btn btn-secondary" style="height:28px;padding:0 9px;font-size:11px;border-radius:5px;border-color:var(--accent);color:var(--accent);" onclick="cpLoadFromCapcutDb()">
+                  📥 CapCut DB
+                </button>
+              </div>
+
+              <button class="btn btn-secondary" style="height:28px;padding:0 9px;font-size:11px;border-radius:5px;color:var(--muted);" onclick="cpClearInput()" title="Xóa trắng danh sách">
+                🗑️ Xóa
+              </button>
+            </div>
+
+            <!-- Textarea: font monospace, cuộn ngang êm ái, không bẻ gãy token -->
+            <textarea id="cp-accountsInput" rows="12" style="width:100%;background:var(--bg2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:10px;font-family:'JetBrains Mono','Consolas',monospace;font-size:11px;line-height:1.55;outline:none;resize:vertical;white-space:pre;overflow-x:auto;word-break:normal;" placeholder="Dán danh sách tài khoản (mỗi tài khoản 1 dòng):&#10;• Hotmail: email|pass|refresh_token|client_id&#10;• AtomicMail: email|pass" oninput="cpUpdateCount()"></textarea>
+
+            <div style="margin-top:6px;font-size:10.5px;color:var(--muted);display:flex;align-items:center;gap:4px;">
+              <span>⚡</span><span>Tự động nhận diện cả <strong>Hotmail OAuth2</strong> và <strong>AtomicMail</strong>.</span>
+            </div>
+
+            <!-- Nút Bắt đầu / Dừng -->
+            <div class="btn-row" style="margin-top:12px;">
+              <button class="btn btn-start" id="cp-startBtn" onclick="cpStart()">▶ BẮT ĐẦU QUÉT</button>
+              <button class="btn btn-stop" id="cp-stopBtn" onclick="cpStop()" style="display:none">⏹ DỪNG</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Cột Phải: Nhật ký & Bảng kết quả -->
+      <div style="display:flex;flex-direction:column;gap:16px;">
+        <!-- Nhật ký Console -->
+        <div class="panel" style="flex:1;">
+          <div class="panel-header">
+            <span>📋</span>
+            <h2>Nhật ký (Check Pro)</h2>
+            <div class="log-controls">
+              <button class="log-filter-btn active" onclick="cpSetFilter('ALL',this)">All</button>
+              <button class="log-filter-btn" onclick="cpSetFilter('OK',this)">✅ OK</button>
+              <button class="log-filter-btn" onclick="cpSetFilter('WARN',this)">⚠️ Hoàn tiền</button>
+              <button class="log-filter-btn" onclick="cpSetFilter('ERR',this)">❌ Lỗi</button>
+              <button class="btn-secondary btn" style="height:24px;padding:0 8px;font-size:11px;" onclick="cpClearLog()">Xóa</button>
+            </div>
+          </div>
+          <div class="log-wrap" id="cp-logWrap" style="max-height:175px;">
+            <div class="log-entry log-info"><span class="log-time">--:--:--</span><span class="log-icon">📌</span><span class="log-msg">Sẵn sàng kiểm tra gói CapCut.</span></div>
+          </div>
+        </div>
+
+        <!-- Bảng kết quả Data Table -->
+        <div class="panel">
+          <div class="panel-header" style="flex-wrap:wrap;gap:8px;">
+            <div style="display:flex;align-items:center;gap:6px;">
+              <span>📊</span>
+              <h2>Kết quả kiểm tra</h2>
+            </div>
+
+            <!-- Tab Lọc Trạng Thái Bảng -->
+            <div style="display:inline-flex;gap:3px;background:var(--bg2);padding:2px 3px;border-radius:6px;border:1px solid var(--border);">
+              <button class="cp-tab-btn active" data-filter="ALL" onclick="cpSetTableStatusFilter('ALL',this)" style="background:transparent;border:none;color:var(--text);font-size:11px;padding:3px 8px;border-radius:4px;cursor:pointer;font-weight:600;">Tất cả</button>
+              <button class="cp-tab-btn" data-filter="FOUND" onclick="cpSetTableStatusFilter('FOUND',this)" style="background:transparent;border:none;color:var(--muted);font-size:11px;padding:3px 8px;border-radius:4px;cursor:pointer;">🟢 Pro</button>
+              <button class="cp-tab-btn" data-filter="REFUNDED" onclick="cpSetTableStatusFilter('REFUNDED',this)" style="background:transparent;border:none;color:var(--muted);font-size:11px;padding:3px 8px;border-radius:4px;cursor:pointer;">⚠️ Hoàn tiền</button>
+              <button class="cp-tab-btn" data-filter="FAIL" onclick="cpSetTableStatusFilter('FAIL',this)" style="background:transparent;border:none;color:var(--muted);font-size:11px;padding:3px 8px;border-radius:4px;cursor:pointer;">❌ Lỗi</button>
+            </div>
+
+            <div style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+              <input type="text" id="cp-searchFilter" placeholder="🔍 Lọc email..." oninput="cpFilterTable()" style="height:28px;font-size:11px;border:1px solid var(--border);border-radius:5px;background:var(--bg2);color:var(--text);padding:0 8px;width:110px;outline:none;">
+              <button class="btn-secondary btn" style="height:28px;padding:0 9px;font-size:11px;border-color:#10b981;color:#10b981;" onclick="cpCopyPro()" title="Chỉ copy tài khoản Pro Active">📋 Copy Pro</button>
+              <button class="btn-secondary btn" style="height:28px;padding:0 9px;font-size:11px;border-color:#f59e0b;color:#f59e0b;" onclick="cpCopyRefunded()" title="Copy tài khoản bị hoàn tiền">⚠️ Copy Hoàn Tiền</button>
+              <button class="btn-secondary btn" style="height:28px;padding:0 8px;font-size:11px;border-color:#38bdf8;color:#38bdf8;" onclick="cpExportCsv()" title="Xuất file CSV">💾 CSV</button>
+              <button class="btn-secondary btn" style="height:28px;padding:0 8px;font-size:11px;border-color:var(--red);color:var(--red);" onclick="cpClearResults()" title="Xóa bảng kết quả">🗑️</button>
+            </div>
+          </div>
+          <div class="accounts-wrap" style="max-height:410px;overflow-y:auto;">
+            <table style="width:100%;border-collapse:collapse;table-layout:fixed;">
+              <thead>
+                <tr>
+                  <th style="width:36px;text-align:center;">#</th>
+                  <th>Email / Username</th>
+                  <th style="width:130px;text-align:center;">Trạng thái</th>
+                  <th style="width:115px;text-align:center;">Hộp thư</th>
+                  <th style="width:140px;text-align:center;">Thời gian</th>
+                  <th style="width:115px;text-align:center;">Thao tác</th>
+                </tr>
+              </thead>
+              <tbody id="cp-resultsBody">
+                <tr>
+                  <td colspan="6" style="text-align:center;color:var(--muted);padding:24px;">Chưa có kết quả nào</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal xem chi tiết thư -->
+  <div id="cp-detailModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:1000;align-items:center;justify-content:center;">
+    <div style="background:var(--card);border:1px solid var(--border);border-radius:16px;padding:24px;width:600px;max-width:95vw;max-height:85vh;overflow-y:auto;box-shadow:0 20px 25px -5px rgba(0,0,0,0.5);">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;border-bottom:1px solid var(--border);padding-bottom:10px;">
+        <h3 style="margin:0;font-size:15px;color:var(--text);display:flex;align-items:center;gap:6px;">
+          <span>📧</span> Chi tiết thư xác nhận
+        </h3>
+        <button onclick="document.getElementById('cp-detailModal').style.display='none'" style="background:none;border:none;color:var(--muted);font-size:22px;cursor:pointer;">✕</button>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:10px;font-size:12px;">
+        <div><strong>Email:</strong> <code id="cp-modalEmail" style="color:var(--accent);"></code></div>
+        <div><strong>Trạng thái:</strong> <span id="cp-modalStatus"></span></div>
+        <div><strong>Thời gian gửi:</strong> <span id="cp-modalDate" style="color:var(--yellow);"></span></div>
+        <div><strong>Người gửi:</strong> <span id="cp-modalFrom"></span></div>
+        <div><strong>Tiêu đề:</strong> <span id="cp-modalSubject" style="font-weight:600;color:#fff;"></span></div>
+        <div><strong>Nội dung thư:</strong></div>
+        <div id="cp-modalIntro" style="padding:10px 12px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;font-family:'JetBrains Mono',monospace;font-size:11px;white-space:pre-wrap;max-height:220px;overflow-y:auto;color:var(--text);line-height:1.5;"></div>
+      </div>
+      <div style="margin-top:16px;text-align:right;">
+        <button class="btn btn-secondary" style="width:auto;padding:6px 16px;font-size:12px;" onclick="document.getElementById('cp-detailModal').style.display='none'">Đóng</button>
+      </div>
+    </div>
+  </div>

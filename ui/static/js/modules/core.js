@@ -384,13 +384,13 @@ async function checkRunningStatus() {
 
 window.addEventListener('hashchange', () => {
   let hash = window.location.hash.substring(1);
-  if (!['capcut', 'higgsfield', 'gpt', 'gpm', 'dreamina', 'grok', 'settings'].includes(hash)) hash = 'capcut';
+  if (!['capcut', 'checkpro', 'higgsfield', 'gpt', 'gpm', 'dreamina', 'grok', 'settings'].includes(hash)) hash = 'capcut';
   switchTab(hash, false);
 });
 
 window.onload=()=>{
   let hash = window.location.hash.substring(1);
-  if (!['capcut', 'higgsfield', 'gpt', 'gpm', 'dreamina', 'grok', 'settings'].includes(hash)) hash = 'capcut';
+  if (!['capcut', 'checkpro', 'higgsfield', 'gpt', 'gpm', 'dreamina', 'grok', 'settings'].includes(hash)) hash = 'capcut';
   switchTab(hash, false);
 
   ccLoadHotmailCount();

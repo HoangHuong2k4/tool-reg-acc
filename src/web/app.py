@@ -205,7 +205,7 @@ GROK_HOTMAIL_FILE   = os.path.join(os.path.dirname(__file__), "..", "..", "data"
 app = Flask(__name__, template_folder="../../ui/templates", static_folder="../../ui/static")
 
 # ─── Global state ─────────────────────────────────────────────────────────────
-from src.web.core import BotState, state_capcut, state_higgsfield, state_gpt, state_gpm, state_dreamina, state_grok
+from src.web.core import BotState, state_capcut, state_higgsfield, state_gpt, state_gpm, state_dreamina, state_grok, state_checkpro
 
 def patched_get_proxy():
     print(f"[Proxy] Dùng proxy: {PROXY_HOST}:{PROXY_PORT}")
@@ -1157,6 +1157,296 @@ def _run_capcut_task(mode, count, threads, join_link, mail_type, mail_api_source
             bot.ACTIVE_DRIVERS.clear()
         state_capcut.is_running = False
 
+
+# ─── CHECK PRO (ATOMICMAIL) API ──────────────────────────────────────────
+from src.bots.capcut_checker import checker_manager, parse_account_line
+
+def _run_checkpro_task(accounts_input, keyword="Pro monthly", threads_count=3, check_mode="mail", default_password="capcut123", headless=False):
+    if isinstance(accounts_input, str):
+        lines = [l.strip() for l in accounts_input.splitlines() if l.strip()]
+    else:
+        lines = [str(l).strip() for l in accounts_input if str(l).strip()]
+
+    total = len(lines)
+    with checker_manager.lock:
+        checker_manager.results.clear()
+        checker_manager.stats = {"total": total, "done": 0, "found": 0, "refunded": 0, "fail": 0}
+
+    mode_label = "🌐 Auto Login CapCut Web" if check_mode == "web" else "📧 Hộp thư (Hotmail/AtomicMail)"
+    state_checkpro.log(f"🚀 Bắt đầu quét {total} tài khoản với {threads_count} luồng. Chế độ: {mode_label}", "INFO")
+
+    task_queue = queue.Queue()
+    for idx, line in enumerate(lines, 1):
+        task_queue.put((idx, line))
+
+    def worker():
+        while not task_queue.empty() and not state_checkpro.task_stop.is_set():
+            try:
+                idx, line = task_queue.get_nowait()
+            except queue.Empty:
+                break
+
+            email_or_user = ""
+            try:
+                acc_info = parse_account_line(line)
+                email_or_user = acc_info.get("email", "")
+                if not email_or_user:
+                    import re
+                    m = re.search(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+", line)
+                    if m:
+                        email_or_user = m.group(0)
+                    else:
+                        email_or_user = line.split("|")[0].split("----")[0].strip()
+
+                if not email_or_user:
+                    task_queue.task_done()
+                    continue
+
+                if check_mode == "web":
+                    state_checkpro.log(f"[{idx}/{total}] [CapCut Web] Đang mở trình duyệt kiểm tra: {email_or_user}...", "INFO")
+                    res = checker_manager.check_via_web(
+                        line,
+                        default_password=default_password,
+                        headless=headless,
+                        timeout=90,
+                        log_cb=lambda m, lvl: state_checkpro.log(m, lvl)
+                    )
+                else:
+                    acc_type_tag = "[Hotmail]" if acc_info.get("type") == "hotmail" else "[AtomicMail]"
+                    state_checkpro.log(f"[{idx}/{total}] {acc_type_tag} Đang kiểm tra hộp thư: {email_or_user}...", "INFO")
+                    res = checker_manager.check_single_account(line, keyword=keyword)
+                res["index"] = idx
+
+                with checker_manager.lock:
+                    checker_manager.results.append(res)
+                    checker_manager.stats["done"] += 1
+                    if res["status"] == "FOUND":
+                        checker_manager.stats["found"] += 1
+                        state_checkpro.log(f"[{email_or_user}] 🟢 TÌM THẤY (Active Pro)! {res.get('intro', '')}", "OK")
+                    elif res["status"] == "REFUNDED":
+                        checker_manager.stats["refunded"] = checker_manager.stats.get("refunded", 0) + 1
+                        state_checkpro.log(f"[{email_or_user}] ⚠️ ĐÃ HOÀN TIỀN / BỊ HỦY! ({res.get('subject')}) Ngày: {res.get('date')}", "WARN")
+                    elif res["status"] == "LOGIN_OK":
+                        checker_manager.stats["fail"] = checker_manager.stats.get("fail", 0) + 1
+                        state_checkpro.log(f"[{email_or_user}] Đăng nhập OK nhưng không thấy Pro/VIP", "INFO")
+                    else:
+                        checker_manager.stats["fail"] += 1
+                        state_checkpro.log(f"[{email_or_user}] ❌ Lỗi: {res.get('error') or res.get('status_text')}", "ERR")
+
+                    state_checkpro.log_queue.put(json.dumps({"type": "row", "data": res}))
+                    state_checkpro.log_queue.put(json.dumps({"type": "stats", "stats": dict(checker_manager.stats)}))
+
+            except Exception as e_proc:
+                state_checkpro.log(f"[{idx}/{total}] ❌ Lỗi ngoại lệ: {e_proc}", "ERR")
+                fail_res = {
+                    "index": idx,
+                    "email": email_or_user or line[:30],
+                    "status": "FAIL",
+                    "status_text": "Lỗi ngoại lệ",
+                    "error": str(e_proc)
+                }
+                with checker_manager.lock:
+                    checker_manager.results.append(fail_res)
+                    checker_manager.stats["done"] += 1
+                    checker_manager.stats["fail"] += 1
+                    state_checkpro.log_queue.put(json.dumps({"type": "row", "data": fail_res}))
+                    state_checkpro.log_queue.put(json.dumps({"type": "stats", "stats": dict(checker_manager.stats)}))
+            finally:
+                task_queue.task_done()
+                time.sleep(0.05)
+
+    actual_workers = min(max(1, threads_count), total if total > 0 else 1)
+    if check_mode == "web" and not headless and actual_workers > 2:
+        actual_workers = 2
+    threads = []
+    for _ in range(actual_workers):
+        t = threading.Thread(target=worker, daemon=True)
+        t.start()
+        threads.append(t)
+
+    for t in threads:
+        t.join()
+
+    state_checkpro.is_running = False
+    if state_checkpro.task_stop.is_set():
+        state_checkpro.log("⏹ Tiến trình kiểm tra đã dừng theo yêu cầu.", "WARN")
+    else:
+        found_cnt = checker_manager.stats.get("found", 0)
+        refund_cnt = checker_manager.stats.get("refunded", 0)
+        fail_cnt = checker_manager.stats.get("fail", 0)
+        state_checkpro.log(f"🏁 ĐÃ HOÀN TẤT! Tổng: {total} | 🟢 Có Pro: {found_cnt} | ⚠️ Hoàn tiền: {refund_cnt} | ❌ Lỗi/Không có: {fail_cnt}", "OK")
+
+    state_checkpro.log_queue.put(json.dumps({"type": "done", "stats": dict(checker_manager.stats)}))
+
+@app.route("/api/checkpro/status")
+def checkpro_status():
+    return jsonify({"is_running": state_checkpro.is_running, "stats": checker_manager.stats})
+
+@app.route("/api/checkpro/start", methods=["POST"])
+def checkpro_start():
+    if state_checkpro.is_running:
+        return jsonify({"success": False, "error": "Đang chạy rồi!"})
+    data = request.json or {}
+    accounts = data.get("accounts", "")
+    keyword = data.get("keyword", "Pro monthly") or "Pro monthly"
+    check_mode = data.get("check_mode", "mail")  # 'mail' hoặc 'web'
+    default_password = data.get("default_password", "capcut123") or "capcut123"
+    headless = bool(data.get("headless", False))
+    try:
+        threads = int(data.get("threads", 3))
+    except (ValueError, TypeError):
+        threads = 3
+
+    if not accounts or (isinstance(accounts, str) and not accounts.strip()):
+        return jsonify({"success": False, "error": "Vui lòng nhập ít nhất 1 tài khoản!"})
+
+    state_checkpro.task_stop.clear()
+    while not state_checkpro.log_queue.empty():
+        try: state_checkpro.log_queue.get_nowait()
+        except: break
+
+    state_checkpro.is_running = True
+    state_checkpro.task_thread = threading.Thread(
+        target=_run_checkpro_task,
+        args=(accounts, keyword, threads, check_mode, default_password, headless),
+        daemon=True
+    )
+    state_checkpro.task_thread.start()
+    return jsonify({"success": True})
+
+@app.route("/api/checkpro/login_check", methods=["POST"])
+def checkpro_login_check():
+    """
+    Chạy auto login CapCut cho 1 tài khoản cụ thể để check tay / kiểm tra trực tiếp.
+    """
+    data = request.json or {}
+    email = data.get("email", "").strip()
+    password = data.get("password", "").strip() or "capcut123"
+    headless = bool(data.get("headless", False))
+
+    if not email:
+        return jsonify({"success": False, "error": "Thiếu email để đăng nhập!"})
+
+    state_checkpro.log(f"🌐 [Check Tay] Đang mở trình duyệt đăng nhập CapCut cho {email}...", "INFO")
+
+    def _do_check():
+        from src.bots.capcut_checker import check_capcut_web_login
+        res = check_capcut_web_login(
+            email=email,
+            password=password,
+            headless=headless,
+            timeout=90,
+            log_cb=lambda m, lvl: state_checkpro.log(m, lvl)
+        )
+        with checker_manager.lock:
+            found_existing = False
+            for idx, r in enumerate(checker_manager.results):
+                if r.get("email", "").lower() == email.lower():
+                    r.update(res)
+                    found_existing = True
+                    break
+            if not found_existing:
+                res["index"] = len(checker_manager.results) + 1
+                checker_manager.results.append(res)
+
+            found_cnt = sum(1 for r in checker_manager.results if r.get("status") == "FOUND")
+            refund_cnt = sum(1 for r in checker_manager.results if r.get("status") == "REFUNDED")
+            fail_cnt = sum(1 for r in checker_manager.results if r.get("status") not in ("FOUND", "REFUNDED"))
+            checker_manager.stats["found"] = found_cnt
+            checker_manager.stats["refunded"] = refund_cnt
+            checker_manager.stats["fail"] = fail_cnt
+            checker_manager.stats["done"] = len(checker_manager.results)
+
+            state_checkpro.log_queue.put(json.dumps({"type": "row", "data": res}))
+            state_checkpro.log_queue.put(json.dumps({"type": "stats", "stats": dict(checker_manager.stats)}))
+
+    threading.Thread(target=_do_check, daemon=True).start()
+    return jsonify({"success": True, "message": f"Đã khởi động trình duyệt kiểm tra cho {email}"})
+
+@app.route("/api/checkpro/stop", methods=["POST"])
+def checkpro_stop():
+    state_checkpro.task_stop.set()
+    return jsonify({"success": True})
+
+@app.route("/api/checkpro/stream")
+def checkpro_stream():
+    def generate():
+        yield f"data: {json.dumps({'type':'log','level':'INFO','time':datetime.now().strftime('%H:%M:%S'),'msg':'🔗 Kết nối log stream Check Pro...'})}\n\n"
+        while True:
+            try:
+                msg = state_checkpro.log_queue.get(timeout=25)
+                yield f"data: {msg}\n\n"
+            except queue.Empty:
+                yield f"data: {json.dumps({'type':'ping'})}\n\n"
+    return Response(stream_with_context(generate()), mimetype="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+@app.route("/api/checkpro/results")
+def checkpro_results():
+    with checker_manager.lock:
+        return jsonify({"success": True, "results": checker_manager.results, "stats": checker_manager.stats})
+
+@app.route("/api/checkpro/clear", methods=["POST"])
+def checkpro_clear():
+    with checker_manager.lock:
+        checker_manager.results.clear()
+        checker_manager.stats = {"total": 0, "done": 0, "found": 0, "fail": 0}
+    return jsonify({"success": True})
+
+@app.route("/api/checkpro/capcut_accounts")
+def checkpro_capcut_accounts():
+    lines = []
+    try:
+        with get_db() as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT email, password FROM accounts WHERE app='capcut' ORDER BY id DESC")
+            for row in cursor.fetchall():
+                email = row["email"] or ""
+                password = row["password"] or ""
+                if email:
+                    lines.append(f"{email} | {password}")
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+    return jsonify({"success": True, "accounts": "\n".join(lines), "count": len(lines)})
+
+@app.route("/api/checkpro/hotmails_txt")
+def checkpro_hotmails_txt():
+    hotmails_path = os.path.join(os.path.dirname(__file__), "..", "..", "data", "hotmails.txt")
+    if os.path.exists(hotmails_path):
+        try:
+            with open(hotmails_path, "r", encoding="utf-8") as f:
+                content = f.read()
+            lines = [l for l in content.splitlines() if l.strip()]
+            return jsonify({"success": True, "accounts": content, "count": len(lines)})
+        except Exception as e:
+            return jsonify({"success": False, "error": str(e)})
+    return jsonify({"success": False, "error": "Không tìm thấy file data/hotmails.txt"})
+
+@app.route("/api/checkpro/export_csv")
+def checkpro_export_csv():
+    import csv, io
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["STT", "Email / Username", "Mật khẩu", "Trạng thái", "Mailbox ID (INBOX)", "Pro Monthly Date", "Tiêu đề", "Người gửi", "Chi tiết nội dung / Lỗi"])
+    with checker_manager.lock:
+        for idx, r in enumerate(checker_manager.results, 1):
+            writer.writerow([
+                idx,
+                r.get("email", ""),
+                r.get("password", ""),
+                r.get("status_text", ""),
+                r.get("mailbox_id", ""),
+                r.get("date", ""),
+                r.get("subject", ""),
+                r.get("from", ""),
+                r.get("intro", "") or r.get("error", "")
+            ])
+    csv_data = output.getvalue()
+    return Response(
+        "\ufeff" + csv_data,
+        mimetype="text/csv; charset=utf-8",
+        headers={"Content-Disposition": "attachment; filename=capcut_pro_check_results.csv"}
+    )
 
 # ─── HIGGSFIELD API ───────────────────────────────────────────────────────────
 @app.route("/api/higgsfield/accounts")
